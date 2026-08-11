@@ -1,0 +1,136 @@
+version: 2
+
+project_name: covo-agent
+
+dist: dist
+
+before:
+  hooks:
+    - go test ./...
+
+builds:
+  - id: covo-agent-darwin
+    main: ./cmd/covo-agent
+    binary: covo-agent
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=1
+      - CC=clang
+    flags:
+      - -trimpath
+    ldflags:
+      - >-
+        -s -w
+        -X main.Version={{ .Version }}
+        -X github.com/covoyage/covo-agent/internal/acp.Version={{ .Version }}
+
+  - id: covo-agent-linux
+    main: ./cmd/covo-agent
+    binary: covo-agent
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - >-
+        -s -w
+        -X main.Version={{ .Version }}
+        -X github.com/covoyage/covo-agent/internal/acp.Version={{ .Version }}
+
+  - id: covo-agent-windows
+    main: ./cmd/covo-agent
+    binary: covo-agent
+    goos:
+      - windows
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - >-
+        -s -w
+        -X main.Version={{ .Version }}
+        -X github.com/covoyage/covo-agent/internal/acp.Version={{ .Version }}
+
+archives:
+  - id: unix
+    ids:
+      - covo-agent-darwin
+      - covo-agent-linux
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+
+  - id: windows
+    ids:
+      - covo-agent-windows
+    formats:
+      - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  use: github-native
+
+release:
+  draft: false
+  prerelease: auto
+  make_latest: true
+
+homebrew_casks:
+  - name: covo-agent
+    ids:
+      - unix
+    binary: covo-agent
+    repository:
+      owner: covoyage
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.DISTRIBUTION_REPO_TOKEN }}"
+    directory: Casks
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Brew cask update for {{ .ProjectName }} version {{ .Tag }}"
+    homepage: https://github.com/covoyage/covo-agent
+    description: General-purpose AI agent for the terminal
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/covo-agent"]
+          end
+
+scoops:
+  - name: covo-agent
+    ids:
+      - windows
+    repository:
+      owner: covoyage
+      name: scoop-bucket
+      branch: main
+      token: "{{ .Env.DISTRIBUTION_REPO_TOKEN }}"
+    directory: bucket
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Scoop update for {{ .ProjectName }} version {{ .Tag }}"
+    homepage: https://github.com/covoyage/covo-agent
+    description: General-purpose AI agent for the terminal
+    license: AGPL-3.0

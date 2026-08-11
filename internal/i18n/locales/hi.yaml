@@ -1,0 +1,61 @@
+# हिन्दी — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · उपकरण, मेमोरी, स्किल और सत्रों के साथ तेज़ी से
+    विकास करें'
+  welcome_type: अपना संदेश लिखें या कमांड के लिए "/help" उपयोग करें।
+  welcome_model: डिफ़ॉल्ट प्रदाता/मॉडल बदलने के लिए `covo-agent model` चलाएँ।
+  welcome_session: सत्र
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: Ctrl+Q या Ctrl+D फिर से दबाएँ।
+statusline:
+  mode_general: सामान्य
+  mode_code: कोड
+  bg_tasks: ⚙ {count} पृष्ठभूमि
+  tokens: 'टोकन: {count}'
+  shortcuts: ctrl+/ सहायता  ctrl+t कार्य  ctrl+o सत्र  ctrl+k स्किल
+approval:
+  required: ⚠ अनुमति आवश्यक
+  dangerous: '⚠️ खतरनाक कमांड: {description}'
+  choose_short: एक बार अनुमति
+  choose_session: सत्र अनुमति
+  choose_always: हमेशा अनुमति
+  deny: अस्वीकार
+  navigation: ↑↓ चुनें  Enter पुष्टि  Esc अस्वीकार
+  text_prompt: '⚠️ अनुमति दें: {description}'
+  denied: '❌ अस्वीकृत: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: शॉर्टकट दिखाएँ
+  clear: नई बातचीत
+  reset: नई बातचीत
+  mode: सामान्य मोड
+  code_mode: कोड मोड
+  provider: प्रदाता बदलें
+  model: प्रदाता/मॉडल चुनें
+  save: सत्र सहेजें
+  language: भाषा बदलें
+  quit: बाहर निकलें
+system:
+  yolo_on: ⚡ YOLO चालू
+  yolo_off: ⚠ YOLO बंद
+  interrupted: (बाधित)
+  busy: (व्यस्त)
+  no_image: ⚠ कोई छवि नहीं
+  session_resumed: सत्र {id} पुनः आरंभ
+  new_conversation: नई बातचीत शुरू
+  no_skills: (कोई स्किल नहीं)
+  no_session: (कोई सत्र नहीं)
+  no_active_agent: (कोई सक्रिय एजेंट नहीं)
+  language_current: 'वर्तमान भाषा: {lang} ({name})'
+  language_switched: भाषा बदली गई {name}
+  language_unknown: 'अज्ञात भाषा: {code}'
+  language_usage: 'उपयोग: /language <कोड> | /language list'
+keybinding:
+  help: शॉर्टकट सहायता
+  quit: बाहर निकलें
+  todo: कार्य पैनल
+  skills: स्किल केंद्र
+  interrupt: एजेंट रोकें

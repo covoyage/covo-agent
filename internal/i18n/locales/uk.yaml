@@ -1,0 +1,61 @@
+# Українська — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · Розробляйте швидше з інструментами, пам''яттю,
+    навичками та сесіями'
+  welcome_type: Введіть повідомлення або використайте "/help" для команд.
+  welcome_model: Запустіть `covo-agent model`, щоб змінити провайдера/модель.
+  welcome_session: Сесія
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: Натисніть Ctrl+Q або Ctrl+D ще раз для виходу.
+statusline:
+  mode_general: Загальний
+  mode_code: Код
+  bg_tasks: ⚙ {count} фонових
+  tokens: 'токенів: {count}'
+  shortcuts: ctrl+/ довідка  ctrl+t завдання  ctrl+o сесії  ctrl+k навички
+approval:
+  required: ⚠ Потрібен дозвіл
+  dangerous: '⚠️ НЕБЕЗПЕЧНА КОМАНДА: {description}'
+  choose_short: Дозволити раз
+  choose_session: Дозволити сесію
+  choose_always: Завжди дозволяти
+  deny: Відхилити
+  navigation: ↑↓ обрати  Enter підтвердити  Esc відхилити
+  text_prompt: '⚠️ Дозволити: {description}'
+  denied: '❌ Відхилено: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: Показати ярлики
+  clear: Нова розмова
+  reset: Нова розмова
+  mode: Загальний режим
+  code_mode: Режим коду
+  provider: Змінити провайдера
+  model: Вибрати провайдера/модель
+  save: Зберегти сесію
+  language: Змінити мову
+  quit: Вийти
+system:
+  yolo_on: ⚡ YOLO УВІМК.
+  yolo_off: ⚠ YOLO ВИМК.
+  interrupted: (перервано)
+  busy: (зайнято)
+  no_image: ⚠ Немає зображення
+  session_resumed: сесію {id} відновлено
+  new_conversation: нову розмову розпочато
+  no_skills: (немає навичок)
+  no_session: (немає сесій)
+  no_active_agent: (немає активного агента)
+  language_current: 'Поточна мова: {lang} ({name})'
+  language_switched: Мову змінено на {name}
+  language_unknown: 'Невідома мова: {code}'
+  language_usage: 'Використання: /language <код> | /language list'
+keybinding:
+  help: Довідка ярликів
+  quit: Вийти
+  todo: Панель завдань
+  skills: Центр навичок
+  interrupt: Перервати агента

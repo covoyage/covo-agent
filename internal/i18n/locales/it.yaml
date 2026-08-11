@@ -1,0 +1,121 @@
+# Italiano — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  session_title: covo-agent · session={id}
+  welcome_intro: '**Covo Agent** · Sviluppa più velocemente con strumenti, memoria,
+    skill e sessioni'
+  welcome_type: Digita il tuo messaggio o usa "/help" per i comandi.
+  welcome_model: Esegui `covo-agent model` per cambiare provider/modello predefinito.
+  welcome_session: Sessione
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: Premi di nuovo Ctrl+Q o Ctrl+D per uscire.
+statusline:
+  mode_general: Generale
+  mode_code: Codice
+  bg_tasks: ⚙ {count} sfondo
+  tokens_io: 'tokens: {input} in + {output} out = {total}'
+  tokens: 'tokens: {count}'
+  shortcuts: ctrl+/ aiuto  ctrl+t TODO  ctrl+o sessioni  ctrl+k skill
+  tool_calls: 'chiamate: {count}'
+approval:
+  required: ⚠ Approvazione richiesta
+  dangerous: '⚠️ COMANDO PERICOLOSO: {description}'
+  choose_short: Approva una volta
+  choose_short_desc: solo questa operazione
+  choose_session: Approva sessione
+  choose_session_desc: tutte le operazioni
+  choose_always: Approva sempre
+  choose_always_desc: non chiedere più
+  deny: Nega
+  deny_desc: rifiuta
+  navigation: ↑↓ scegli  Enter conferma  Esc nega
+  text_prompt: '⚠️ Approva: {description} (y=una volta / s=sessione / a=sempre / n=nega)'
+  denied: '❌ Negato: {description}'
+  bash_op: 'bash: {command}'
+  write_op: Scrivi {path} ({bytes} byte)
+  edit_op: Modifica {path}
+  git_commit: 'git commit: {message}'
+  git_push: git push
+  delete_op: Elimina {path}
+  delete_multi: Elimina {count} file
+  execute_op: 'Esegui: {command}'
+commands:
+  goal: "Set or manage active goal"
+  help: Mostra scorciatoie e comandi
+  clear: Nuova conversazione
+  reset: Nuova conversazione
+  mode: Modalità agente generale
+  code_mode: Modalità codice
+  provider: Cambia provider
+  model: Selettore provider/modello
+  yolo: Attiva/disattiva YOLO
+  undo: Annulla ultimi scambi
+  fast: Modalità rapida
+  status: Mostra riepilogo
+  footer: Attiva/disattiva piè di pagina
+  memory: Visualizza memoria
+  profile: Visualizza profilo
+  skill: Visualizza skill
+  resume: Riprendi sessione
+  save: Salva sessione
+  rename: Rinomina sessione
+  fork: Dirama sessione
+  log: Stampa conversazione
+  rollback: Ripristina checkpoint
+  reasoning: Livello ragionamento
+  personality: Personalità agente
+  busy: Comportamento Enter
+  copy: Copia risposta
+  ask: Domanda laterale
+  export: Esporta HTML
+  trajectory: Esporta JSONL
+  tool_profile: Profilo strumenti
+  curator: Esegui curatore
+  compact: Comprimi contesto
+  retry: Riprova
+  bg: Avvia in background
+  bg_list: Elenca background
+  bg_steer: Guida background
+  bg_cancel: Annulla background
+  statusline_cmd: Personalizza barra
+  rewind: Riavvolgi conversazione
+  stats: Statistiche
+  language: Cambia lingua
+  quit: Esci
+system:
+  yolo_on: ⚡ YOLO ATTIVO
+  yolo_off: ⚠ YOLO DISATTIVATO
+  interrupted: (interrotto)
+  busy: (occupato)
+  queued: (in coda)
+  steer_unsupported: (non supportato)
+  no_image: ⚠ Nessuna immagine
+  image_pasted: '📎 immagine: {name}'
+  tip_prefix: '💡 Suggerimento: {tip}'
+  session_resumed: sessione {id} ripresa
+  processing_queued: 'elaborazione in coda: {text}'
+  todo_status: 'TODO {status}: {content}'
+  new_conversation: nuova conversazione avviata
+  switched_mode: modalità cambiata in {mode}
+  switched_model: modello cambiato in {model}
+  switched_provider: provider cambiato in {provider}
+  provider_switched_model: provider {provider}, modello {model}
+  bg_started: attività {id} avviata
+  bg_completed: '[bg/{id}] completato'
+  bg_failed: '[bg/{id}] fallito: {error}'
+  bg_cancelled: '[bg/{id}] annullato'
+  no_skills: (nessuna skill)
+  no_session: (nessuna sessione)
+  no_active_agent: (nessun agente attivo)
+  language_current: 'Lingua corrente: {lang} ({name})'
+  language_switched: Lingua cambiata in {name}
+  language_unknown: 'Lingua sconosciuta: {code}'
+  language_usage: 'Uso: /language <codice> | /language list'
+keybinding:
+  help: Aiuto scorciatoie
+  quit: Esci
+  todo: Pannello TODO
+  skills: Centro skill
+  interrupt: Interrompi agente

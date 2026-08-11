@@ -1,0 +1,55 @@
+# 한국어 — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · 도구, 메모리, 스킬, 세션으로 더 빠르게 개발'
+  welcome_type: 메시지를 입력하거나 "/help"로 명령어를 확인하세요.
+  welcome_model: '`covo-agent model`을 실행하여 기본 provider/model을 변경하세요.'
+  welcome_session: 세션
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+statusline:
+  mode_general: 일반
+  mode_code: 코드
+  bg_tasks: ⚙ {count} 백그라운드
+  tokens: 'tokens: {count}'
+  shortcuts: ctrl+/ 도움말  ctrl+t 할일  ctrl+o 세션  ctrl+k 스킬
+approval:
+  required: ⚠ 승인 필요
+  dangerous: '⚠️ 위험한 명령: {description}'
+  choose_short: 1회 승인
+  choose_short_desc: 이 작업만
+  choose_session: 세션 승인
+  choose_session_desc: 이 세션의 모든 작업
+  choose_always: 항상 승인
+  choose_always_desc: 다시 묻지 않음
+  deny: 거부
+  deny_desc: 거부
+  navigation: ↑↓ 선택  Enter 확인  Esc 거부
+  text_prompt: '⚠️ 승인: {description} (y=1회 / s=세션 / a=항상 / n=거부)'
+  denied: '❌ 거부됨: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: 키바인딩 및 명령어 표시
+  clear: 새 대화 시작
+  mode: 범용 에이전트 모드로 전환
+  code_mode: 코딩 중심 모드로 전환
+  provider: 프로바이더 빠른 전환
+  model: 대화형 프로바이더/모델 선택기 열기
+  save: 현재 세션 저장
+  quit: 애플리케이션 종료
+system:
+  yolo_on: ⚡ YOLO 모드 ON
+  yolo_off: ⚠ YOLO 모드 OFF
+  interrupted: (중단됨)
+  busy: (처리 중)
+  session_resumed: 세션 {id} 재개됨
+  new_conversation: 새 대화 시작됨
+  no_skills: (등록된 스킬 없음)
+  no_session: (저장된 세션 없음)
+keybinding:
+  help: 키바인딩 도움말 전환
+  quit: 애플리케이션 종료
+  todo: TODO 패널 전환
+  skills: 스킬 센터 열기
+  interrupt: 에이전트 중단

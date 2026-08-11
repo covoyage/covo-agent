@@ -1,0 +1,57 @@
+# Français — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · Développez plus vite avec outils, mémoire, skills
+    et sessions'
+  welcome_type: Saisissez votre message ou utilisez "/help" pour les commandes.
+  welcome_model: Exécutez `covo-agent model` pour changer le fournisseur/modèle.
+  welcome_session: Session
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+statusline:
+  mode_general: Général
+  mode_code: Code
+  bg_tasks: ⚙ {count} arrière-plan
+  tokens: 'tokens: {count}'
+  shortcuts: ctrl+/ aide  ctrl+t TODO  ctrl+o session  ctrl+k skills
+approval:
+  required: ⚠ Approbation requise
+  dangerous: '⚠️ COMMANDE DANGEREUSE: {description}'
+  choose_short: Approuver une fois
+  choose_short_desc: cette opération uniquement
+  choose_session: Approuver la session
+  choose_session_desc: toutes les opérations
+  choose_always: Toujours approuver
+  choose_always_desc: ne plus demander
+  deny: Refuser
+  deny_desc: rejeter
+  navigation: ↑↓ choisir  Enter confirmer  Esc refuser
+  text_prompt: '⚠️ Approuver: {description} (y=une fois / s=session / a=toujours /
+    n=refuser)'
+  denied: '❌ Refusé: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: Afficher les raccourcis et commandes
+  clear: Nouvelle conversation
+  mode: Passer au mode agent polyvalent
+  code_mode: Passer au mode code
+  provider: Changer rapidement de fournisseur
+  model: Sélecteur fournisseur/modèle
+  save: Sauvegarder la session
+  quit: Quitter l'application
+system:
+  yolo_on: ⚡ Mode YOLO ACTIVÉ
+  yolo_off: ⚠ Mode YOLO DÉSACTIVÉ
+  interrupted: (interrompu)
+  busy: (occupé)
+  session_resumed: session {id} reprise
+  new_conversation: nouvelle conversation démarrée
+  no_skills: (aucun skill)
+  no_session: (aucune session)
+keybinding:
+  help: Aide des raccourcis
+  quit: Quitter
+  todo: Panneau TODO
+  skills: Centre de skills
+  interrupt: Interrompre l'agent

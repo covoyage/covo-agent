@@ -1,0 +1,59 @@
+# العربية — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · طوّر أسرع مع الأدوات والذاكرة والمهارات والجلسات'
+  welcome_type: اكتب رسالتك أو استخدم "/help" للأوامر.
+  welcome_model: شغّل `covo-agent model` لتغيير المزوّد/النموذج الافتراضي.
+  welcome_session: جلسة
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: اضغط Ctrl+Q أو Ctrl+D مرة أخرى للخروج.
+statusline:
+  mode_general: عام
+  mode_code: كود
+  bg_tasks: ⚙ {count} خلفية
+  tokens: 'tokens: {count}'
+  shortcuts: ctrl+/ مساعدة  ctrl+t مهام  ctrl+o جلسات  ctrl+k مهارات
+approval:
+  required: ⚠ الموافقة مطلوبة
+  dangerous: '⚠️ أمر خطير: {description}'
+  choose_short: موافقة مرة واحدة
+  choose_session: موافقة الجلسة
+  choose_always: موافقة دائمة
+  deny: رفض
+  navigation: ↑↓ اختر  Enter تأكيد  Esc رفض
+  text_prompt: '⚠️ موافقة: {description} (y=مرة / s=جلسة / a=دائم / n=رفض)'
+  denied: '❌ مرفوض: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: عرض الاختصارات
+  clear: محادثة جديدة
+  reset: محادثة جديدة
+  mode: وضع عام
+  code_mode: وضع الكود
+  provider: تغيير المزوّد
+  model: اختيار المزوّد/النموذج
+  save: حفظ الجلسة
+  language: تغيير اللغة
+  quit: خروج
+system:
+  yolo_on: ⚡ YOLO مفعّل
+  yolo_off: ⚠ YOLO معطّل
+  interrupted: (مقاطع)
+  busy: (مشغول)
+  no_image: ⚠ لا توجد صورة
+  session_resumed: تم استئناف الجلسة {id}
+  new_conversation: بدأت محادثة جديدة
+  no_skills: (لا توجد مهارات)
+  no_session: (لا توجد جلسات)
+  language_current: 'اللغة الحالية: {lang} ({name})'
+  language_switched: تم تغيير اللغة إلى {name}
+  language_unknown: 'لغة غير معروفة: {code}'
+  language_usage: 'الاستخدام: /language <كود> | /language list'
+keybinding:
+  help: مساعدة الاختصارات
+  quit: خروج
+  todo: لوحة المهام
+  skills: مركز المهارات
+  interrupt: مقاطعة الوكيل

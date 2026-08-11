@@ -1,0 +1,122 @@
+# Türkçe — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  session_title: covo-agent · session={id}
+  welcome_intro: '**Covo Agent** · Araçlar, bellek, beceriler ve oturumlarla daha
+    hızlı geliştirin'
+  welcome_type: Mesajınızı yazın veya komutlar için "/help" kullanın.
+  welcome_model: Varsayılan sağlayıcıyı/modeli değiştirmek için `covo-agent model`
+    çalıştırın.
+  welcome_session: Oturum
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: Çıkmak için tekrar Ctrl+Q veya Ctrl+D tuşlarına basın.
+statusline:
+  mode_general: Genel
+  mode_code: Kod
+  bg_tasks: ⚙ {count} arka plan
+  tokens_io: 'token: {input} giriş + {output} çıkış = {total}'
+  tokens: 'token: {count}'
+  shortcuts: ctrl+/ yardım  ctrl+t görev  ctrl+o oturum  ctrl+k beceri
+  tool_calls: 'çağrı: {count}'
+approval:
+  required: ⚠ Onay gerekli
+  dangerous: '⚠️ TEHLİKELİ KOMUT: {description}'
+  choose_short: Bir kez onayla
+  choose_short_desc: sadece bu işlem
+  choose_session: Oturumu onayla
+  choose_session_desc: bu oturumdaki tüm işlemler
+  choose_always: Her zaman onayla
+  choose_always_desc: bir daha sorma
+  deny: Reddet
+  deny_desc: reddet
+  navigation: ↑↓ seç  Enter onayla  Esc reddet
+  text_prompt: '⚠️ Onayla: {description} (y=bir kez / s=oturum / a=her zaman / n=reddet)'
+  denied: '❌ Reddedildi: {description}'
+  bash_op: 'bash: {command}'
+  write_op: Yaz {path} ({bytes} bayt)
+  edit_op: Düzenle {path}
+  git_commit: 'git commit: {message}'
+  git_push: git push
+  delete_op: Sil {path}
+  delete_multi: '{count} dosyayı sil'
+  execute_op: 'Çalıştır: {command}'
+commands:
+  goal: "Set or manage active goal"
+  help: Kısayolları ve komutları göster
+  clear: Yeni sohbet
+  reset: Yeni sohbet
+  mode: Genel ajan modu
+  code_mode: Kod modu
+  provider: Sağlayıcı değiştir
+  model: Sağlayıcı/model seçici
+  yolo: YOLO modunu aç/kapat
+  undo: Son değişimleri geri al
+  fast: Hızlı mod
+  status: Oturum özeti
+  footer: Alt bilgiyi aç/kapat
+  memory: Belleği görüntüle
+  profile: Profili görüntüle
+  skill: Beceri görüntüle
+  resume: Oturumu sürdür
+  save: Oturumu kaydet
+  rename: Oturumu yeniden adlandır
+  fork: Oturumu çatalla
+  log: Sohbeti yazdır
+  rollback: Kontrol noktasına dön
+  reasoning: Akıl yürütme seviyesi
+  personality: Ajan kişiliği
+  busy: Enter davranışı
+  copy: Yanıtı kopyala
+  ask: Yan soru
+  export: HTML'e aktar
+  trajectory: JSONL'e aktar
+  tool_profile: Araç profili
+  curator: Küratörü çalıştır
+  compact: Bağlamı sıkıştır
+  retry: Tekrar dene
+  bg: Arka plan görevi
+  bg_list: Arka plan görevleri
+  bg_steer: Görevi yönlendir
+  bg_cancel: Görevi iptal et
+  statusline_cmd: Durum çubuğunu özelleştir
+  rewind: Sohbeti geri sar
+  stats: İstatistikler
+  language: Dili değiştir
+  quit: Çıkış
+system:
+  yolo_on: ⚡ YOLO AÇIK
+  yolo_off: ⚠ YOLO KAPALI
+  interrupted: (kesildi)
+  busy: (meşgul)
+  queued: (kuyrukta)
+  steer_unsupported: (desteklenmiyor)
+  no_image: ⚠ Görüntü yok
+  image_pasted: '📎 görüntü: {name}'
+  tip_prefix: '💡 İpucu: {tip}'
+  session_resumed: '{id} oturumu sürdürüldü'
+  processing_queued: 'kuyruk işleniyor: {text}'
+  todo_status: 'GÖREV {status}: {content}'
+  new_conversation: yeni sohbet başlatıldı
+  switched_mode: mod {mode} olarak değiştirildi
+  switched_model: model {model} olarak değiştirildi
+  switched_provider: sağlayıcı {provider} olarak değiştirildi
+  provider_switched_model: sağlayıcı {provider}, model {model}
+  bg_started: görev {id} başlatıldı
+  bg_completed: '[bg/{id}] tamamlandı'
+  bg_failed: '[bg/{id}] başarısız: {error}'
+  bg_cancelled: '[bg/{id}] iptal edildi'
+  no_skills: (beceri yok)
+  no_session: (oturum yok)
+  no_active_agent: (aktif ajan yok)
+  language_current: 'Mevcut dil: {lang} ({name})'
+  language_switched: Dil {name} olarak değiştirildi
+  language_unknown: 'Bilinmeyen dil: {code}'
+  language_usage: 'Kullanım: /language <kod> | /language list'
+keybinding:
+  help: Kısayol yardımı
+  quit: Çıkış
+  todo: Görev paneli
+  skills: Beceri merkezi
+  interrupt: Ajanı kes

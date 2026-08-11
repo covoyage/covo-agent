@@ -1,0 +1,60 @@
+# עברית — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · פתח מהר יותר עם כלים, זיכרון, מיומנויות ומפגשים'
+  welcome_type: הקלד הודעה או השתמש ב-"/help" לפקודות.
+  welcome_model: הרץ `covo-agent model` לשינוי ספק/מודל ברירת מחדל.
+  welcome_session: מפגש
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: לחץ Ctrl+Q או Ctrl+D שוב ליציאה.
+statusline:
+  mode_general: כללי
+  mode_code: קוד
+  bg_tasks: ⚙ {count} רקע
+  tokens: 'אסימונים: {count}'
+  shortcuts: ctrl+/ עזרה  ctrl+t משימות  ctrl+o מפגשים  ctrl+k מיומנויות
+approval:
+  required: ⚠ נדרש אישור
+  dangerous: '⚠️ פקודה מסוכנת: {description}'
+  choose_short: אשר פעם אחת
+  choose_session: אשר מפגש
+  choose_always: אשר תמיד
+  deny: דחה
+  navigation: ↑↓ בחר  Enter אשר  Esc דחה
+  text_prompt: '⚠️ אשר: {description}'
+  denied: '❌ נדחה: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: הצג קיצורים
+  clear: שיחה חדשה
+  reset: שיחה חדשה
+  mode: מצב כללי
+  code_mode: מצב קוד
+  provider: החלף ספק
+  model: בחר ספק/מודל
+  save: שמור מפגש
+  language: שנה שפה
+  quit: צא
+system:
+  yolo_on: ⚡ YOLO פועל
+  yolo_off: ⚠ YOLO כבוי
+  interrupted: (הופסק)
+  busy: (עסוק)
+  no_image: ⚠ אין תמונה
+  session_resumed: מפגש {id} חודש
+  new_conversation: שיחה חדשה החלה
+  no_skills: (אין מיומנויות)
+  no_session: (אין מפגשים)
+  no_active_agent: (אין סוכן פעיל)
+  language_current: 'שפה נוכחית: {lang} ({name})'
+  language_switched: השפה שונתה ל- {name}
+  language_unknown: 'שפה לא ידועה: {code}'
+  language_usage: 'שימוש: /language <קוד> | /language list'
+keybinding:
+  help: עזרת קיצורים
+  quit: צא
+  todo: לוח משימות
+  skills: מרכז מיומנויות
+  interrupt: הפסק סוכן

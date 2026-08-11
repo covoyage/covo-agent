@@ -1,0 +1,61 @@
+# فارسی — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · با ابزارها، حافظه، مهارت‌ها و جلسات سریع‌تر توسعه
+    دهید'
+  welcome_type: پیام خود را بنویسید یا از "/help" برای دستورات استفاده کنید.
+  welcome_model: '`covo-agent model` را برای تغییر ارائه‌دهنده/مدل پیش‌فرض اجرا کنید.'
+  welcome_session: جلسه
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: دوباره Ctrl+Q یا Ctrl+D را برای خروج فشار دهید.
+statusline:
+  mode_general: عمومی
+  mode_code: کد
+  bg_tasks: ⚙ {count} پس‌زمینه
+  tokens: 'توکن: {count}'
+  shortcuts: ctrl+/ راهنما  ctrl+t وظایف  ctrl+o جلسات  ctrl+k مهارت‌ها
+approval:
+  required: ⚠ تأیید لازم است
+  dangerous: '⚠️ دستور خطرناک: {description}'
+  choose_short: تأیید یکباره
+  choose_session: تأیید جلسه
+  choose_always: تأیید همیشگی
+  deny: رد
+  navigation: ↑↓ انتخاب  Enter تأیید  Esc رد
+  text_prompt: '⚠️ تأیید: {description}'
+  denied: '❌ رد شد: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: نمایش میانبرها
+  clear: گفتگوی جدید
+  reset: گفتگوی جدید
+  mode: حالت عمومی
+  code_mode: حالت کد
+  provider: تغییر ارائه‌دهنده
+  model: انتخاب ارائه‌دهنده/مدل
+  save: ذخیره جلسه
+  language: تغییر زبان
+  quit: خروج
+system:
+  yolo_on: ⚡ YOLO روشن
+  yolo_off: ⚠ YOLO خاموش
+  interrupted: (قطع شد)
+  busy: (مشغول)
+  no_image: ⚠ تصویری نیست
+  session_resumed: جلسه {id} از سر گرفته شد
+  new_conversation: گفتگوی جدید آغاز شد
+  no_skills: (مهارتی نیست)
+  no_session: (جلسه‌ای نیست)
+  no_active_agent: (ایجنت فعال نیست)
+  language_current: 'زبان فعلی: {lang} ({name})'
+  language_switched: زبان تغییر یافت به {name}
+  language_unknown: 'زبان ناشناخته: {code}'
+  language_usage: 'استفاده: /language <کد> | /language list'
+keybinding:
+  help: راهنمای میانبرها
+  quit: خروج
+  todo: پنل وظایف
+  skills: مرکز مهارت‌ها
+  interrupt: قطع ایجنت

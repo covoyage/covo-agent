@@ -1,0 +1,59 @@
+# 日本語 — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · ツール、メモリ、スキル、セッションで開発を加速'
+  welcome_type: メッセージを入力するか、"/help" でコマンドを確認してください。
+  welcome_model: '`covo-agent model` を実行してデフォルトの provider/model を変更します。'
+  welcome_session: セッション
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+statusline:
+  mode_general: 一般
+  mode_code: コード
+  bg_tasks: ⚙ {count} バックグラウンド
+  tokens: 'tokens: {count}'
+  shortcuts: ctrl+/ ヘルプ  ctrl+t TODO  ctrl+o セッション  ctrl+k スキル
+approval:
+  required: ⚠ 承認が必要
+  dangerous: '⚠️ 危険なコマンド: {description}'
+  choose_short: 1回承認
+  choose_short_desc: この操作のみ
+  choose_session: セッション承認
+  choose_session_desc: このセッションの全操作
+  choose_always: 常に承認
+  choose_always_desc: 今後は質問しない
+  deny: 拒否
+  deny_desc: 拒否する
+  navigation: ↑↓ 選択  Enter 確認  Esc 拒否
+  text_prompt: '⚠️ 承認: {description} (y=1回 / s=セッション / a=常に / n=拒否)'
+  denied: '❌ 拒否されました: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: キーバインドとコマンドを表示
+  clear: 新しい会話を開始
+  reset: 新しい会話を開始
+  mode: 汎用エージェントモードに切替
+  code_mode: コーディング重視モードに切替
+  provider: プロバイダーを素早く切替
+  model: 対話型プロバイダー/モデル選択を開く
+  yolo: YOLOモード切替
+  undo: 直近N回のやり取りを元に戻す
+  save: 現在のセッションを保存
+  quit: アプリケーションを終了
+system:
+  yolo_on: ⚡ YOLOモードON
+  yolo_off: ⚠ YOLOモードOFF
+  interrupted: （中断）
+  busy: （ビジー）
+  no_image: ⚠ クリップボードに画像なし
+  session_resumed: セッション {id} を再開
+  new_conversation: 新しい会話を開始しました
+  no_skills: （登録スキルなし）
+  no_session: （保存セッションなし）
+keybinding:
+  help: キーバインドヘルプを切替
+  quit: アプリケーションを終了
+  todo: TODOパネルを切替
+  skills: スキルセンターを開く
+  interrupt: エージェントを中断

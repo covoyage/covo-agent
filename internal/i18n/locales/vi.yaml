@@ -1,0 +1,61 @@
+# Tiếng Việt — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · Phát triển nhanh hơn với công cụ, bộ nhớ, kỹ năng
+    và phiên'
+  welcome_type: Nhập tin nhắn hoặc dùng "/help" để xem lệnh.
+  welcome_model: Chạy `covo-agent model` để đổi nhà cung cấp/mô hình mặc định.
+  welcome_session: Phiên
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: Nhấn Ctrl+Q hoặc Ctrl+D lần nữa để thoát.
+statusline:
+  mode_general: Chung
+  mode_code: Mã
+  bg_tasks: ⚙ {count} nền
+  tokens: 'token: {count}'
+  shortcuts: ctrl+/ trợ giúp  ctrl+t việc  ctrl+o phiên  ctrl+k kỹ năng
+approval:
+  required: ⚠ Cần phê duyệt
+  dangerous: '⚠️ LỆNH NGUY HIỂM: {description}'
+  choose_short: Phê duyệt một lần
+  choose_session: Phê duyệt phiên
+  choose_always: Luôn phê duyệt
+  deny: Từ chối
+  navigation: ↑↓ chọn  Enter xác nhận  Esc từ chối
+  text_prompt: '⚠️ Phê duyệt: {description}'
+  denied: '❌ Đã từ chối: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: Hiển thị phím tắt
+  clear: Hội thoại mới
+  reset: Hội thoại mới
+  mode: Chế độ chung
+  code_mode: Chế độ mã
+  provider: Đổi nhà cung cấp
+  model: Chọn nhà cung cấp/mô hình
+  save: Lưu phiên
+  language: Đổi ngôn ngữ
+  quit: Thoát
+system:
+  yolo_on: ⚡ YOLO BẬT
+  yolo_off: ⚠ YOLO TẮT
+  interrupted: (bị ngắt)
+  busy: (bận)
+  no_image: ⚠ Không có ảnh
+  session_resumed: phiên {id} đã tiếp tục
+  new_conversation: hội thoại mới bắt đầu
+  no_skills: (không có kỹ năng)
+  no_session: (không có phiên)
+  no_active_agent: (không có tác nhân)
+  language_current: 'Ngôn ngữ hiện tại: {lang} ({name})'
+  language_switched: Đã đổi ngôn ngữ sang {name}
+  language_unknown: 'Ngôn ngữ không xác định: {code}'
+  language_usage: 'Cách dùng: /language <mã> | /language list'
+keybinding:
+  help: Trợ giúp phím tắt
+  quit: Thoát
+  todo: Bảng việc
+  skills: Trung tâm kỹ năng
+  interrupt: Dừng tác nhân

@@ -1,0 +1,61 @@
+# Svenska — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · Utveckla snabbare med verktyg, minne, färdigheter
+    och sessioner'
+  welcome_type: Skriv ditt meddelande eller använd "/help" för kommandon.
+  welcome_model: Kör `covo-agent model` för att ändra standardleverantör/modell.
+  welcome_session: Session
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: Tryck Ctrl+Q eller Ctrl+D igen för att avsluta.
+statusline:
+  mode_general: Allmän
+  mode_code: Kod
+  bg_tasks: ⚙ {count} bakgrund
+  tokens: 'token: {count}'
+  shortcuts: ctrl+/ hjälp  ctrl+t uppgifter  ctrl+o sessioner  ctrl+k färdigheter
+approval:
+  required: ⚠ Godkännande krävs
+  dangerous: '⚠️ FARLIGT KOMMANDO: {description}'
+  choose_short: Godkänn en gång
+  choose_session: Godkänn session
+  choose_always: Godkänn alltid
+  deny: Neka
+  navigation: ↑↓ välj  Enter bekräfta  Esc neka
+  text_prompt: '⚠️ Godkänn: {description}'
+  denied: '❌ Nekat: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: Visa genvägar
+  clear: Ny konversation
+  reset: Ny konversation
+  mode: Allmänt läge
+  code_mode: Kodläge
+  provider: Byt leverantör
+  model: Välj leverantör/modell
+  save: Spara session
+  language: Byt språk
+  quit: Avsluta
+system:
+  yolo_on: ⚡ YOLO PÅ
+  yolo_off: ⚠ YOLO AV
+  interrupted: (avbruten)
+  busy: (upptagen)
+  no_image: ⚠ Ingen bild
+  session_resumed: session {id} återupptagen
+  new_conversation: ny konversation startad
+  no_skills: (inga färdigheter)
+  no_session: (inga sessioner)
+  no_active_agent: (ingen aktiv agent)
+  language_current: 'Aktuellt språk: {lang} ({name})'
+  language_switched: Språk ändrat till {name}
+  language_unknown: 'Okänt språk: {code}'
+  language_usage: 'Användning: /language <kod> | /language list'
+keybinding:
+  help: Genvägshjälp
+  quit: Avsluta
+  todo: Uppgiftspanel
+  skills: Färdighetscenter
+  interrupt: Avbryt agent

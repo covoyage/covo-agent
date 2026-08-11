@@ -1,0 +1,56 @@
+# Español — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · Desarrolla más rápido con herramientas, memoria,
+    skills y sesiones'
+  welcome_type: Escribe tu mensaje o usa "/help" para ver los comandos.
+  welcome_model: Ejecuta `covo-agent model` para cambiar el proveedor/modelo.
+  welcome_session: Sesión
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+statusline:
+  mode_general: General
+  mode_code: Código
+  bg_tasks: ⚙ {count} en fondo
+  tokens: 'tokens: {count}'
+  shortcuts: ctrl+/ ayuda  ctrl+t tareas  ctrl+o sesiones  ctrl+k skills
+approval:
+  required: ⚠ Aprobación requerida
+  dangerous: '⚠️ COMANDO PELIGROSO: {description}'
+  choose_short: Aprobar una vez
+  choose_short_desc: solo esta operación
+  choose_session: Aprobar sesión
+  choose_session_desc: todas las operaciones
+  choose_always: Aprobar siempre
+  choose_always_desc: no preguntar de nuevo
+  deny: Denegar
+  deny_desc: rechazar
+  navigation: ↑↓ elegir  Enter confirmar  Esc denegar
+  text_prompt: '⚠️ Aprobar: {description} (y=una vez / s=sesión / a=siempre / n=denegar)'
+  denied: '❌ Denegado: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: Mostrar atajos y comandos
+  clear: Nueva conversación
+  mode: Modo agente general
+  code_mode: Modo agente de código
+  provider: Cambiar de proveedor
+  model: Selector de proveedor/modelo
+  save: Guardar sesión
+  quit: Salir
+system:
+  yolo_on: ⚡ Modo YOLO ACTIVADO
+  yolo_off: ⚠ Modo YOLO DESACTIVADO
+  interrupted: (interrumpido)
+  busy: (ocupado)
+  session_resumed: sesión {id} reanudada
+  new_conversation: nueva conversación iniciada
+  no_skills: (sin skills)
+  no_session: (sin sesiones guardadas)
+keybinding:
+  help: Ayuda de atajos
+  quit: Salir
+  todo: Panel TODO
+  skills: Centro de skills
+  interrupt: Interrumpir agente

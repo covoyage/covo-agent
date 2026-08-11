@@ -1,0 +1,121 @@
+# Português — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  session_title: covo-agent · session={id}
+  welcome_intro: '**Covo Agent** · Desenvolva mais rápido com ferramentas, memória,
+    skills e sessões'
+  welcome_type: Digite sua mensagem ou use "/help" para ver os comandos.
+  welcome_model: Execute `covo-agent model` para alterar o provedor/modelo padrão.
+  welcome_session: Sessão
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: Pressione Ctrl+Q ou Ctrl+D novamente para sair.
+statusline:
+  mode_general: Geral
+  mode_code: Código
+  bg_tasks: ⚙ {count} fundo
+  tokens_io: 'tokens: {input} entrada + {output} saída = {total}'
+  tokens: 'tokens: {count}'
+  shortcuts: ctrl+/ ajuda  ctrl+t tarefas  ctrl+o sessões  ctrl+k skills
+  tool_calls: 'chamadas: {count}'
+approval:
+  required: ⚠ Aprovação necessária
+  dangerous: '⚠️ COMANDO PERIGOSO: {description}'
+  choose_short: Aprovar uma vez
+  choose_short_desc: apenas esta operação
+  choose_session: Aprovar sessão
+  choose_session_desc: todas as operações desta sessão
+  choose_always: Aprovar sempre
+  choose_always_desc: não perguntar novamente
+  deny: Negar
+  deny_desc: rejeitar
+  navigation: ↑↓ escolher  Enter confirmar  Esc negar
+  text_prompt: '⚠️ Aprovar: {description} (y=uma vez / s=sessão / a=sempre / n=negar)'
+  denied: '❌ Negado: {description}'
+  bash_op: 'bash: {command}'
+  write_op: Escrever {path} ({bytes} bytes)
+  edit_op: Editar {path}
+  git_commit: 'git commit: {message}'
+  git_push: git push
+  delete_op: Excluir {path}
+  delete_multi: Excluir {count} arquivos
+  execute_op: 'Executar: {command}'
+commands:
+  goal: "Set or manage active goal"
+  help: Mostrar atalhos e comandos
+  clear: Nova conversa
+  reset: Nova conversa
+  mode: Modo agente geral
+  code_mode: Modo código
+  provider: Trocar provedor
+  model: Seletor de provedor/modelo
+  yolo: Alternar modo YOLO
+  undo: Desfazer últimas trocas
+  fast: Alternar modo rápido
+  status: Mostrar resumo
+  footer: Alternar rodapé
+  memory: Ver memória
+  profile: Ver perfil
+  skill: Ver skill
+  resume: Retomar sessão
+  save: Salvar sessão
+  rename: Renomear sessão
+  fork: Bifurcar sessão
+  log: Imprimir conversa
+  rollback: Restaurar checkpoint
+  reasoning: Nível de raciocínio
+  personality: Personalidade do agente
+  busy: Comportamento Enter
+  copy: Copiar resposta
+  ask: Pergunta lateral
+  export: Exportar HTML
+  trajectory: Exportar JSONL
+  tool_profile: Perfil de ferramentas
+  curator: Executar curador
+  compact: Compactar contexto
+  retry: Tentar novamente
+  bg: Tarefa em segundo plano
+  bg_list: Listar tarefas
+  bg_steer: Direcionar tarefa
+  bg_cancel: Cancelar tarefa
+  statusline_cmd: Personalizar barra
+  rewind: Retroceder conversa
+  stats: Estatísticas
+  language: Mudar idioma
+  quit: Sair
+system:
+  yolo_on: ⚡ Modo YOLO ATIVADO
+  yolo_off: ⚠ Modo YOLO DESATIVADO
+  interrupted: (interrompido)
+  busy: (ocupado)
+  queued: (na fila)
+  steer_unsupported: (não suportado)
+  no_image: ⚠ Nenhuma imagem
+  image_pasted: '📎 imagem: {name}'
+  tip_prefix: '💡 Dica: {tip}'
+  session_resumed: sessão {id} retomada
+  processing_queued: 'processando fila: {text}'
+  todo_status: 'TODO {status}: {content}'
+  new_conversation: nova conversa iniciada
+  switched_mode: modo alterado para {mode}
+  switched_model: modelo alterado para {model}
+  switched_provider: provedor alterado para {provider}
+  provider_switched_model: provedor {provider}, modelo {model}
+  bg_started: tarefa {id} iniciada
+  bg_completed: '[bg/{id}] concluído'
+  bg_failed: '[bg/{id}] falhou: {error}'
+  bg_cancelled: '[bg/{id}] cancelado'
+  no_skills: (nenhuma skill)
+  no_session: (nenhuma sessão)
+  no_active_agent: (nenhum agente ativo)
+  language_current: 'Idioma atual: {lang} ({name})'
+  language_switched: Idioma alterado para {name}
+  language_unknown: 'Idioma desconhecido: {code}'
+  language_usage: 'Uso: /language <código> | /language list'
+keybinding:
+  help: Ajuda de atalhos
+  quit: Sair
+  todo: Painel TODO
+  skills: Central de skills
+  interrupt: Interromper agente

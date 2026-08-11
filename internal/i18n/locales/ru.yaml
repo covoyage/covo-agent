@@ -1,0 +1,122 @@
+# Русский — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  session_title: covo-agent · session={id}
+  welcome_intro: '**Covo Agent** · Разрабатывайте быстрее с инструментами, памятью,
+    навыками и сессиями'
+  welcome_type: Введите сообщение или используйте "/help" для списка команд.
+  welcome_model: Запустите `covo-agent model`, чтобы изменить провайдера/модель по
+    умолчанию.
+  welcome_session: Сессия
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: Нажмите Ctrl+Q или Ctrl+D ещё раз для выхода.
+statusline:
+  mode_general: Общий
+  mode_code: Код
+  bg_tasks: ⚙ {count} фоновых
+  tokens_io: 'токенов: {input} вх + {output} исх = {total}'
+  tokens: 'токенов: {count}'
+  shortcuts: ctrl+/ помощь  ctrl+t задачи  ctrl+o сессии  ctrl+k навыки
+  tool_calls: 'вызовов: {count}'
+approval:
+  required: ⚠ Требуется подтверждение
+  dangerous: '⚠️ ОПАСНАЯ КОМАНДА: {description}'
+  choose_short: Одобрить один раз
+  choose_short_desc: только эту операцию
+  choose_session: Одобрить сессию
+  choose_session_desc: все операции сессии
+  choose_always: Одобрять всегда
+  choose_always_desc: больше не спрашивать
+  deny: Отклонить
+  deny_desc: отказать
+  navigation: ↑↓ выбрать  Enter подтвердить  Esc отклонить
+  text_prompt: '⚠️ Подтвердите: {description} (y=раз / s=сессия / a=всегда / n=нет)'
+  denied: '❌ Отклонено: {description}'
+  bash_op: 'bash: {command}'
+  write_op: Запись {path} ({bytes} байт)
+  edit_op: Правка {path}
+  git_commit: 'git commit: {message}'
+  git_push: git push
+  delete_op: Удалить {path}
+  delete_multi: Удалить {count} файлов
+  execute_op: 'Выполнить: {command}'
+commands:
+  goal: "Set or manage active goal"
+  help: Показать команды
+  clear: Новый диалог
+  reset: Новый диалог
+  mode: Общий режим
+  code_mode: Режим кода
+  provider: Сменить провайдера
+  model: Выбор провайдера/модели
+  yolo: Режим YOLO
+  undo: Отменить последние обмены
+  fast: Быстрый режим
+  status: Обзор сессии
+  footer: Переключить нижний колонтитул
+  memory: Просмотр памяти
+  profile: Профиль пользователя
+  skill: Просмотр навыка
+  resume: Возобновить сессию
+  save: Сохранить сессию
+  rename: Переименовать сессию
+  fork: Ответвить сессию
+  log: Печать диалога
+  rollback: Восстановить контрольную точку
+  reasoning: Уровень рассуждения
+  personality: Характер агента
+  busy: Поведение Enter
+  copy: Копировать ответ
+  ask: Боковой вопрос
+  export: Экспорт в HTML
+  trajectory: Экспорт JSONL
+  tool_profile: Профиль инструментов
+  curator: Запустить куратора
+  compact: Сжать контекст
+  retry: Повторить
+  bg: Фоновая задача
+  bg_list: Список фоновых задач
+  bg_steer: Управление задачей
+  bg_cancel: Отменить задачу
+  statusline_cmd: Настроить строку состояния
+  rewind: Отмотать диалог
+  stats: Статистика
+  language: Сменить язык
+  quit: Выход
+system:
+  yolo_on: ⚡ YOLO ВКЛ
+  yolo_off: ⚠ YOLO ВЫКЛ
+  interrupted: (прервано)
+  busy: (занято)
+  queued: (в очереди)
+  steer_unsupported: (не поддерживается)
+  no_image: ⚠ Нет изображения
+  image_pasted: '📎 изображение: {name}'
+  tip_prefix: '💡 Совет: {tip}'
+  session_resumed: сессия {id} возобновлена
+  processing_queued: 'обработка очереди: {text}'
+  todo_status: 'TODO {status}: {content}'
+  new_conversation: новый диалог начат
+  switched_mode: режим изменён на {mode}
+  switched_model: модель изменена на {model}
+  switched_provider: провайдер изменён на {provider}
+  provider_switched_model: провайдер {provider}, модель {model}
+  bg_started: задача {id} запущена
+  bg_completed: '[bg/{id}] завершено'
+  bg_failed: '[bg/{id}] ошибка: {error}'
+  bg_cancelled: '[bg/{id}] отменено'
+  no_skills: (нет навыков)
+  no_session: (нет сессий)
+  no_active_agent: (нет активного агента)
+  language_current: 'Текущий язык: {lang} ({name})'
+  language_switched: Язык изменён на {name}
+  language_unknown: 'Неизвестный язык: {code}'
+  language_usage: 'Использование: /language <код> | /language list'
+keybinding:
+  help: Помощь по клавишам
+  quit: Выход
+  todo: Панель задач
+  skills: Центр навыков
+  interrupt: Прервать агента

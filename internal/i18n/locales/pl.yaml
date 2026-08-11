@@ -1,0 +1,61 @@
+# Polski — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · Twórz szybciej z narzędziami, pamięcią, umiejętnościami
+    i sesjami'
+  welcome_type: Wpisz wiadomość lub użyj "/help" dla poleceń.
+  welcome_model: Uruchom `covo-agent model`, aby zmienić domyślnego dostawcę/model.
+  welcome_session: Sesja
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: Naciśnij ponownie Ctrl+Q lub Ctrl+D, aby wyjść.
+statusline:
+  mode_general: Ogólny
+  mode_code: Kod
+  bg_tasks: ⚙ {count} w tle
+  tokens: 'tokeny: {count}'
+  shortcuts: ctrl+/ pomoc  ctrl+t zadania  ctrl+o sesje  ctrl+k umiejętności
+approval:
+  required: ⚠ Wymagana zgoda
+  dangerous: '⚠️ NIEBEZPIECZNE POLECENIE: {description}'
+  choose_short: Zatwierdź raz
+  choose_session: Zatwierdź sesję
+  choose_always: Zawsze zatwierdzaj
+  deny: Odrzuć
+  navigation: ↑↓ wybierz  Enter potwierdź  Esc odrzuć
+  text_prompt: '⚠️ Zatwierdź: {description}'
+  denied: '❌ Odrzucono: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: Pokaż skróty
+  clear: Nowa rozmowa
+  reset: Nowa rozmowa
+  mode: Tryb ogólny
+  code_mode: Tryb kodu
+  provider: Zmień dostawcę
+  model: Wybierz dostawcę/model
+  save: Zapisz sesję
+  language: Zmień język
+  quit: Wyjdź
+system:
+  yolo_on: ⚡ YOLO WŁ.
+  yolo_off: ⚠ YOLO WYŁ.
+  interrupted: (przerwane)
+  busy: (zajęty)
+  no_image: ⚠ Brak obrazu
+  session_resumed: sesja {id} wznowiona
+  new_conversation: nowa rozmowa rozpoczęta
+  no_skills: (brak umiejętności)
+  no_session: (brak sesji)
+  no_active_agent: (brak aktywnego agenta)
+  language_current: 'Bieżący język: {lang} ({name})'
+  language_switched: Język zmieniony na {name}
+  language_unknown: 'Nieznany język: {code}'
+  language_usage: 'Użycie: /language <kod> | /language list'
+keybinding:
+  help: Pomoc skrótów
+  quit: Wyjdź
+  todo: Panel zadań
+  skills: Centrum umiejętności
+  interrupt: Przerwij agenta

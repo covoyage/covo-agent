@@ -1,0 +1,60 @@
+# ไทย — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · พัฒนาเร็วขึ้นด้วยเครื่องมือ หน่วยความจำ ทักษะ และเซสชัน'
+  welcome_type: พิมพ์ข้อความหรือใช้ "/help" สำหรับคำสั่ง
+  welcome_model: รัน `covo-agent model` เพื่อเปลี่ยนผู้ให้บริการ/โมเดลเริ่มต้น
+  welcome_session: เซสชัน
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: กด Ctrl+Q หรือ Ctrl+D อีกครั้งเพื่อออก
+statusline:
+  mode_general: ทั่วไป
+  mode_code: โค้ด
+  bg_tasks: ⚙ {count} พื้นหลัง
+  tokens: 'โทเค็น: {count}'
+  shortcuts: ctrl+/ ช่วยเหลือ  ctrl+t งาน  ctrl+o เซสชัน  ctrl+k ทักษะ
+approval:
+  required: ⚠ ต้องอนุมัติ
+  dangerous: '⚠️ คำสั่งอันตราย: {description}'
+  choose_short: อนุมัติครั้งเดียว
+  choose_session: อนุมัติเซสชัน
+  choose_always: อนุมัติเสมอ
+  deny: ปฏิเสธ
+  navigation: ↑↓ เลือก  Enter ยืนยัน  Esc ปฏิเสธ
+  text_prompt: '⚠️ อนุมัติ: {description}'
+  denied: '❌ ถูกปฏิเสธ: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: แสดงทางลัด
+  clear: การสนทนาใหม่
+  reset: การสนทนาใหม่
+  mode: โหมดทั่วไป
+  code_mode: โหมดโค้ด
+  provider: เปลี่ยนผู้ให้บริการ
+  model: เลือกผู้ให้บริการ/โมเดล
+  save: บันทึกเซสชัน
+  language: เปลี่ยนภาษา
+  quit: ออก
+system:
+  yolo_on: ⚡ YOLO เปิด
+  yolo_off: ⚠ YOLO ปิด
+  interrupted: (ถูกขัดจังหวะ)
+  busy: (ไม่ว่าง)
+  no_image: ⚠ ไม่มีรูปภาพ
+  session_resumed: เซสชัน {id} ดำเนินต่อ
+  new_conversation: เริ่มการสนทนาใหม่
+  no_skills: (ไม่มีทักษะ)
+  no_session: (ไม่มีเซสชัน)
+  no_active_agent: (ไม่มีเอเจนต์)
+  language_current: 'ภาษาปัจจุบัน: {lang} ({name})'
+  language_switched: เปลี่ยนภาษาเป็น {name}
+  language_unknown: 'ภาษาไม่รู้จัก: {code}'
+  language_usage: 'วิธีใช้: /language <รหัส> | /language list'
+keybinding:
+  help: ช่วยเหลือทางลัด
+  quit: ออก
+  todo: แผงงาน
+  skills: ศูนย์ทักษะ
+  interrupt: หยุดเอเจนต์

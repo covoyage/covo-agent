@@ -1,0 +1,60 @@
+# Bahasa Indonesia — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · Kembangkan lebih cepat dengan alat, memori, skill,
+    dan sesi'
+  welcome_type: Ketik pesan Anda atau gunakan "/help" untuk perintah.
+  welcome_model: Jalankan `covo-agent model` untuk mengubah penyedia/model default.
+  welcome_session: Sesi
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: Tekan Ctrl+Q atau Ctrl+D lagi untuk keluar.
+statusline:
+  mode_general: Umum
+  mode_code: Kode
+  bg_tasks: ⚙ {count} latar
+  tokens: 'tokens: {count}'
+  shortcuts: ctrl+/ bantuan  ctrl+t tugas  ctrl+o sesi  ctrl+k skill
+approval:
+  required: ⚠ Persetujuan diperlukan
+  dangerous: '⚠️ PERINTAH BERBAHAYA: {description}'
+  choose_short: Setujui sekali
+  choose_session: Setujui sesi
+  choose_always: Setujui selalu
+  deny: Tolak
+  navigation: ↑↓ pilih  Enter konfirmasi  Esc tolak
+  text_prompt: '⚠️ Setujui: {description} (y=sekali / s=sesi / a=selalu / n=tolak)'
+  denied: '❌ Ditolak: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: Tampilkan pintasan
+  clear: Percakapan baru
+  reset: Percakapan baru
+  mode: Mode umum
+  code_mode: Mode kode
+  provider: Ganti penyedia
+  model: Pilih penyedia/model
+  save: Simpan sesi
+  language: Ganti bahasa
+  quit: Keluar
+system:
+  yolo_on: ⚡ YOLO AKTIF
+  yolo_off: ⚠ YOLO NONAKTIF
+  interrupted: (terputus)
+  busy: (sibuk)
+  no_image: ⚠ Tidak ada gambar
+  session_resumed: sesi {id} dilanjutkan
+  new_conversation: percakapan baru dimulai
+  no_skills: (tidak ada skill)
+  no_session: (tidak ada sesi)
+  language_current: 'Bahasa saat ini: {lang} ({name})'
+  language_switched: Bahasa diubah ke {name}
+  language_unknown: 'Bahasa tidak dikenal: {code}'
+  language_usage: 'Penggunaan: /language <kode> | /language list'
+keybinding:
+  help: Bantuan pintasan
+  quit: Keluar
+  todo: Panel tugas
+  skills: Pusat skill
+  interrupt: Hentikan agen

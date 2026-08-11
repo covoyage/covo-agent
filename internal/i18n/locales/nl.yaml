@@ -1,0 +1,61 @@
+# Nederlands — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · Ontwikkel sneller met tools, geheugen, vaardigheden
+    en sessies'
+  welcome_type: Typ je bericht of gebruik "/help" voor opdrachten.
+  welcome_model: Voer `covo-agent model` uit om de standaard provider/model te wijzigen.
+  welcome_session: Sessie
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  quit_confirm: Druk nogmaals op Ctrl+Q of Ctrl+D om af te sluiten.
+statusline:
+  mode_general: Algemeen
+  mode_code: Code
+  bg_tasks: ⚙ {count} achtergrond
+  tokens: 'tokens: {count}'
+  shortcuts: ctrl+/ hulp  ctrl+t taken  ctrl+o sessies  ctrl+k vaardigheden
+approval:
+  required: ⚠ Goedkeuring vereist
+  dangerous: '⚠️ GEVAARLIJKE OPDRACHT: {description}'
+  choose_short: Eenmalig goedkeuren
+  choose_session: Sessie goedkeuren
+  choose_always: Altijd goedkeuren
+  deny: Weigeren
+  navigation: ↑↓ kies  Enter bevestig  Esc weiger
+  text_prompt: '⚠️ Goedkeuren: {description}'
+  denied: '❌ Geweigerd: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: Toon snelkoppelingen
+  clear: Nieuw gesprek
+  reset: Nieuw gesprek
+  mode: Algemene modus
+  code_mode: Codemodus
+  provider: Wijzig provider
+  model: Kies provider/model
+  save: Sessie opslaan
+  language: Taal wijzigen
+  quit: Afsluiten
+system:
+  yolo_on: ⚡ YOLO AAN
+  yolo_off: ⚠ YOLO UIT
+  interrupted: (onderbroken)
+  busy: (bezig)
+  no_image: ⚠ Geen afbeelding
+  session_resumed: sessie {id} hervat
+  new_conversation: nieuw gesprek gestart
+  no_skills: (geen vaardigheden)
+  no_session: (geen sessies)
+  no_active_agent: (geen actieve agent)
+  language_current: 'Huidige taal: {lang} ({name})'
+  language_switched: Taal gewijzigd naar {name}
+  language_unknown: 'Onbekende taal: {code}'
+  language_usage: 'Gebruik: /language <code> | /language list'
+keybinding:
+  help: Sneltoetshulp
+  quit: Afsluiten
+  todo: Takenpaneel
+  skills: Vaardighedencentrum
+  interrupt: Agent onderbreken

@@ -1,0 +1,56 @@
+# Deutsch — covo-agent i18n translation catalog (AI-generated)
+# High-impact sections translated; remaining fall back to English.
+
+app:
+  title: covo-agent · provider={provider} model={model} mode={mode}
+  welcome_intro: '**Covo Agent** · Schneller entwickeln mit Tools, Speicher, Skills
+    und Sitzungen'
+  welcome_type: Geben Sie Ihre Nachricht ein oder nutzen Sie "/help" für Befehle.
+  welcome_model: Führen Sie `covo-agent model` aus, um Provider/Modell zu ändern.
+  welcome_session: Sitzung
+  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+statusline:
+  mode_general: Allgemein
+  mode_code: Code
+  bg_tasks: ⚙ {count} Hintergrund
+  tokens: 'tokens: {count}'
+  shortcuts: ctrl+/ Hilfe  ctrl+t TODO  ctrl+o Sitzungen  ctrl+k Skills
+approval:
+  required: ⚠ Genehmigung erforderlich
+  dangerous: '⚠️ GEFÄHRLICHER BEFEHL: {description}'
+  choose_short: Einmal genehmigen
+  choose_short_desc: nur diese Operation
+  choose_session: Sitzung genehmigen
+  choose_session_desc: alle Operationen dieser Sitzung
+  choose_always: Immer genehmigen
+  choose_always_desc: nicht erneut fragen
+  deny: Ablehnen
+  deny_desc: ablehnen
+  navigation: ↑↓ wählen  Enter bestätigen  Esc ablehnen
+  text_prompt: '⚠️ Genehmigen: {description} (y=einmal / s=Sitzung / a=immer / n=ablehnen)'
+  denied: '❌ Abgelehnt: {description}'
+commands:
+  goal: "Set or manage active goal"
+  help: Tastenkürzel und Befehle anzeigen
+  clear: Neue Konversation starten
+  mode: Zum Allzweck-Agentenmodus wechseln
+  code_mode: Zum codeorientierten Agentenmodus
+  provider: Provider schnell wechseln
+  model: Provider/Modell-Auswahldialog öffnen
+  save: Aktuelle Sitzung speichern
+  quit: Anwendung beenden
+system:
+  yolo_on: ⚡ YOLO-Modus EIN
+  yolo_off: ⚠ YOLO-Modus AUS
+  interrupted: (unterbrochen)
+  busy: (beschäftigt)
+  session_resumed: Sitzung {id} fortgesetzt
+  new_conversation: Neue Konversation gestartet
+  no_skills: (keine Skills registriert)
+  no_session: (keine gespeicherten Sitzungen)
+keybinding:
+  help: Tastenkürzel-Hilfe umschalten
+  quit: Anwendung beenden
+  todo: TODO-Panel umschalten
+  skills: Skill-Center öffnen
+  interrupt: Agent unterbrechen
