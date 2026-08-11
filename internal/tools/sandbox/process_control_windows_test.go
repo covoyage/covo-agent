@@ -42,7 +42,7 @@ func TestTerminateProcessTreeAcceptsDirectKillFallback(t *testing.T) {
 	t.Cleanup(func() { runTaskkill = previous; killProcess = previousKill })
 	runTaskkill = func(int) error { return errors.New("unavailable") }
 	killProcess = func(*os.Process) error { return nil }
-	process, err := os.FindProcess(42)
+	process, err := os.FindProcess(os.Getpid())
 	if err != nil {
 		t.Fatal(err)
 	}

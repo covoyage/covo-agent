@@ -2,6 +2,7 @@ package panels
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -319,22 +320,25 @@ func buildFileTree(entries []FileChange, workingDir string) []*fileTreeNode {
 	relPath := func(p string) string {
 		if workingDir != "" {
 			if rel, err := filepath.Rel(workingDir, p); err == nil && !strings.HasPrefix(rel, "..") {
-				return rel
+				return filepath.ToSlash(rel)
 			}
 		}
-		return p
+		return filepath.ToSlash(p)
 	}
 
 	for _, entry := range entries {
 		rel := relPath(entry.Path)
-		parts := splitPath(rel)
+		parts := strings.Split(rel, "/")
 
 		currentPath := ""
 		for i, part := range parts {
+			if part == "" {
+				continue
+			}
 			if i == len(parts)-1 {
-				filePath := filepath.Join(currentPath, part)
-				if currentPath == "" {
-					filePath = part
+				filePath := part
+				if currentPath != "" {
+					filePath = currentPath + "/" + part
 				}
 				nodeMap[filePath] = &fileTreeNode{
 					Name:   part,
@@ -354,7 +358,7 @@ func buildFileTree(entries []FileChange, workingDir string) []*fileTreeNode {
 				if currentPath == "" {
 					currentPath = part
 				} else {
-					currentPath = filepath.Join(currentPath, part)
+					currentPath = currentPath + "/" + part
 				}
 				if _, exists := nodeMap[currentPath]; !exists {
 					nodeMap[currentPath] = &fileTreeNode{
@@ -362,7 +366,7 @@ func buildFileTree(entries []FileChange, workingDir string) []*fileTreeNode {
 						Path:  currentPath,
 						IsDir: true,
 					}
-					parentKey := filepath.Dir(currentPath)
+					parentKey := path.Dir(currentPath)
 					if parentKey == "." || parentKey == "" {
 						parentKey = "."
 					}
@@ -376,9 +380,7 @@ func buildFileTree(entries []FileChange, workingDir string) []*fileTreeNode {
 
 	var roots []*fileTreeNode
 	for path, node := range nodeMap {
-		if !strings.Contains(path, string(filepath.Separator)) && node.IsDir {
-			roots = append(roots, node)
-		} else if !node.IsDir && !strings.Contains(path, string(filepath.Separator)) {
+		if !strings.Contains(path, "/") {
 			roots = append(roots, node)
 		}
 	}
@@ -409,9 +411,4 @@ func appendUniqueChild(parent, child *fileTreeNode) {
 		}
 	}
 	parent.Children = append(parent.Children, child)
-}
-
-func splitPath(p string) []string {
-	p = filepath.ToSlash(p)
-	return strings.Split(p, "/")
 }

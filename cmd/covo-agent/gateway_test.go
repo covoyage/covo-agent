@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestGatewayCommandRegistersSubcommands(t *testing.T) {
 	cmd := newGatewayCommand(&commandRuntime{homeDir: t.TempDir()})
@@ -31,7 +34,7 @@ func TestGatewayCommandRejectsExtraArguments(t *testing.T) {
 
 func TestGatewayPIDFile(t *testing.T) {
 	homeDir := t.TempDir()
-	want := homeDir + "/gateway.pid"
+	want := filepath.Join(homeDir, "gateway.pid")
 	if got := gatewayPIDFile(homeDir); got != want {
 		t.Fatalf("gatewayPIDFile() = %q, want %q", got, want)
 	}

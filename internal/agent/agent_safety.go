@@ -249,7 +249,9 @@ func ValidatePath(baseDir, relPath string) (string, error) {
 	cleaned := filepath.Clean(relPath)
 
 	// Reject input that is already absolute – the caller promised relative.
-	if filepath.IsAbs(cleaned) {
+	// On Windows a volume-relative path (e.g. "\etc\passwd") is not reported
+	// absolute by filepath.IsAbs, so also reject any leading separator.
+	if filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, string(filepath.Separator)) {
 		return "", errors.New("relative path must not be absolute")
 	}
 

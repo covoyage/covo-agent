@@ -227,7 +227,14 @@ func IsUnsafeRoot(dir string) bool {
 	if err != nil {
 		return true
 	}
-	if abs == "/" || abs == filepath.Clean("/") {
+	clean := filepath.Clean(abs)
+	if clean == string(filepath.Separator) {
+		return true
+	}
+	// Windows drive roots (e.g. C:\) and UNC share roots are absolute without
+	// matching "/" — treat any volume root as unsafe.
+	vol := filepath.VolumeName(clean)
+	if vol != "" && clean == vol+string(filepath.Separator) {
 		return true
 	}
 	home, err := os.UserHomeDir()
