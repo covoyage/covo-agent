@@ -29,6 +29,14 @@ Feature availability can vary across macOS, Linux, and Windows. Run `covo-agent 
 
 ## Install
 
+Install the latest release with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/covoyage/covo-agent/main/install.sh | bash
+```
+
+The script downloads the binary for your OS and architecture from the GitHub Releases page, installs it to `~/.covo-agent/bin`, and adds it to your `PATH`. Pass `--version <version>` to install a specific release, or `--no-modify-path` to skip the shell-config edit.
+
 Install with Homebrew on macOS or Linux:
 
 ```bash

@@ -29,6 +29,14 @@ macOS、Linux 和 Windows 上的部分能力可能有所不同。可以运行 `c
 
 ## 安装
 
+一条命令安装最新版本：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/covoyage/covo-agent/main/install.sh | bash
+```
+
+脚本会根据你的操作系统和架构，从 GitHub Releases 页面下载对应二进制，安装到 `~/.covo-agent/bin` 并加入 `PATH`。如需安装指定版本，可传 `--version <版本号>`；如不想修改 shell 配置文件，可加 `--no-modify-path`。
+
 macOS 或 Linux 可通过 Homebrew 安装：
 
 ```bash
