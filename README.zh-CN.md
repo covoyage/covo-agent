@@ -264,15 +264,6 @@ go build -o bin/covo-agent ./cmd/covo-agent
 
 提交修改前，请运行上面的构建、测试和检查命令，并重新生成可执行文件。
 
-## 发布
-
-推送版本 Tag 后，发布流程会自动生成 GitHub Release，并更新 Homebrew Tap 与 Scoop Bucket。需要先在仓库中配置 `DISTRIBUTION_REPO_TOKEN` Secret，并授予它对两个分发仓库的内容写入权限。发布构建使用依赖仓库中同名的不可变 Tag，因此应先在依赖仓库发布相同版本 Tag，再为本仓库打 Tag：
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
 ## 许可证
 
 本项目采用 [GNU Affero General Public License v3.0](LICENSE)（`AGPL-3.0`）。

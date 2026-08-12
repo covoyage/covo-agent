@@ -264,15 +264,6 @@ go build -o bin/covo-agent ./cmd/covo-agent
 
 Before submitting changes, run the build, test, and vet commands above and rebuild the executable.
 
-## Releasing
-
-Tagged versions publish GitHub release archives and update the Homebrew Tap and Scoop Bucket automatically. Configure a `DISTRIBUTION_REPO_TOKEN` repository secret with content write access to both distribution repositories. Release builds use the matching immutable dependency tag, so publish the same semantic version tag there first, then tag this repository:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
 ## License
 
 This project is licensed under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0`).
