@@ -907,10 +907,12 @@ func validateSkillRelPath(relPath string) (string, error) {
 	if relPath == "" {
 		return "", fmt.Errorf("relative path is required")
 	}
-	if filepath.IsAbs(relPath) {
+	clean := filepath.Clean(relPath)
+	// On Windows a volume-relative path (e.g. "\tmp\escape.txt") is not
+	// reported absolute by filepath.IsAbs, so also reject any leading separator.
+	if filepath.IsAbs(relPath) || strings.HasPrefix(clean, string(filepath.Separator)) {
 		return "", fmt.Errorf("path traversal detected")
 	}
-	clean := filepath.Clean(relPath)
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("path traversal detected")
 	}

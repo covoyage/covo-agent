@@ -314,7 +314,7 @@ func formatMap(workDir string, entries []FileEntry) string {
 	dirs := make(map[string]*dirNode)
 	var dirKeys []string
 	for _, e := range entries {
-		dir := filepath.Dir(e.RelPath)
+		dir := filepath.ToSlash(filepath.Dir(e.RelPath))
 		if dir == "." {
 			dir = ""
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -94,6 +95,9 @@ func TestNew_Default(t *testing.T) {
 }
 
 func TestLocalSandbox_Run(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("local sandbox shell tests require /bin/sh")
+	}
 	sb, err := newLocalSandbox(Config{WorkDir: "/tmp"})
 	if err != nil {
 		t.Fatalf("newLocalSandbox() error: %v", err)
@@ -124,6 +128,9 @@ func TestLocalSandbox_RunTimeout(t *testing.T) {
 }
 
 func TestLocalSandbox_RunNonZeroExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("local sandbox shell tests require /bin/sh")
+	}
 	sb, _ := newLocalSandbox(Config{WorkDir: "/tmp"})
 	defer sb.Close()
 
@@ -242,6 +249,9 @@ func TestDockerContainerName_Stable(t *testing.T) {
 }
 
 func TestNewDockerSandbox_PersistentIDSetsContainerName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake docker shim is POSIX-only")
+	}
 	origPath := os.Getenv("PATH")
 	defer os.Setenv("PATH", origPath)
 	// Ensure docker lookup succeeds by using a fake docker on PATH.
@@ -291,6 +301,9 @@ func TestConfigFromEnv_PersistentID(t *testing.T) {
 // requireDocker skips the test unless a working Docker daemon is reachable.
 func requireDocker(t *testing.T) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("docker sandbox integration tests require Linux containers")
+	}
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not on PATH")
 	}

@@ -6,8 +6,8 @@ import (
 )
 
 func TestExternalSkillRoots(t *testing.T) {
-	home := "/home/u"
-	work := "/proj"
+	home := filepath.FromSlash("/home/u")
+	work := filepath.FromSlash("/proj")
 
 	t.Run("default includes all ecosystems global+project", func(t *testing.T) {
 		roots := externalSkillRoots(home, work)

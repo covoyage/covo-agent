@@ -159,6 +159,7 @@ func TestNewMemorySystemFromEnv(t *testing.T) {
 	t.Run("sqlite via env", func(t *testing.T) {
 		t.Setenv("COVO_MEMORY_PROVIDER", "sqlite")
 		ms := NewMemorySystem(t.TempDir())
+		t.Cleanup(func() { _ = ms.Provider().Close() })
 		if err := ms.Init(); err != nil {
 			t.Fatalf("Init: %v", err)
 		}

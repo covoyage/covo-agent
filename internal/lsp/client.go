@@ -630,7 +630,8 @@ func (c *Client) Shutdown() error {
 
 func fileURI(path string) string {
 	abs, _ := filepath.Abs(path)
-	return "file://" + abs
+	// LSP URIs use forward slashes on every platform.
+	return "file://" + filepath.ToSlash(abs)
 }
 
 func uriToPath(uri string) string {
