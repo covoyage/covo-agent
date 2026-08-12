@@ -283,14 +283,15 @@ func ValidatePath(baseDir, relPath string) (string, error) {
 // IsSensitivePath reports whether path points at a known-sensitive system
 // file, SSH key, credential directory, agent configuration, or similar.
 //
-// The check is based on common Unix/Linux/macOS paths.  On non-Unix systems
-// many of the patterns will simply never match, which is safe.
+// Matching is done in forward-slash form so the Unix-style patterns apply
+// regardless of the host OS separator.
 func IsSensitivePath(path string) bool {
-	path = filepath.Clean(path)
-	sep := string(filepath.Separator)
+	path = filepath.ToSlash(filepath.Clean(path))
+	const sep = "/"
 
 	// Exact or prefix match against the pre-computed list.
 	for _, prefix := range sensitivePathPrefixes {
+		prefix = filepath.ToSlash(prefix)
 		if path == prefix {
 			return true
 		}
@@ -300,7 +301,7 @@ func IsSensitivePath(path string) bool {
 	}
 
 	// --- Generic home-directory patterns (/home/<user>/..., /Users/<user>/...) ---
-	parts := strings.Split(path, sep)
+	parts := strings.Split(path, "/")
 	// On Unix the first part after cleaning is "" (leading /).
 	if len(parts) >= 4 && parts[1] != "" {
 		top := parts[1]    // "home" or "Users"
@@ -332,7 +333,7 @@ func IsSensitivePath(path string) bool {
 		// already in sensitivePathPrefixes through init, but double-check
 		// in case the home dir wasn't available at init time).
 		if home, err := os.UserHomeDir(); err == nil {
-			if path == filepath.Join(home, ".env") {
+			if path == filepath.ToSlash(filepath.Join(home, ".env")) {
 				return true
 			}
 		}

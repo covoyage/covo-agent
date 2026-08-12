@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/covoyage/covonaut/agentcore"
 	agenttools "github.com/covoyage/covo-agent/internal/tools"
+	"github.com/covoyage/covonaut/agentcore"
 )
 
 func TestCommitmentHookAfterAgentRun(t *testing.T) {
@@ -18,6 +18,7 @@ func TestCommitmentHookAfterAgentRun(t *testing.T) {
 
 	// Create the extension first so agentTools has a commitment store.
 	ext := agenttools.NewExtension(agenttools.ExtensionConfig{HomeDir: homeDir})
+	t.Cleanup(func() { _ = ext.Dispose() })
 	ca := &CovoAgent{
 		baseCfg:    CovoAgentConfig{Logger: logger},
 		agentTools: ext,
@@ -49,6 +50,7 @@ func TestCommitmentHookAfterAgentRun(t *testing.T) {
 func TestCommitmentHookAfterAgentRunNilLogger(t *testing.T) {
 	homeDir := t.TempDir()
 	ext := agenttools.NewExtension(agenttools.ExtensionConfig{HomeDir: homeDir})
+	t.Cleanup(func() { _ = ext.Dispose() })
 	ca := &CovoAgent{
 		baseCfg:    CovoAgentConfig{Logger: nil},
 		agentTools: ext,

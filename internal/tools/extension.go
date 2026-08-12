@@ -529,6 +529,15 @@ func (e *Extension) Dispose() error {
 	if e.ftsSearcher != nil {
 		e.ftsSearcher.Close()
 	}
+	if e.auditStore != nil {
+		_ = e.auditStore.Close()
+	}
+	if e.inboxStore != nil {
+		_ = e.inboxStore.Close()
+	}
+	if e.subagentStore != nil {
+		_ = e.subagentStore.Close()
+	}
 	return nil
 }
 
