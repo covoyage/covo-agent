@@ -3,7 +3,7 @@ module github.com/covoyage/covo-agent
 go 1.25.0
 
 require (
-	github.com/covoyage/covonaut v1.0.3
+	github.com/covoyage/covonaut v1.0.4
 	github.com/covoyage/covonaut/tools v0.0.0-20260805142133-bce0a8a572cf
 	github.com/gobwas/ws v1.4.0
 	github.com/google/uuid v1.6.0

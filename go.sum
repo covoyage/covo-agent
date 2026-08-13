@@ -8,8 +8,8 @@ github.com/chromedp/chromedp v0.14.2 h1:r3b/WtwM50RsBZHMUm9fsNhhzRStTHrKdr2zmwbZ
 github.com/chromedp/chromedp v0.14.2/go.mod h1:rHzAv60xDE7VNy/MYtTUrYreSc0ujt2O1/C3bzctYBo=
 github.com/chromedp/sysutil v1.1.0 h1:PUFNv5EcprjqXZD9nJb9b/c9ibAbxiYo4exNWZyipwM=
 github.com/chromedp/sysutil v1.1.0/go.mod h1:WiThHUdltqCNKGc4gaU50XgYjwjYIhKWoHGPTUfWTJ8=
-github.com/covoyage/covonaut v1.0.3 h1:4F4sNnOW7mCc/bat/+ukSn5do6r5UE5oI97/F1Ivk4k=
-github.com/covoyage/covonaut v1.0.3/go.mod h1:WgDkTdox/EAG6I2Q5zs+ILHLxdnkpivlLOgNcrz8rzM=
+github.com/covoyage/covonaut v1.0.4 h1:FKa93VVNI7Hw0aY7t9KQK9fbE1RqAVA/aCU7+Jue3FA=
+github.com/covoyage/covonaut v1.0.4/go.mod h1:WgDkTdox/EAG6I2Q5zs+ILHLxdnkpivlLOgNcrz8rzM=
 github.com/covoyage/covonaut/tools v0.0.0-20260805142133-bce0a8a572cf h1:X3WentvHOnUIpGvvd5rdrP2Fu3Za9iID4EprLMFsW3I=
 github.com/covoyage/covonaut/tools v0.0.0-20260805142133-bce0a8a572cf/go.mod h1:ksvRNSdghATOcdgPBaz5bHXRT8ZM55Adl1tdOLoIKXE=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
