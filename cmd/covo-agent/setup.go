@@ -363,7 +363,7 @@ func renderProviderList(label string, options []string, selected, offset, pageSi
 
 	// Search bar
 	if searching {
-		lines = append(lines, fmt.Sprintf("\033[33mSearch:\033[0m %s▎  backspace edit  enter confirm  esc cancel", search))
+		lines = append(lines, fmt.Sprintf("\033[33mSearch:\033[0m %s  backspace edit  enter confirm  esc cancel", overlayEndCursor(search)))
 	} else if search != "" {
 		lines = append(lines, fmt.Sprintf("\033[33mFilter:\033[0m %s  / refine  esc clear  PgUp/PgDn", search))
 	} else {
@@ -430,6 +430,17 @@ func clearSelect(count int) {
 	for i := 0; i <= count; i++ {
 		fmt.Print("\r\033[A\033[2K")
 	}
+}
+
+// overlayEndCursor renders s with the last character shown as a block cursor
+// (reverse video), so the cursor does not consume an extra character cell.
+// An empty string renders as a single block.
+func overlayEndCursor(s string) string {
+	r := []rune(s)
+	if len(r) == 0 {
+		return "▎"
+	}
+	return string(r[:len(r)-1]) + "\033[7m" + string(r[len(r)-1]) + "\033[0m"
 }
 
 func promptChoice(reader *bufio.Reader, label string, options []string, defaultVal string) string {

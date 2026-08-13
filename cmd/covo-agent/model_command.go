@@ -473,7 +473,8 @@ func editCustomProvider(cfg *cli.Config, reader *bufio.Reader, providerType stri
 	fmt.Printf("\r  Provider %q updated.\r\n", name)
 }
 
-// promptLineWithDefault is like promptLine but shows a default value that is used on empty input.
+// promptLineWithDefault is like promptLine but pre-fills the field with a
+// default value (kept when the user confirms without editing).
 func promptLineWithDefault(label, defaultVal string) (string, bool) {
 	if !cli.IsTerminal(os.Stdin.Fd()) {
 		fmt.Printf("  %s [%s]: ", label, defaultVal)
@@ -498,14 +499,20 @@ func promptLineWithDefault(label, defaultVal string) (string, bool) {
 	}
 	defer cli.RestoreTerminal(fd, oldState)
 
-	// Pre-display the default as ghost text
-	fmt.Printf("\r  %s: %s", label, defaultVal)
-	// Move cursor back to the start of the default
-	fmt.Printf("\033[%dD", len(defaultVal))
+	return promptLineRaw(fd, oldState, label, []rune(defaultVal))
+}
 
-	var line []byte
+// promptLineRaw reads a single line in raw mode with caret editing support:
+// ←/→ move the caret, Home/End (and Ctrl+A/E) jump to the line edges, Ctrl+B/F
+// move by one, characters are inserted at the caret, and backspace deletes the
+// character before it. Returns (line, true) on Esc, (line, false) on Enter.
+func promptLineRaw(fd int, oldState *term.State, label string, initial []rune) (string, bool) {
+	line := append([]rune(nil), initial...)
+	caret := len(line)
+
+	drawPromptLine(label, line, caret)
+
 	buf := make([]byte, 256)
-	started := false
 	for {
 		n, err := os.Stdin.Read(buf)
 		if err != nil || n == 0 {
@@ -514,41 +521,155 @@ func promptLineWithDefault(label, defaultVal string) (string, bool) {
 		for i := 0; i < n; i++ {
 			switch buf[i] {
 			case 13, 10: // Enter
-				if !started {
-					// User pressed Enter without typing → use default
-					fmt.Print("\r\n")
-					return defaultVal, false
-				}
 				fmt.Print("\r\n")
 				return string(line), false
-			case 27: // Esc
-				fmt.Print("\r  Cancelled.\r\n")
-				return "", true
+			case 27: // Esc or escape sequence
+				if i+1 >= n {
+					fmt.Print("\r  Cancelled.\r\n")
+					return "", true
+				}
+				key, consumed := decodeEscapeSeq(buf, i+1, n)
+				if consumed == 0 {
+					fmt.Print("\r  Cancelled.\r\n")
+					return "", true
+				}
+				i += consumed
+				switch key {
+				case "left":
+					if caret > 0 {
+						caret--
+						fmt.Print("\033[1D")
+					}
+				case "right":
+					if caret < len(line) {
+						caret++
+						fmt.Print("\033[1C")
+					}
+				case "home":
+					if caret > 0 {
+						fmt.Printf("\033[%dD", caret)
+						caret = 0
+					}
+				case "end":
+					if dist := len(line) - caret; dist > 0 {
+						fmt.Printf("\033[%dC", dist)
+						caret = len(line)
+					}
+				default:
+					fmt.Print("\r  Cancelled.\r\n")
+					return "", true
+				}
 			case 3: // Ctrl-C
 				cli.RestoreTerminal(fd, oldState)
-				fmt.Print("\033[?25h\r\n")
+				fmt.Print("\033[?25h")
+				fmt.Print("\r\n")
 				os.Exit(1)
 			case 127, 8: // Backspace
-				if len(line) > 0 {
-					line = line[:len(line)-1]
-					fmt.Print("\b \b")
-				} else if !started {
-					// Remove the default display
-					fmt.Printf("\033[%dD\033[K\r  %s: ", len(defaultVal), label)
-					started = true
+				if caret > 0 {
+					line = append(line[:caret-1], line[caret:]...)
+					caret--
+					drawPromptLine(label, line, caret)
+				}
+			case 1: // Ctrl+A → start of line
+				if caret > 0 {
+					fmt.Printf("\033[%dD", caret)
+					caret = 0
+				}
+			case 5: // Ctrl+E → end of line
+				if dist := len(line) - caret; dist > 0 {
+					fmt.Printf("\033[%dC", dist)
+					caret = len(line)
+				}
+			case 2: // Ctrl+B → left
+				if caret > 0 {
+					caret--
+					fmt.Print("\033[1D")
+				}
+			case 6: // Ctrl+F → right
+				if caret < len(line) {
+					caret++
+					fmt.Print("\033[1C")
 				}
 			default:
 				if buf[i] >= 32 {
-					if !started {
-						// Clear the default display first
-						fmt.Printf("\033[%dD\033[K", len(defaultVal))
-						started = true
-					}
-					line = append(line, buf[i])
-					fmt.Print(string(buf[i]))
+					line = append(line, 0)
+					copy(line[caret+1:], line[caret:])
+					line[caret] = rune(buf[i])
+					caret++
+					drawPromptLine(label, line, caret)
 				}
 			}
 		}
+	}
+}
+
+// decodeEscapeSeq decodes a CSI escape sequence whose bytes start at buf[start]
+// (immediately after the leading ESC). Returns the key ID and the number of
+// bytes consumed (excluding the ESC). Returns ("", 0) if the sequence is
+// incomplete, and ("", n) for an unrecognized sequence.
+func decodeEscapeSeq(buf []byte, start, n int) (string, int) {
+	if start >= n || buf[start] != '[' {
+		if start < n {
+			return "", 1
+		}
+		return "", 0
+	}
+	end := start + 1
+	for end < n {
+		c := buf[end]
+		if c >= 0x40 && c <= 0x7e {
+			break
+		}
+		end++
+	}
+	if end >= n {
+		return "", 0
+	}
+	params := string(buf[start+1 : end])
+	consumed := end - start + 1
+	switch buf[end] {
+	case 'A':
+		if params == "" {
+			return "up", consumed
+		}
+	case 'B':
+		if params == "" {
+			return "down", consumed
+		}
+	case 'C':
+		if params == "" {
+			return "right", consumed
+		}
+	case 'D':
+		if params == "" {
+			return "left", consumed
+		}
+	case 'H':
+		if params == "" {
+			return "home", consumed
+		}
+	case 'F':
+		if params == "" {
+			return "end", consumed
+		}
+	case '~':
+		switch params {
+		case "1", "7":
+			return "home", consumed
+		case "4", "8":
+			return "end", consumed
+		}
+	}
+	return "", consumed
+}
+
+// drawPromptLine redraws the current input line and positions the terminal
+// cursor at the caret so the caret is always visible in the right place.
+func drawPromptLine(label string, line []rune, caret int) {
+	fmt.Printf("\r  %s: %s", label, string(line))
+	fmt.Print("\033[K")
+	if dist := len(line) - caret; dist > 0 {
+		fmt.Printf("\033[%dD", dist)
 	}
 }
 
@@ -698,7 +819,8 @@ func addCustomProvider(_ *bufio.Reader, cfg *cli.Config) (*cli.CustomProvider, s
 	return cp, selectedModel, nil
 }
 
-// promptLine reads a single line of text in raw mode, with ESC to cancel.
+// promptLine reads a single line of text in raw mode with caret editing
+// support (see promptLineRaw), with ESC to cancel.
 // Returns (line, true) if ESC was pressed, (line, false) on Enter.
 func promptLine(label string) (string, bool) {
 	if !cli.IsTerminal(os.Stdin.Fd()) {
@@ -716,41 +838,7 @@ func promptLine(label string) (string, bool) {
 	}
 	defer cli.RestoreTerminal(fd, oldState)
 
-	fmt.Printf("\r  %s: ", label)
-
-	var line []byte
-	buf := make([]byte, 256)
-	for {
-		n, err := os.Stdin.Read(buf)
-		if err != nil || n == 0 {
-			continue
-		}
-		for i := 0; i < n; i++ {
-			switch buf[i] {
-			case 13, 10: // Enter
-				fmt.Print("\r\n")
-				return string(line), false
-			case 27: // Esc
-				fmt.Print("\r  Cancelled.\r\n")
-				return "", true
-			case 3: // Ctrl-C
-				cli.RestoreTerminal(fd, oldState)
-				fmt.Print("\033[?25h")
-				fmt.Print("\r\n")
-				os.Exit(1)
-			case 127, 8: // Backspace / Delete
-				if len(line) > 0 {
-					line = line[:len(line)-1]
-					fmt.Print("\b \b")
-				}
-			default:
-				if buf[i] >= 32 {
-					line = append(line, buf[i])
-					fmt.Print(string(buf[i]))
-				}
-			}
-		}
-	}
+	return promptLineRaw(fd, oldState, label, nil)
 }
 
 // apiKeyEnvForProvider generates a unique env var name for a custom provider's API key.
@@ -1113,7 +1201,7 @@ func renderModelPicker(previousLines int, provider, query string, choices []stri
 	lineCount := 0
 	fmt.Print("\r  Select default model (type to search, ↑↓ navigate, Enter confirm, Esc back):\r\n")
 	lineCount++
-	fmt.Printf("\r  Search: %s\r\n", query)
+	fmt.Printf("\r  Search: %s\r\n", overlayEndCursor(query))
 	lineCount++
 	fmt.Printf("\r  Showing %d-%d of %d %s models\r\n", offset+1, visibleEnd, len(choices), cli.ProviderDisplayName(provider))
 	lineCount++
