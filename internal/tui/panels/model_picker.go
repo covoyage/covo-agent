@@ -1265,29 +1265,6 @@ func (p *ModelPicker) currentInputLocked() string {
 	return ""
 }
 
-// setCurrentInputLocked sets the text of the active input field. Caller must
-// hold p.mu for writing.
-func (p *ModelPicker) setCurrentInputLocked(text string) {
-	switch p.step {
-	case modelPickerProviderSearch:
-		p.providerSearch = text
-	case modelPickerModels, modelPickerCustomModels:
-		p.search = text
-	case modelPickerManual:
-		p.manualInput = text
-	case modelPickerCustomName:
-		p.customName = text
-	case modelPickerCustomBaseURL:
-		p.customBaseURL = text
-	case modelPickerCustomAPIKey:
-		p.customAPIKey = text
-	case modelPickerAPIKey:
-		p.apiKeyInput = text
-	case modelPickerCustomContext:
-		p.customContextInput = text
-	}
-}
-
 // resetCaretToEndLocked moves the caret to the end of the active input field.
 // Caller must hold p.mu for writing.
 func (p *ModelPicker) resetCaretToEndLocked() {
