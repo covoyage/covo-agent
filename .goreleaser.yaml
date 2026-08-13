@@ -25,7 +25,7 @@ builds:
     ldflags:
       - >-
         -s -w
-        -X main.Version={{ .Version }}
+        -X github.com/covoyage/covo-agent/internal/cli.Version={{ .Version }}
         -X github.com/covoyage/covo-agent/internal/acp.Version={{ .Version }}
 
   - id: covo-agent-linux
@@ -43,7 +43,7 @@ builds:
     ldflags:
       - >-
         -s -w
-        -X main.Version={{ .Version }}
+        -X github.com/covoyage/covo-agent/internal/cli.Version={{ .Version }}
         -X github.com/covoyage/covo-agent/internal/acp.Version={{ .Version }}
 
   - id: covo-agent-windows
@@ -60,7 +60,7 @@ builds:
     ldflags:
       - >-
         -s -w
-        -X main.Version={{ .Version }}
+        -X github.com/covoyage/covo-agent/internal/cli.Version={{ .Version }}
         -X github.com/covoyage/covo-agent/internal/acp.Version={{ .Version }}
 
 archives:

@@ -607,7 +607,7 @@ func RegisterCustomProviders(cfg *Config) {
 				if key == "" {
 					return nil, fmt.Errorf("%s is required for %s provider", apiKeyEnv, cp.Name)
 				}
-				return anthropic.New(anthropic.Config{APIKey: key, BaseURL: baseURL}), nil
+				return anthropic.New(anthropic.Config{APIKey: key, BaseURL: baseURL, ExtraHeaders: map[string]string{"User-Agent": UserAgent()}}), nil
 			}
 			reg.FetchModels = func() ([]ProviderModel, error) {
 				if len(cp.Models) > 0 {
@@ -621,7 +621,7 @@ func RegisterCustomProviders(cfg *Config) {
 				if key == "" {
 					return nil, fmt.Errorf("%s is required for %s provider", apiKeyEnv, cp.Name)
 				}
-				return gemini.New(gemini.Config{APIKey: key, BaseURL: baseURL}), nil
+				return gemini.New(gemini.Config{APIKey: key, BaseURL: baseURL, ExtraHeaders: map[string]string{"User-Agent": UserAgent()}}), nil
 			}
 			reg.FetchModels = func() ([]ProviderModel, error) {
 				if len(cp.Models) > 0 {
@@ -635,7 +635,7 @@ func RegisterCustomProviders(cfg *Config) {
 				if key == "" {
 					return nil, fmt.Errorf("%s is required for %s provider", apiKeyEnv, cp.Name)
 				}
-				cfg := chatcompat.Config{APIKey: key, BaseURL: baseURL}
+				cfg := chatcompat.Config{APIKey: key, BaseURL: baseURL, ExtraHeaders: map[string]string{"User-Agent": UserAgent()}}
 				return chatcompat.New(cfg), nil
 			}
 			reg.FetchModels = func() ([]ProviderModel, error) {
@@ -777,7 +777,7 @@ func registerOpenAICompatible(pr *ProviderRegistration) {
 			if baseURL == "" {
 				baseURL = pr.DefaultBaseURL
 			}
-			return chatcompat.New(chatcompat.Config{APIKey: key, BaseURL: baseURL}), nil
+			return chatcompat.New(chatcompat.Config{APIKey: key, BaseURL: baseURL, ExtraHeaders: map[string]string{"User-Agent": UserAgent()}}), nil
 		}
 	}
 	if pr.FetchModels == nil {
@@ -805,8 +805,9 @@ func init() {
 				return nil, fmt.Errorf("OPENAI_API_KEY or API_KEY is required for openai provider")
 			}
 			return chatcompat.New(chatcompat.Config{
-				APIKey:  apiKey,
-				BaseURL: os.Getenv("OPENAI_BASE_URL"),
+				APIKey:       apiKey,
+				BaseURL:      os.Getenv("OPENAI_BASE_URL"),
+				ExtraHeaders: map[string]string{"User-Agent": UserAgent()},
 			}), nil
 		},
 		FetchModels: func() ([]ProviderModel, error) {
@@ -827,8 +828,9 @@ func init() {
 				return nil, fmt.Errorf("ANTHROPIC_API_KEY or API_KEY is required for anthropic provider")
 			}
 			return anthropic.New(anthropic.Config{
-				APIKey:  apiKey,
-				BaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
+				APIKey:       apiKey,
+				BaseURL:      os.Getenv("ANTHROPIC_BASE_URL"),
+				ExtraHeaders: map[string]string{"User-Agent": UserAgent()},
 			}), nil
 		},
 		FetchModels: func() ([]ProviderModel, error) {
@@ -849,8 +851,9 @@ func init() {
 				return nil, fmt.Errorf("GEMINI_API_KEY, GOOGLE_API_KEY, or API_KEY is required for gemini provider")
 			}
 			return gemini.New(gemini.Config{
-				APIKey:  apiKey,
-				BaseURL: os.Getenv("GEMINI_BASE_URL"),
+				APIKey:       apiKey,
+				BaseURL:      os.Getenv("GEMINI_BASE_URL"),
+				ExtraHeaders: map[string]string{"User-Agent": UserAgent()},
 			}), nil
 		},
 		FetchModels: func() ([]ProviderModel, error) {
@@ -875,7 +878,7 @@ func init() {
 			if baseURL == "" {
 				baseURL = xiaomiBaseURL
 			}
-			return chatcompat.New(chatcompat.Config{APIKey: apiKey, BaseURL: baseURL}), nil
+			return chatcompat.New(chatcompat.Config{APIKey: apiKey, BaseURL: baseURL, ExtraHeaders: map[string]string{"User-Agent": UserAgent()}}), nil
 		},
 	})
 	RegisterProvider(&ProviderRegistration{
@@ -895,7 +898,7 @@ func init() {
 			if baseURL == "" {
 				baseURL = openrouterBaseURL
 			}
-			return chatcompat.New(chatcompat.Config{APIKey: apiKey, BaseURL: baseURL}), nil
+			return chatcompat.New(chatcompat.Config{APIKey: apiKey, BaseURL: baseURL, ExtraHeaders: map[string]string{"User-Agent": UserAgent()}}), nil
 		},
 		FetchModels: func() ([]ProviderModel, error) {
 			models, err := FetchOpenRouterModels()
@@ -943,7 +946,7 @@ func init() {
 			if apiKey == "" {
 				return nil, fmt.Errorf("MINIMAX_API_KEY is required")
 			}
-			return anthropic.New(anthropic.Config{APIKey: apiKey, BaseURL: os.Getenv("MINIMAX_BASE_URL")}), nil
+			return anthropic.New(anthropic.Config{APIKey: apiKey, BaseURL: os.Getenv("MINIMAX_BASE_URL"), ExtraHeaders: map[string]string{"User-Agent": UserAgent()}}), nil
 		},
 	})
 	RegisterProvider(&ProviderRegistration{Type: "minimax-cn", Name: "minimax-cn", DisplayName: "MiniMax CN", DefaultModel: "MiniMax-M1", APIKeyEnvs: []string{"MINIMAX_CN_API_KEY"}, BaseURLEnv: "MINIMAX_CN_BASE_URL", DefaultBaseURL: minimaxCNBaseURL,
@@ -952,7 +955,7 @@ func init() {
 			if apiKey == "" {
 				return nil, fmt.Errorf("MINIMAX_CN_API_KEY is required")
 			}
-			return anthropic.New(anthropic.Config{APIKey: apiKey, BaseURL: os.Getenv("MINIMAX_CN_BASE_URL")}), nil
+			return anthropic.New(anthropic.Config{APIKey: apiKey, BaseURL: os.Getenv("MINIMAX_CN_BASE_URL"), ExtraHeaders: map[string]string{"User-Agent": UserAgent()}}), nil
 		},
 	})
 
@@ -1004,7 +1007,7 @@ func init() {
 			if baseURL == "" {
 				return nil, fmt.Errorf("CUSTOM_BASE_URL is required for custom provider")
 			}
-			return chatcompat.New(chatcompat.Config{APIKey: apiKey, BaseURL: baseURL}), nil
+			return chatcompat.New(chatcompat.Config{APIKey: apiKey, BaseURL: baseURL, ExtraHeaders: map[string]string{"User-Agent": UserAgent()}}), nil
 		},
 	})
 }

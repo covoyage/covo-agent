@@ -208,6 +208,8 @@ Profiles use isolated data directories under:
 
 Set `COVO_PROFILE` or use the `profile` command to select one.
 
+Set `COVO_USER_AGENT` to override the `User-Agent` header sent to LLM providers (defaults to `covo-agent/<version>`).
+
 ## Data Locations
 
 | Path | Purpose |

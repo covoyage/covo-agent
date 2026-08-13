@@ -208,6 +208,8 @@ Profile 使用独立的数据目录：
 
 可以设置 `COVO_PROFILE`，或使用 `profile` 命令选择 Profile。
 
+设置 `COVO_USER_AGENT` 可覆盖发送给 LLM 提供方的 `User-Agent` 请求头（默认值为 `covo-agent/<version>`）。
+
 ## 数据目录
 
 | 路径 | 用途 |

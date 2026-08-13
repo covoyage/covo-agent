@@ -11,7 +11,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/selfupdate"
 )
 
-var Version = "0.1.0-dev"
+var Version = cli.Version
 
 func cmdVersion() {
 	fmt.Printf("covo-agent v%s\n", Version)

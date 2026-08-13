@@ -38,12 +38,12 @@ func BuildAuxiliaryProvider(providerType, baseURL, apiKey string) (agentcore.Pro
 func buildAuxProviderDirect(providerType, baseURL, apiKey string) (agentcore.Provider, error) {
 	switch providerType {
 	case "anthropic":
-		return anthropic.New(anthropic.Config{APIKey: apiKey, BaseURL: baseURL}), nil
+		return anthropic.New(anthropic.Config{APIKey: apiKey, BaseURL: baseURL, ExtraHeaders: map[string]string{"User-Agent": UserAgent()}}), nil
 	case "gemini":
-		return gemini.New(gemini.Config{APIKey: apiKey, BaseURL: baseURL}), nil
+		return gemini.New(gemini.Config{APIKey: apiKey, BaseURL: baseURL, ExtraHeaders: map[string]string{"User-Agent": UserAgent()}}), nil
 	default:
 		// All OpenAI-compatible providers use chatcompat.
-		return chatcompat.New(chatcompat.Config{APIKey: apiKey, BaseURL: baseURL}), nil
+		return chatcompat.New(chatcompat.Config{APIKey: apiKey, BaseURL: baseURL, ExtraHeaders: map[string]string{"User-Agent": UserAgent()}}), nil
 	}
 }
 
