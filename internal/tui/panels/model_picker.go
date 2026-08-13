@@ -150,6 +150,7 @@ type ModelPicker struct {
 
 	cursorVisible    bool
 	cursorTickActive bool
+	caret            int
 }
 
 var customProtocolOptions = []string{
@@ -231,6 +232,7 @@ func (p *ModelPicker) Update(msg core.Msg) core.Cmd {
 		if m.err != nil || len(m.models) == 0 {
 			p.step = modelPickerManual
 			p.manualInput = p.defaultModel
+			p.resetCaretToEndLocked()
 			p.mu.Unlock()
 			p.cursorTickActive = true
 			return cursorTickCmd()
@@ -241,6 +243,7 @@ func (p *ModelPicker) Update(msg core.Msg) core.Cmd {
 		p.modelSelected = 0
 		p.modelOffset = 0
 		p.applyModelFilterLocked()
+		p.resetCaretToEndLocked()
 		p.mu.Unlock()
 		p.cursorTickActive = true
 		return cursorTickCmd()
@@ -258,6 +261,7 @@ func (p *ModelPicker) Update(msg core.Msg) core.Cmd {
 		if m.err != nil || len(m.models) == 0 {
 			p.step = modelPickerManual
 			p.manualInput = p.defaultModel
+			p.resetCaretToEndLocked()
 			p.mu.Unlock()
 			p.cursorTickActive = true
 			return cursorTickCmd()
@@ -269,6 +273,7 @@ func (p *ModelPicker) Update(msg core.Msg) core.Cmd {
 		p.modelSelected = 0
 		p.modelOffset = 0
 		p.applyModelFilterLocked()
+		p.resetCaretToEndLocked()
 		p.mu.Unlock()
 		p.cursorTickActive = true
 		return cursorTickCmd()
@@ -317,6 +322,20 @@ func (p *ModelPicker) processKey(key terminal.Key) core.Cmd {
 	case "down":
 		p.clearIgnoredEnter()
 		p.move(1)
+	case "left", "right":
+		if isCaretInputStep(step) {
+			p.clearIgnoredEnter()
+			if key.Name == "left" {
+				p.moveCaret(-1)
+			} else {
+				p.moveCaret(1)
+			}
+		}
+	case "home", "end":
+		if isCaretInputStep(step) {
+			p.clearIgnoredEnter()
+			p.setCaretBoundary(key.Name == "home")
+		}
 	case "enter":
 		if p.consumeIgnoredEnter() {
 			cmd = nil
@@ -331,6 +350,18 @@ func (p *ModelPicker) processKey(key terminal.Key) core.Cmd {
 		p.backspace()
 	default:
 		p.clearIgnoredEnter()
+		if isCaretInputStep(step) && key.Mods&terminal.ModCtrl != 0 {
+			switch key.Name {
+			case "b":
+				p.moveCaret(-1)
+			case "f":
+				p.moveCaret(1)
+			case "a":
+				p.setCaretBoundary(true)
+			case "e":
+				p.setCaretBoundary(false)
+			}
+		}
 		isTextInput := step == modelPickerModels || step == modelPickerManual ||
 			step == modelPickerCustomName || step == modelPickerCustomBaseURL ||
 			step == modelPickerCustomAPIKey || step == modelPickerAPIKey ||
@@ -358,7 +389,7 @@ func (p *ModelPicker) processKey(key terminal.Key) core.Cmd {
 
 		if step == modelPickerProviderSearch {
 			if key.IsPrintable() {
-				p.appendProviderSearch(key.Rune)
+				p.typeRune(key.Rune)
 			}
 		}
 	}
@@ -436,14 +467,11 @@ func copyProviderOptions(options []ProviderOption) []ProviderOption {
 	return out
 }
 
-func (p *ModelPicker) appendProviderSearch(r rune) {
-	p.providerSearch += string(r)
-}
-
 func (p *ModelPicker) enterProviderSearch() {
 	p.mu.Lock()
 	p.step = modelPickerProviderSearch
 	p.providerSearch = ""
+	p.caret = 0
 	p.mu.Unlock()
 }
 
@@ -490,6 +518,7 @@ func (p *ModelPicker) confirm() core.Cmd {
 			p.customProtocolSelected = 0
 			p.customBaseURL = ""
 			p.customAPIKey = ""
+			p.caret = 0
 			return nil
 		}
 		provider := p.backend.NormalizeProvider(selectedProvider.Type)
@@ -498,6 +527,7 @@ func (p *ModelPicker) confirm() core.Cmd {
 			p.apiKeyEnv = p.backend.ProviderAPIKeyEnv(provider)
 			p.apiKeyInput = ""
 			p.step = modelPickerAPIKey
+			p.caret = 0
 			return nil
 		}
 		p.provider = provider
@@ -540,6 +570,7 @@ func (p *ModelPicker) confirm() core.Cmd {
 		p.customProtocol = p.customProtocols[p.customProtocolSelected]
 		p.step = modelPickerCustomBaseURL
 		p.customBaseURL = ""
+		p.caret = 0
 		return nil
 	case modelPickerCustomBaseURL:
 		baseURL := strings.TrimSpace(p.customBaseURL)
@@ -551,6 +582,7 @@ func (p *ModelPicker) confirm() core.Cmd {
 		p.customBaseURLErr = ""
 		p.step = modelPickerCustomAPIKey
 		p.customAPIKey = ""
+		p.caret = 0
 		return nil
 	case modelPickerCustomAPIKey:
 		apiKey := strings.TrimSpace(p.customAPIKey)
@@ -589,12 +621,14 @@ func (p *ModelPicker) confirm() core.Cmd {
 		if choice == customModelOption {
 			p.step = modelPickerManual
 			p.manualInput = p.defaultModel
+			p.resetCaretToEndLocked()
 			return nil
 		}
 		p.selectedModelID = choice
 		if p.needsContextPrompt(choice) {
 			p.step = modelPickerCustomContext
 			p.customContextInput = ""
+			p.caret = 0
 			return nil
 		}
 		return p.finalizeCustomProvider(choice)
@@ -614,6 +648,7 @@ func (p *ModelPicker) confirm() core.Cmd {
 		if choice == customModelOption {
 			p.step = modelPickerManual
 			p.manualInput = p.defaultModel
+			p.resetCaretToEndLocked()
 			return nil
 		}
 		if p.onApply != nil {
@@ -632,6 +667,7 @@ func (p *ModelPicker) confirm() core.Cmd {
 			if p.needsContextPrompt(model) {
 				p.step = modelPickerCustomContext
 				p.customContextInput = ""
+				p.caret = 0
 				return nil
 			}
 			return p.finalizeCustomProvider(model)
@@ -650,6 +686,7 @@ func (p *ModelPicker) back() {
 	case modelPickerProviderSearch:
 		p.providerSearch = ""
 		p.step = modelPickerProvider
+		p.caret = 0
 	case modelPickerProvider:
 		if p.providerSearch != "" {
 			p.providerSearch = ""
@@ -663,24 +700,31 @@ func (p *ModelPicker) back() {
 	case modelPickerAPIKey:
 		p.step = modelPickerProvider
 		p.apiKeyInput = ""
+		p.caret = 0
 	case modelPickerCustomName:
 		p.step = modelPickerProvider
 		p.customName = ""
+		p.caret = 0
 	case modelPickerCustomProtocol:
 		p.step = modelPickerCustomName
 		p.customProtocol = ""
+		p.resetCaretToEndLocked()
 	case modelPickerCustomBaseURL:
 		p.step = modelPickerCustomProtocol
 		p.customBaseURL = ""
+		p.caret = 0
 	case modelPickerCustomAPIKey:
 		p.step = modelPickerCustomBaseURL
 		p.customAPIKey = ""
+		p.resetCaretToEndLocked()
 	case modelPickerCustomContext:
 		if len(p.customFetchedModels) > 0 {
 			p.step = modelPickerCustomModels
+			p.resetCaretToEndLocked()
 		} else {
 			p.step = modelPickerManual
 			p.manualInput = p.defaultModel
+			p.resetCaretToEndLocked()
 		}
 		p.customContextInput = ""
 	case modelPickerCustomLoading, modelPickerCustomModels, modelPickerLoading, modelPickerModels, modelPickerManual:
@@ -698,6 +742,7 @@ func (p *ModelPicker) back() {
 		p.selectedModelID = ""
 		p.apiKeyEnv = ""
 		p.apiKeyInput = ""
+		p.caret = 0
 	}
 }
 
@@ -706,40 +751,27 @@ func (p *ModelPicker) backspace() {
 	defer p.mu.Unlock()
 	switch p.step {
 	case modelPickerProviderSearch:
-		if p.providerSearch != "" {
-			p.providerSearch = p.providerSearch[:len(p.providerSearch)-1]
-		}
+		p.providerSearch = deleteRuneBeforeCaret(p.providerSearch, &p.caret)
 	case modelPickerModels, modelPickerCustomModels:
-		if p.search != "" {
-			p.search = p.search[:len(p.search)-1]
+		old := p.search
+		p.search = deleteRuneBeforeCaret(p.search, &p.caret)
+		if p.search != old {
 			p.modelSelected = 0
 			p.modelOffset = 0
 			p.applyModelFilterLocked()
 		}
 	case modelPickerManual:
-		if p.manualInput != "" {
-			p.manualInput = p.manualInput[:len(p.manualInput)-1]
-		}
+		p.manualInput = deleteRuneBeforeCaret(p.manualInput, &p.caret)
 	case modelPickerCustomName:
-		if p.customName != "" {
-			p.customName = p.customName[:len(p.customName)-1]
-		}
+		p.customName = deleteRuneBeforeCaret(p.customName, &p.caret)
 	case modelPickerCustomBaseURL:
-		if p.customBaseURL != "" {
-			p.customBaseURL = p.customBaseURL[:len(p.customBaseURL)-1]
-		}
+		p.customBaseURL = deleteRuneBeforeCaret(p.customBaseURL, &p.caret)
 	case modelPickerCustomAPIKey:
-		if p.customAPIKey != "" {
-			p.customAPIKey = p.customAPIKey[:len(p.customAPIKey)-1]
-		}
+		p.customAPIKey = deleteRuneBeforeCaret(p.customAPIKey, &p.caret)
 	case modelPickerAPIKey:
-		if p.apiKeyInput != "" {
-			p.apiKeyInput = p.apiKeyInput[:len(p.apiKeyInput)-1]
-		}
+		p.apiKeyInput = deleteRuneBeforeCaret(p.apiKeyInput, &p.caret)
 	case modelPickerCustomContext:
-		if p.customContextInput != "" {
-			p.customContextInput = p.customContextInput[:len(p.customContextInput)-1]
-		}
+		p.customContextInput = deleteRuneBeforeCaret(p.customContextInput, &p.caret)
 	}
 }
 
@@ -750,23 +782,25 @@ func (p *ModelPicker) typeRune(r rune) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	switch p.step {
+	case modelPickerProviderSearch:
+		p.providerSearch = insertRuneAtCaret(p.providerSearch, &p.caret, r)
 	case modelPickerModels, modelPickerCustomModels:
-		p.search += string(r)
+		p.search = insertRuneAtCaret(p.search, &p.caret, r)
 		p.modelSelected = 0
 		p.modelOffset = 0
 		p.applyModelFilterLocked()
 	case modelPickerManual:
-		p.manualInput += string(r)
+		p.manualInput = insertRuneAtCaret(p.manualInput, &p.caret, r)
 	case modelPickerCustomName:
-		p.customName += string(r)
+		p.customName = insertRuneAtCaret(p.customName, &p.caret, r)
 	case modelPickerCustomBaseURL:
-		p.customBaseURL += string(r)
+		p.customBaseURL = insertRuneAtCaret(p.customBaseURL, &p.caret, r)
 	case modelPickerCustomAPIKey:
-		p.customAPIKey += string(r)
+		p.customAPIKey = insertRuneAtCaret(p.customAPIKey, &p.caret, r)
 	case modelPickerAPIKey:
-		p.apiKeyInput += string(r)
+		p.apiKeyInput = insertRuneAtCaret(p.apiKeyInput, &p.caret, r)
 	case modelPickerCustomContext:
-		p.customContextInput += string(r)
+		p.customContextInput = insertRuneAtCaret(p.customContextInput, &p.caret, r)
 	}
 }
 
@@ -838,6 +872,7 @@ func (p *ModelPicker) handleEditProvider() core.Cmd {
 	p.customAPIKey = ""
 	p.apiKeyEnv = target.APIKeyEnv
 	p.step = modelPickerCustomName
+	p.resetCaretToEndLocked()
 	return nil
 }
 
@@ -848,23 +883,25 @@ func (p *ModelPicker) handlePaste(text string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	switch p.step {
+	case modelPickerProviderSearch:
+		p.providerSearch = insertStringAtCaret(p.providerSearch, &p.caret, text)
 	case modelPickerModels, modelPickerCustomModels:
-		p.search += text
+		p.search = insertStringAtCaret(p.search, &p.caret, text)
 		p.modelSelected = 0
 		p.modelOffset = 0
 		p.applyModelFilterLocked()
 	case modelPickerManual:
-		p.manualInput += text
+		p.manualInput = insertStringAtCaret(p.manualInput, &p.caret, text)
 	case modelPickerCustomName:
-		p.customName += text
+		p.customName = insertStringAtCaret(p.customName, &p.caret, text)
 	case modelPickerCustomBaseURL:
-		p.customBaseURL += text
+		p.customBaseURL = insertStringAtCaret(p.customBaseURL, &p.caret, text)
 	case modelPickerCustomAPIKey:
-		p.customAPIKey += text
+		p.customAPIKey = insertStringAtCaret(p.customAPIKey, &p.caret, text)
 	case modelPickerAPIKey:
-		p.apiKeyInput += text
+		p.apiKeyInput = insertStringAtCaret(p.apiKeyInput, &p.caret, text)
 	case modelPickerCustomContext:
-		p.customContextInput += text
+		p.customContextInput = insertStringAtCaret(p.customContextInput, &p.caret, text)
 	}
 }
 
@@ -960,8 +997,10 @@ func (p *ModelPicker) Render(width int64) []string {
 		total := len(filtered)
 
 		if p.step == modelPickerProviderSearch {
-			sbar := fmt.Sprintf("Search: %s▎  backspace edit  enter confirm  esc cancel", p.providerSearch)
-			body = append(body, pal.Accent.Render(sbar))
+			sbar := pal.Accent.Render("Search: ") +
+				p.renderInput(p.providerSearch, pal.Accent) +
+				pal.Accent.Render("  backspace edit  enter confirm  esc cancel")
+			body = append(body, sbar)
 		} else if p.providerSearch != "" {
 			body = append(body, pal.Dim.Render(fmt.Sprintf("Filter: %s  / refine  esc clear  PgUp/PgDn", p.providerSearch)))
 		} else {
@@ -1010,7 +1049,7 @@ func (p *ModelPicker) Render(width int64) []string {
 		body = append(body, pal.Dim.Render(fmt.Sprintf("Provider: %s", p.provider)))
 		body = append(body, "")
 		body = append(body, fmt.Sprintf("Enter API key for %s (leave blank to keep current):", p.apiKeyEnv))
-		body = append(body, pal.SelectHighlight.Render("> "+maskAPIKey(p.apiKeyInput))+p.cursorBlink())
+		body = append(body, p.renderField(maskAPIKey(p.apiKeyInput)))
 	case modelPickerLoading, modelPickerCustomLoading:
 		body = append(body, "")
 		displayName := p.provider
@@ -1020,7 +1059,7 @@ func (p *ModelPicker) Render(width int64) []string {
 		body = append(body, fmt.Sprintf("Fetching %s models from API...", displayName))
 	case modelPickerModels, modelPickerCustomModels:
 		body = append(body, pal.Dim.Render(fmt.Sprintf("Provider: %s", p.provider)))
-		body = append(body, pal.Dim.Render(fmt.Sprintf("Search: %s (%d models)", p.search, len(p.filtered))))
+		body = append(body, pal.Dim.Render("Search: ")+p.renderInput(p.search, pal.Dim)+pal.Dim.Render(fmt.Sprintf(" (%d models)", len(p.filtered))))
 		body = append(body, "")
 		body = append(body, p.renderModelRows(innerWidth, pal)...)
 	case modelPickerManual:
@@ -1030,12 +1069,12 @@ func (p *ModelPicker) Render(width int64) []string {
 		}
 		body = append(body, "")
 		body = append(body, "Enter model name, then Enter to confirm. Esc returns to providers.")
-		body = append(body, pal.SelectHighlight.Render("> "+p.manualInput)+p.cursorBlink())
+		body = append(body, p.renderField(p.manualInput))
 	case modelPickerCustomName:
 		body = append(body, pal.Dim.Render("Add Custom Provider"))
 		body = append(body, "")
 		body = append(body, "Enter provider name:")
-		body = append(body, pal.SelectHighlight.Render("> "+p.customName)+p.cursorBlink())
+		body = append(body, p.renderField(p.customName))
 	case modelPickerCustomProtocol:
 		body = append(body, pal.Dim.Render("Add Custom Provider - Protocol"))
 		body = append(body, fmt.Sprintf("Name: %s", p.customName))
@@ -1058,7 +1097,7 @@ func (p *ModelPicker) Render(width int64) []string {
 			body = append(body, pal.Error.Render(p.customBaseURLErr))
 		}
 		body = append(body, "Enter base URL:")
-		body = append(body, pal.SelectHighlight.Render("> "+p.customBaseURL)+p.cursorBlink())
+		body = append(body, p.renderField(p.customBaseURL))
 	case modelPickerCustomAPIKey:
 		body = append(body, pal.Dim.Render("Add Custom Provider - API Key"))
 		body = append(body, fmt.Sprintf("Name: %s", p.customName))
@@ -1070,13 +1109,13 @@ func (p *ModelPicker) Render(width int64) []string {
 			label = fmt.Sprintf("Enter API key (will be saved as %s):", p.apiKeyEnv)
 		}
 		body = append(body, label)
-		body = append(body, pal.SelectHighlight.Render("> "+maskAPIKey(p.customAPIKey))+p.cursorBlink())
+		body = append(body, p.renderField(maskAPIKey(p.customAPIKey)))
 	case modelPickerCustomContext:
 		body = append(body, pal.Dim.Render("Add Custom Provider - Context Window"))
 		body = append(body, fmt.Sprintf("Model: %s", p.selectedModelID))
 		body = append(body, "")
 		body = append(body, fmt.Sprintf("Enter context window size (in tokens) for %s:", p.selectedModelID))
-		body = append(body, pal.SelectHighlight.Render("> "+p.customContextInput)+p.cursorBlink())
+		body = append(body, p.renderField(p.customContextInput))
 	}
 	panel := renderPickerPanel(body, panelWidth)
 	return centerPanelLines(panel, width)
@@ -1151,11 +1190,175 @@ func maskAPIKey(key string) string {
 	return strings.Repeat("*", len(key)-4) + key[len(key)-4:]
 }
 
-func (p *ModelPicker) cursorBlink() string {
-	if p.cursorVisible {
-		return "▌"
+// renderInput returns text with the caret drawn as a background block over the
+// character at the caret position, so the cursor never consumes an extra
+// character cell. Only when the caret sits past the last character is a single
+// trailing cell (▌ when visible, a space when hidden) appended, keeping the
+// field width stable across cursor blinks. Non-cursor segments are rendered
+// with base.
+func (p *ModelPicker) renderInput(text string, base theme.Style) string {
+	runes := []rune(text)
+	pos := clampCaret(p.caret, len(runes))
+	if pos >= len(runes) {
+		marker := " "
+		if p.cursorVisible {
+			marker = "▌"
+		}
+		return base.Render(text) + marker
 	}
-	return " "
+	out := base.Render(string(runes[:pos]))
+	ch := string(runes[pos])
+	if p.cursorVisible {
+		out += cursorBlockStyle(theme.CurrentPalette()).Render(ch)
+	} else {
+		out += base.Render(ch)
+	}
+	if pos+1 < len(runes) {
+		out += base.Render(string(runes[pos+1:]))
+	}
+	return out
+}
+
+// renderField renders a highlighted input field line ("> "+text) with the caret
+// drawn over the character under it (see renderInput).
+func (p *ModelPicker) renderField(text string) string {
+	pal := theme.CurrentPalette()
+	return pal.SelectHighlight.Render("> ") + p.renderInput(text, pal.SelectHighlight)
+}
+
+// cursorBlockStyle returns a style that renders a character as a filled block:
+// the character stays visible with the theme accent as its background.
+func cursorBlockStyle(pal *theme.Palette) theme.Style {
+	s := theme.NewStyle().Bold()
+	if params := theme.FgParams(pal.Semantic.Accent, pal.Mode); params != "" {
+		s = s.WithBgParams("48" + strings.TrimPrefix(params, "38"))
+	}
+	return s
+}
+
+// isCaretInputStep reports whether the step edits a text field with a caret.
+func isCaretInputStep(step modelPickerStep) bool {
+	return isTextInputStep(step) || step == modelPickerProviderSearch
+}
+
+// currentInputLocked returns the text of the active input field. Caller must
+// hold p.mu (read or write).
+func (p *ModelPicker) currentInputLocked() string {
+	switch p.step {
+	case modelPickerProviderSearch:
+		return p.providerSearch
+	case modelPickerModels, modelPickerCustomModels:
+		return p.search
+	case modelPickerManual:
+		return p.manualInput
+	case modelPickerCustomName:
+		return p.customName
+	case modelPickerCustomBaseURL:
+		return p.customBaseURL
+	case modelPickerCustomAPIKey:
+		return p.customAPIKey
+	case modelPickerAPIKey:
+		return p.apiKeyInput
+	case modelPickerCustomContext:
+		return p.customContextInput
+	}
+	return ""
+}
+
+// setCurrentInputLocked sets the text of the active input field. Caller must
+// hold p.mu for writing.
+func (p *ModelPicker) setCurrentInputLocked(text string) {
+	switch p.step {
+	case modelPickerProviderSearch:
+		p.providerSearch = text
+	case modelPickerModels, modelPickerCustomModels:
+		p.search = text
+	case modelPickerManual:
+		p.manualInput = text
+	case modelPickerCustomName:
+		p.customName = text
+	case modelPickerCustomBaseURL:
+		p.customBaseURL = text
+	case modelPickerCustomAPIKey:
+		p.customAPIKey = text
+	case modelPickerAPIKey:
+		p.apiKeyInput = text
+	case modelPickerCustomContext:
+		p.customContextInput = text
+	}
+}
+
+// resetCaretToEndLocked moves the caret to the end of the active input field.
+// Caller must hold p.mu for writing.
+func (p *ModelPicker) resetCaretToEndLocked() {
+	p.caret = len([]rune(p.currentInputLocked()))
+}
+
+func (p *ModelPicker) moveCaret(delta int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	max := len([]rune(p.currentInputLocked()))
+	p.caret = clampCaret(p.caret+delta, max)
+}
+
+func (p *ModelPicker) setCaretBoundary(start bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if start {
+		p.caret = 0
+		return
+	}
+	p.caret = len([]rune(p.currentInputLocked()))
+}
+
+func clampCaret(caret, max int) int {
+	if caret < 0 {
+		return 0
+	}
+	if caret > max {
+		return max
+	}
+	return caret
+}
+
+// insertRuneAtCaret inserts r into text at the caret position and advances the
+// caret past the inserted rune.
+func insertRuneAtCaret(text string, caret *int, r rune) string {
+	runes := []rune(text)
+	pos := clampCaret(*caret, len(runes))
+	runes = append(runes, 0)
+	copy(runes[pos+1:], runes[pos:])
+	runes[pos] = r
+	*caret = pos + 1
+	return string(runes)
+}
+
+// deleteRuneBeforeCaret removes the rune immediately before the caret.
+func deleteRuneBeforeCaret(text string, caret *int) string {
+	runes := []rune(text)
+	pos := clampCaret(*caret, len(runes))
+	if pos == 0 {
+		return text
+	}
+	runes = append(runes[:pos-1], runes[pos:]...)
+	*caret = pos - 1
+	return string(runes)
+}
+
+// insertStringAtCaret inserts s into text at the caret position and advances
+// the caret past the inserted text.
+func insertStringAtCaret(text string, caret *int, s string) string {
+	insert := []rune(s)
+	if len(insert) == 0 {
+		return text
+	}
+	runes := []rune(text)
+	pos := clampCaret(*caret, len(runes))
+	runes = append(runes, make([]rune, len(insert))...)
+	copy(runes[pos+len(insert):], runes[pos:])
+	copy(runes[pos:], insert)
+	*caret = pos + len(insert)
+	return string(runes)
 }
 
 func wrapIndex(i, n int) int {

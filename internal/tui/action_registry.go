@@ -473,6 +473,9 @@ func (r *ActionRegistry) RenderCheatsheet(query string) []string {
 		lines = append(lines, "")
 		lines = append(lines, fmt.Sprintf("  ── %s ──", cat.String()))
 		for _, def := range byCat[cat] {
+			if len(def.DefaultKeys) == 0 {
+				continue
+			}
 			keyStr := formatKeyDisplay(def.DefaultKeys[0])
 			if len(def.DefaultKeys) > 1 || len(def.AltKeys) > 0 {
 				allKeys := make([]string, 0, len(def.DefaultKeys)+len(def.AltKeys))
