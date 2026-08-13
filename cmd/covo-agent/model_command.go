@@ -233,7 +233,7 @@ func selectProviderInteractive(label string, options []string, defaultVal string
 				if len(filtered) == 0 {
 					continue
 				}
-				clearSelect(len(filtered) + 8)
+				clearScreenHome()
 				fmt.Printf("\r  %s: %s\r\n", label, filtered[selected])
 				return filtered[selected], 0
 			case 127: // backspace
@@ -248,7 +248,7 @@ func selectProviderInteractive(label string, options []string, defaultVal string
 					continue
 				}
 			case 3: // Ctrl+C
-				clearSelect(len(filtered) + 8)
+				clearScreenHome()
 				fmt.Print("\033[?25h")
 				os.Exit(1)
 			case 27: // Esc
@@ -261,7 +261,7 @@ func selectProviderInteractive(label string, options []string, defaultVal string
 					renderProviderList(label, filtered, selected, offset, pageSize, search, searching, defaultVal)
 					continue
 				}
-				clearSelect(len(filtered) + 8)
+				clearScreenHome()
 				fmt.Print("\r  Cancelled.\r\n")
 				return "", 1
 			case 'q':
@@ -271,7 +271,7 @@ func selectProviderInteractive(label string, options []string, defaultVal string
 				if len(filtered) == 0 {
 					continue
 				}
-				clearSelect(len(filtered) + 8)
+				clearScreenHome()
 				fmt.Printf("\r  %s: %s\r\n", label, filtered[selected])
 				return filtered[selected], 0
 			case 'd', 'D':
@@ -1056,7 +1056,6 @@ func selectProviderModelInteractive(provider string, models []cli.ProviderModel,
 	query := ""
 	selected := 0
 	offset := 0
-	renderedLines := 0
 
 	for {
 		choices := providerModelChoices(models, query, currentModel, scoped...)
@@ -1070,7 +1069,7 @@ func selectProviderModelInteractive(provider string, models []cli.ProviderModel,
 			selected = 0
 		}
 		offset = adjustPickerOffset(selected, offset, modelPickerPageSize, len(choices))
-		renderedLines = renderModelPicker(renderedLines, provider, query, choices, selected, offset, currentModel)
+		renderModelPicker(provider, query, choices, selected, offset, currentModel)
 
 		var buf [8]byte
 		n, readErr := os.Stdin.Read(buf[:])
@@ -1081,14 +1080,14 @@ func selectProviderModelInteractive(provider string, models []cli.ProviderModel,
 		if len(b) == 1 {
 			switch b[0] {
 			case 3:
-				clearRenderedBlock(renderedLines)
+				clearScreenHome()
 				os.Exit(1)
 			case 27:
-				clearRenderedBlock(renderedLines)
+				clearScreenHome()
 				fmt.Print("\r  Back to provider selection\r\n")
 				return "", true
 			case 13, 10:
-				clearRenderedBlock(renderedLines)
+				clearScreenHome()
 				choice := choices[selected]
 				if choice == customModelOption {
 					return promptCustomModelWithTerminalRestore(oldState, fd, currentModel), false
@@ -1190,21 +1189,17 @@ func adjustPickerOffset(selected, offset, pageSize, total int) int {
 	return offset
 }
 
-func renderModelPicker(previousLines int, provider, query string, choices []string, selected, offset int, currentModel string) int {
-	clearRenderedBlock(previousLines)
+func renderModelPicker(provider, query string, choices []string, selected, offset int, currentModel string) {
+	clearScreenHome()
 
 	visibleEnd := offset + modelPickerPageSize
 	if visibleEnd > len(choices) {
 		visibleEnd = len(choices)
 	}
 
-	lineCount := 0
 	fmt.Print("\r  Select default model (type to search, ↑↓ navigate, Enter confirm, Esc back):\r\n")
-	lineCount++
 	fmt.Printf("\r  Search: %s\r\n", overlayEndCursor(query))
-	lineCount++
 	fmt.Printf("\r  Showing %d-%d of %d %s models\r\n", offset+1, visibleEnd, len(choices), cli.ProviderDisplayName(provider))
-	lineCount++
 
 	for i := offset; i < visibleEnd; i++ {
 		label := choices[i]
@@ -1216,19 +1211,7 @@ func renderModelPicker(previousLines int, provider, query string, choices []stri
 		} else {
 			fmt.Printf("\r     %s\r\n", label)
 		}
-		lineCount++
 	}
-	return lineCount
-}
-
-func clearRenderedBlock(lineCount int) {
-	if lineCount <= 0 {
-		return
-	}
-	for i := 0; i < lineCount; i++ {
-		fmt.Print("\r\033[A\033[2K")
-	}
-	fmt.Print("\r\033[2K")
 }
 
 func appendUnique(values []string, extras ...string) []string {

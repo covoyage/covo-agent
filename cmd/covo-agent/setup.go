@@ -419,11 +419,18 @@ func renderProviderList(label string, options []string, selected, offset, pageSi
 		lines = append(lines, "")
 	}
 
-	// Clear existing content and render
-	clearSelect(len(lines))
+	// Render from the top of the window so the interface stays anchored and
+	// does not drift upward while scrolling.
+	fmt.Print("\033[2J\033[H")
 	for _, l := range lines {
 		fmt.Printf("\r  %s\r\n", l)
 	}
+}
+
+// clearScreenHome clears the whole terminal and moves the cursor to the
+// top-left corner, anchoring an interactive picker at the top of the window.
+func clearScreenHome() {
+	fmt.Print("\033[2J\033[H")
 }
 
 func clearSelect(count int) {
