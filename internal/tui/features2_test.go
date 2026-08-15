@@ -487,4 +487,25 @@ func TestIsPrintableKey(t *testing.T) {
 	if isPrintableKey("") {
 		t.Error("empty string should not be printable")
 	}
+	if !isPrintableKey("中") {
+		t.Error("multi-byte UTF-8 '中' should be printable")
+	}
+	if !isPrintableKey("中文") {
+		t.Error("multi-byte UTF-8 '中文' should be printable")
+	}
+	if isPrintableKey("\x1b") {
+		t.Error("escape byte should not be printable")
+	}
+}
+
+func TestTrimLastRune(t *testing.T) {
+	if got := trimLastRune("模式"); got != "模" {
+		t.Errorf("expected '模', got %q", got)
+	}
+	if got := trimLastRune("ab"); got != "a" {
+		t.Errorf("expected 'a', got %q", got)
+	}
+	if got := trimLastRune(""); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
 }

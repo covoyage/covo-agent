@@ -57,6 +57,8 @@ type UIDependencies struct {
 	ApplyNamedTheme    func(name string)
 	OpenChangedFiles   func()
 	OpenMCPMarketplace func()
+	OpenSettings       func()
+	OpenPromptQueue    func()
 }
 
 // IODependencies groups import/export and clipboard integrations.

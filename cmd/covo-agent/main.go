@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,8 @@ import (
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/safego"
 	"github.com/covoyage/covo-agent/internal/slashcmd"
+	agenttheme "github.com/covoyage/covo-agent/internal/theme"
+	"github.com/covoyage/covo-agent/internal/tools"
 	toolsplanning "github.com/covoyage/covo-agent/internal/tools/planning"
 	agentui "github.com/covoyage/covo-agent/internal/tui"
 	agentpanels "github.com/covoyage/covo-agent/internal/tui/panels"
@@ -418,6 +421,119 @@ func runInteractive(opts *rootOptions, runtime *commandRuntime) {
 		showTUIModelPicker(appPtr, providerType, model, cfg, switchProviderModel)
 	}
 
+	// openSettings opens the settings panel (via F2 or /settings).
+	openSettings := func() {
+		if appPtr == nil {
+			return
+		}
+		themeOpts := []component.SettingOption{{Value: "", Label: i18n.T("settings.opt_default")}}
+		currentTheme, _ := readSkinTheme(homeDir)
+		themeIdx := 0
+		for _, p := range agenttheme.All() {
+			themeOpts = append(themeOpts, component.SettingOption{Value: p.Name, Label: p.Name})
+			if p.Name == currentTheme {
+				themeIdx = len(themeOpts) - 1
+			}
+		}
+		modeIdx := 0
+		if currentMode == agent.ModeGeneral {
+			modeIdx = 1
+		}
+		yoloIdx := 0
+		if runtimeState.SessionYolo() {
+			yoloIdx = 1
+		}
+		entries := []component.SettingEntry{
+			{
+				Key:         "mode",
+				Label:       i18n.T("settings.label_mode"),
+				Options:     []component.SettingOption{{Value: "code", Label: i18n.T("settings.opt_code")}, {Value: "general", Label: i18n.T("settings.opt_general")}},
+				Current:     int64(modeIdx),
+				Description: i18n.T("settings.desc_mode"),
+			},
+			{
+				Key:         "theme",
+				Label:       i18n.T("settings.label_theme"),
+				Options:     themeOpts,
+				Current:     int64(themeIdx),
+				Description: i18n.T("settings.desc_theme"),
+			},
+			{
+				Key:         "yolo",
+				Label:       i18n.T("settings.label_yolo"),
+				Options:     []component.SettingOption{{Value: "off", Label: i18n.T("settings.opt_off")}, {Value: "on", Label: i18n.T("settings.opt_on")}},
+				Current:     int64(yoloIdx),
+				Description: i18n.T("settings.desc_yolo"),
+			},
+		}
+		agentui.ShowSettingsModal(loadUIBus(), entries, func(e component.SettingEntry) {
+			value := func() string {
+				if e.Current < 0 || int(e.Current) >= len(e.Options) {
+					return ""
+				}
+				return e.Options[e.Current].Value
+			}
+			switch e.Key {
+			case "mode":
+				if m, ok := agent.ParseMode(value()); ok && m != currentMode {
+					switchToMode(m)
+					loadUIBus().PrintSystem(i18n.T("system.switched_mode", "mode", string(m)))
+				}
+			case "theme":
+				v := value()
+				if err := writeSkinTheme(homeDir, v); err != nil {
+					log.Printf("write skin: %v", err)
+					return
+				}
+				if v == "" {
+					applySkinOverrides(homeDir, configTheme)
+				} else {
+					applyNamedTheme(v)
+				}
+				loadUIBus().PrintSystem(i18n.T("system.theme_set", "name", v))
+			case "yolo":
+				on := value() == "on"
+				runtimeState.SetSessionYolo(on)
+				if ca := agentRuntime.Current(); ca != nil {
+					if approvalSys := ca.ApprovalSystem(); approvalSys != nil {
+						if on {
+							approvalSys.EnableSessionYolo("settings")
+						} else {
+							approvalSys.DisableSessionYolo("settings")
+						}
+					}
+				}
+				if permissionGate != nil {
+					permissionGate.YoloMode = on
+				}
+				if on {
+					loadUIBus().PrintSystem(i18n.T("system.yolo_on"))
+				} else {
+					loadUIBus().PrintSystem(i18n.T("system.yolo_off"))
+				}
+			}
+		})
+	}
+
+	// showPromptQueue lists the pending prompts (via Ctrl+Shift+P or /prompts).
+	showPromptQueue := func() {
+		if appPtr == nil {
+			return
+		}
+		queue := runtimeState.PromptQueue()
+		if queue == nil || queue.IsEmpty() {
+			loadUIBus().PrintSystem(i18n.T("system.prompts_empty"))
+			return
+		}
+		var b strings.Builder
+		entries := queue.All()
+		b.WriteString(i18n.T("system.pending_prompts_header", "count", strconv.Itoa(len(entries))) + "\n")
+		for i, e := range entries {
+			b.WriteString(fmt.Sprintf("  %d. %s\n", i+1, e.Text))
+		}
+		loadUIBus().PrintSystem(b.String())
+	}
+
 	var slashContextBuilder *slashcmd.ContextBuilder
 	var handleSubmit func(ctx context.Context, input string)
 	handleSubmit = func(ctx context.Context, input string) {
@@ -800,6 +916,8 @@ func runInteractive(opts *rootOptions, runtime *commandRuntime) {
 		SwitchModel:       switchModel,
 		SwitchProvider:    switchProvider,
 		OpenModelPicker:   openModelPicker,
+		OpenSettings:      openSettings,
+		OpenPromptQueue:   showPromptQueue,
 		BackgroundManager: bgManager,
 		StatusLineManager: statusLineMgr,
 		WorkingDir:        workingDir,
@@ -1003,7 +1121,7 @@ func runInteractive(opts *rootOptions, runtime *commandRuntime) {
 	})
 	app.Keybindings().Register("app.changed-files", terminal.KeybindingDef{
 		DefaultKeys: []terminal.KeyID{"ctrl+g"},
-		Description: "Show changed files tree",
+		Description: i18n.T("keybinding.changed_files"),
 	})
 
 	openSessions := func() {
@@ -1213,8 +1331,17 @@ func runInteractive(opts *rootOptions, runtime *commandRuntime) {
 	}
 
 	openKeyHelp := func() {
-		help := component.NewKeyHelp(app.Keybindings())
-		help.SetTitle("Keybindings — Esc to close")
+		visibleRows := int64(18)
+		if _, rows := app.TerminalSize(); rows > 0 {
+			if n := rows*70/100 - 3; n >= 6 {
+				visibleRows = n
+			}
+		}
+		help := agentui.NewHelpPanel(
+			i18n.T("help.title"),
+			app.Keybindings(),
+			visibleRows,
+		)
 		agentui.NewUIBus(appPtr).ShowPanel(help, 70, 70)
 	}
 
@@ -1234,11 +1361,35 @@ func runInteractive(opts *rootOptions, runtime *commandRuntime) {
 		OpenModelPicker:  openModelPicker,
 		OpenEditor:       openExternalEditorFn,
 		OpenChangedFiles: func() { openChangedFilesPanel(changedFilesTracker, workingDir) },
+		OpenSettings:     openSettings,
+		OpenPromptQueue:  showPromptQueue,
 		Suggestions:      suggestionsMgr,
 	}))
 
 	if err := app.Start(); err != nil {
 		log.Fatalf("start tui: %v", err)
 	}
+
+	cronStore := tools.NewCronStore(homeDir)
+	cronScheduler := tools.NewCronScheduler(cronStore, func(ctx context.Context, jobID, prompt string) (string, error) {
+		if busy.Load() {
+			return "", fmt.Errorf("busy — cron job %s skipped", jobID)
+		}
+		runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancel()
+		ca := createAgent(currentMode)
+		if ca == nil {
+			return "", fmt.Errorf("failed to create agent for cron job %s", jobID)
+		}
+		defer ca.Close()
+		output, err := ca.Core().Run(runCtx, prompt)
+		if err != nil {
+			return "", fmt.Errorf("cron job %s: %w", jobID, err)
+		}
+		return output, nil
+	})
+	cronScheduler.Start(context.Background())
+	defer cronScheduler.Stop()
+
 	<-app.Done()
 }

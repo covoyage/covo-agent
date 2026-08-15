@@ -1,13 +1,14 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/covoyage/covonaut/tui/chat"
 	"github.com/covoyage/covonaut/tui/component"
 	"github.com/covoyage/covonaut/tui/core"
 	"github.com/covoyage/covonaut/tui/theme"
+
+	"github.com/covoyage/covo-agent/internal/i18n"
 )
 
 // ---------------------------------------------------------------------------
@@ -28,7 +29,6 @@ const (
 // SettingsModal 是设置弹窗组件。
 type SettingsModal struct {
 	list        *component.SettingsList
-	title       string
 	width       int64
 	mode        SettingsModalMode
 	filterQuery string
@@ -43,7 +43,6 @@ func NewSettingsModal(entries []component.SettingEntry) *SettingsModal {
 	list.SetFocused(true)
 	return &SettingsModal{
 		list:       list,
-		title:      "Settings",
 		width:      60,
 		mode:       SettingsModeBrowse,
 		allEntries: entries,
@@ -51,6 +50,8 @@ func NewSettingsModal(entries []component.SettingEntry) *SettingsModal {
 }
 
 // Render 实现 core.Component。
+// 只渲染内容区（列表 + 过滤提示）；标题栏与快捷键提示由外层
+// ModalWindow chrome 提供，避免重复展示。
 func (sm *SettingsModal) Render(width int64) []string {
 	if width > sm.width {
 		width = sm.width
@@ -58,24 +59,11 @@ func (sm *SettingsModal) Render(width int64) []string {
 	pal := theme.CurrentPalette()
 
 	var lines []string
-	// Title bar
-	titleSuffix := ""
-	if sm.mode == SettingsModeFilter {
-		titleSuffix = pal.Accent.Render(fmt.Sprintf("  /%s", sm.filterQuery))
-	}
-	lines = append(lines, pal.Accent.Render(fmt.Sprintf("┃ %s", sm.title))+titleSuffix)
-	lines = append(lines, pal.Dim.Render(strings.Repeat("─", int(width)-2)))
-
-	// Settings list
 	listLines := sm.list.Render(width)
 	lines = append(lines, listLines...)
 
-	// Footer
-	lines = append(lines, pal.Dim.Render(strings.Repeat("─", int(width)-2)))
 	if sm.mode == SettingsModeFilter {
-		lines = append(lines, pal.Dim.Render("  type to filter · Esc exit filter"))
-	} else {
-		lines = append(lines, pal.Dim.Render("  ↑/↓ select · ←/→ change · Enter cycle · / filter · Esc close"))
+		lines = append(lines, pal.Dim.Render("  "+i18n.T("settings.filter_hint")))
 	}
 
 	return lines
@@ -101,7 +89,7 @@ func (sm *SettingsModal) Update(msg core.Msg) core.Cmd {
 			// 退格
 			if data == "backspace" || data == "\x7f" {
 				if len(sm.filterQuery) > 0 {
-					sm.filterQuery = sm.filterQuery[:len(sm.filterQuery)-1]
+					sm.filterQuery = trimLastRune(sm.filterQuery)
 					sm.applyFilter()
 				}
 				return nil
@@ -163,7 +151,18 @@ func (sm *SettingsModal) applyFilter() {
 	sm.list = newList
 }
 
+// trimLastRune 删除最后一个 Unicode 字符（按 rune 而非字节），
+// 用于支持中文等多字节输入。
+func trimLastRune(s string) string {
+	r := []rune(s)
+	if len(r) == 0 {
+		return s
+	}
+	return string(r[:len(r)-1])
+}
+
 // isPrintableKey 判断是否是可打印字符键。
+// 支持多字节 UTF-8（如中文输入法提交的字符）。
 func isPrintableKey(data string) bool {
 	if len(data) == 0 {
 		return false
@@ -175,11 +174,13 @@ func isPrintableKey(data string) bool {
 		"space", "ctrl+c", "ctrl+q", "ctrl+d":
 		return false
 	}
-	// 单字符且非控制字符
-	if len(data) == 1 && data[0] >= 0x20 && data[0] < 0x7f {
-		return true
+	// 接受可打印字符，包括多字节 UTF-8
+	for _, r := range data {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
 	}
-	return false
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -199,12 +200,12 @@ func ShowSettingsModal(bus *UIBus, entries []component.SettingEntry, onChange fu
 	}
 	// 使用 ModalWindow chrome 包装
 	return ShowModalWindow(bus, modal, ModalWindowConfig{
-		Title:     "Settings",
+		Title:     i18n.T("settings.title"),
 		Shortcuts: []ModalShortcut{
-			{Keys: "↑/↓", Label: "select"},
-			{Keys: "←/→", Label: "change"},
-			{Keys: "/", Label: "filter"},
-			{Keys: "Esc", Label: "close"},
+			{Keys: "↑/↓", Label: i18n.T("settings.shortcut_select")},
+			{Keys: "←/→", Label: i18n.T("settings.shortcut_change")},
+			{Keys: "/", Label: i18n.T("settings.shortcut_filter")},
+			{Keys: "Esc", Label: i18n.T("settings.shortcut_close")},
 		},
 		WidthPct:  60,
 		HeightPct: 70,
@@ -217,56 +218,56 @@ func BuildDefaultSettingsEntries() []component.SettingEntry {
 	return []component.SettingEntry{
 		{
 			Key:   "theme",
-			Label: "Theme",
+			Label: i18n.T("settings.label_theme"),
 			Options: []component.SettingOption{
-				{Value: "dark", Label: "Dark"},
-				{Value: "light", Label: "Light"},
-				{Value: "system", Label: "System"},
+				{Value: "dark", Label: i18n.T("settings.opt_dark")},
+				{Value: "light", Label: i18n.T("settings.opt_light")},
+				{Value: "system", Label: i18n.T("settings.opt_system")},
 			},
 			Current:     0,
-			Description: "color scheme",
+			Description: i18n.T("settings.desc_theme"),
 		},
 		{
 			Key:   "mode",
-			Label: "Agent Mode",
+			Label: i18n.T("settings.label_mode"),
 			Options: []component.SettingOption{
-				{Value: "code", Label: "Code"},
-				{Value: "general", Label: "General"},
+				{Value: "code", Label: i18n.T("settings.opt_code")},
+				{Value: "general", Label: i18n.T("settings.opt_general")},
 			},
 			Current:     0,
-			Description: "agent behavior",
+			Description: i18n.T("settings.desc_mode"),
 		},
 		{
 			Key:   "thinking",
-			Label: "Show Thinking",
+			Label: i18n.T("settings.label_thinking"),
 			Options: []component.SettingOption{
-				{Value: "off", Label: "Off"},
-				{Value: "compact", Label: "Compact"},
-				{Value: "full", Label: "Full"},
+				{Value: "off", Label: i18n.T("settings.opt_off")},
+				{Value: "compact", Label: i18n.T("settings.opt_compact")},
+				{Value: "full", Label: i18n.T("settings.opt_full")},
 			},
 			Current:     0,
-			Description: "reasoning display",
+			Description: i18n.T("settings.desc_thinking"),
 		},
 		{
 			Key:   "yolo",
-			Label: "Auto-approve",
+			Label: i18n.T("settings.label_yolo"),
 			Options: []component.SettingOption{
-				{Value: "off", Label: "Off"},
-				{Value: "on", Label: "On"},
+				{Value: "off", Label: i18n.T("settings.opt_off")},
+				{Value: "on", Label: i18n.T("settings.opt_on")},
 			},
 			Current:     0,
-			Description: "skip approval prompts",
+			Description: i18n.T("settings.desc_yolo"),
 		},
 		{
 			Key:   "diff",
-			Label: "Diff Preview",
+			Label: i18n.T("settings.label_diff"),
 			Options: []component.SettingOption{
-				{Value: "off", Label: "Off"},
-				{Value: "inline", Label: "Inline"},
-				{Value: "overlay", Label: "Overlay"},
+				{Value: "off", Label: i18n.T("settings.opt_off")},
+				{Value: "inline", Label: i18n.T("settings.opt_inline")},
+				{Value: "overlay", Label: i18n.T("settings.opt_overlay")},
 			},
 			Current:     1,
-			Description: "pre-edit diff display",
+			Description: i18n.T("settings.desc_diff"),
 		},
 	}
 }

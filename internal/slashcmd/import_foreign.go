@@ -17,6 +17,10 @@ import (
 //   /import-foreign <path>         — import a specific foreign session file
 //   /import-foreign scan           — rescan for foreign sessions
 func handleImportForeign(sctx *SlashContext, parts []string) bool {
+	if sctx.Runtime.Busy.Load() {
+		sctx.UI.App.PrintSystem(i18n.T("system.busy"))
+		return true
+	}
 	covoAgent := sctx.Runtime.Agents.Current()
 	if covoAgent == nil {
 		sctx.UI.App.PrintSystem(i18n.T("system.no_active_agent"))

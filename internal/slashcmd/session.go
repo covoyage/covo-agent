@@ -16,6 +16,10 @@ import (
 
 // handleSession handles /session
 func handleSession(sctx *SlashContext, parts []string) bool {
+	if sctx.Runtime.Busy.Load() {
+		sctx.UI.App.PrintSystem(i18n.T("system.busy"))
+		return true
+	}
 	mgr := sctx.Runtime.Agents.Current()
 	if mgr == nil {
 		return true
@@ -179,6 +183,10 @@ func handleResume(sctx *SlashContext, parts []string) bool {
 
 // handleImport handles /import
 func handleImport(sctx *SlashContext, parts []string) bool {
+	if sctx.Runtime.Busy.Load() {
+		sctx.UI.App.PrintSystem(i18n.T("system.busy"))
+		return true
+	}
 	covoAgent := sctx.Runtime.Agents.Current()
 	if covoAgent == nil {
 		sctx.UI.App.PrintSystem(i18n.T("system.no_active_agent"))

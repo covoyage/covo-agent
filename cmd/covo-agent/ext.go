@@ -27,7 +27,7 @@ func newExtCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("home dir: %w", err)
 			}
-			extDir := filepath.Join(homeDir, ".covo-agent", "extensions")
+			extDir := filepath.Join(homeDir, "extensions")
 			mgr := extension.NewManager(extDir)
 			if err := mgr.Discover(context.Background()); err != nil {
 				return fmt.Errorf("discover extensions: %w", err)
@@ -61,7 +61,7 @@ func newExtCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("home dir: %w", err)
 			}
-			extDir := filepath.Join(homeDir, ".covo-agent", "extensions")
+			extDir := filepath.Join(homeDir, "extensions")
 			mgr := extension.NewManager(extDir)
 			if err := mgr.Discover(context.Background()); err != nil {
 				return fmt.Errorf("discover extensions: %w", err)
@@ -106,7 +106,7 @@ func newExtCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("home dir: %w", err)
 			}
-			extDir := filepath.Join(homeDir, ".covo-agent", "extensions")
+			extDir := filepath.Join(homeDir, "extensions")
 			mgr := extension.NewManager(extDir)
 			if err := mgr.Discover(context.Background()); err != nil {
 				return fmt.Errorf("discover extensions: %w", err)
@@ -135,7 +135,7 @@ func newExtCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("home dir: %w", err)
 			}
-			extDir := filepath.Join(homeDir, ".covo-agent", "extensions")
+			extDir := filepath.Join(homeDir, "extensions")
 			mgr := extension.NewManager(extDir)
 			if err := mgr.Reload(context.Background()); err != nil {
 				return fmt.Errorf("reload: %w", err)

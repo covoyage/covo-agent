@@ -1002,7 +1002,7 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 	}
 	// Runtime extensions: load tools from ~/.covo-agent/extensions/.
 	if cfg.HomeDir != "" {
-		extDir := filepath.Join(cfg.HomeDir, ".covo-agent", "extensions")
+		extDir := filepath.Join(cfg.HomeDir, "extensions")
 		extMgr := extension.NewManager(extDir)
 		extensions = append(extensions, extension.NewAgentExtension(extMgr))
 	}

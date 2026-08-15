@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/covoyage/covonaut/tui/terminal"
+
+	"github.com/covoyage/covo-agent/internal/i18n"
 )
 
 // ---------------------------------------------------------------------------
@@ -410,7 +412,7 @@ func DefaultActions(terminalCtx *TerminalContext) []ActionDef {
 		{
 			ID:          ActionOpenSessionTree,
 			Label:       "tree",
-			Description: "Open session tree",
+			Description: i18n.T("keybinding.session_tree"),
 			DefaultKeys: []terminal.KeyID{"ctrl+y"},
 			Category:    CatPanels,
 			Context:     WhenAgentScreen,
@@ -418,7 +420,7 @@ func DefaultActions(terminalCtx *TerminalContext) []ActionDef {
 		{
 			ID:          ActionOpenChangedFiles,
 			Label:       "files",
-			Description: "Show changed files tree",
+			Description: i18n.T("keybinding.changed_files"),
 			DefaultKeys: []terminal.KeyID{"ctrl+g"},
 			Category:    CatPanels,
 			Context:     WhenAgentScreen,

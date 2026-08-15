@@ -2,10 +2,12 @@ package slashcmd
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/covoyage/covonaut/agentcore"
-	"github.com/covoyage/covonaut/tui/component"
+	"github.com/covoyage/covonaut/tui/chat"
+	"github.com/covoyage/covonaut/tui/terminal"
 
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/evolution"
@@ -99,6 +101,8 @@ var slashDispatch = map[string]slashHandler{
 	"import-foreign":    handleImportForeign,
 	"mermaid":           handleMermaid,
 	"marketplace":       handleMarketplace,
+	"settings":          handleSettings,
+	"prompts":           handlePrompts,
 }
 
 // HandleSlashCommand is the main entry point for slash command processing.
@@ -156,9 +160,92 @@ func handleSkillInvoke(sctx *SlashContext, parts []string) bool {
 }
 
 func handleHelp(sctx *SlashContext, parts []string) bool {
-	help := component.NewKeyHelp(sctx.UI.App.Keybindings())
-	help.SetTitle("Keybindings — Esc to close")
+	registerSlashHelpBindings(sctx.UI.App.Keybindings())
+	help := agentui.NewHelpPanel(
+		i18n.T("help.title_slash"),
+		sctx.UI.App.Keybindings(),
+		helpVisibleRows(sctx.UI.App),
+	)
 	agentui.NewUIBus(sctx.UI.App).ShowPanel(help, 70, 70)
+	return true
+}
+
+// helpVisibleRows computes how many body lines fit inside the 70%-height
+// panel (title + separator + scroll indicator are pinned, so they are
+// subtracted).
+func helpVisibleRows(app *chat.ChatApp) int64 {
+	if app == nil {
+		return 18
+	}
+	_, rows := app.TerminalSize()
+	if rows <= 0 {
+		return 18
+	}
+	n := rows*70/100 - 3
+	if n < 6 {
+		n = 6
+	}
+	return n
+}
+
+// registerSlashHelpBindings registers the slash commands as keybinding
+// definitions (with no bound keys) so they appear in the KeyHelp panel under
+// the "slash" group. Registration is idempotent.
+func registerSlashHelpBindings(km *terminal.KeybindingsManager) {
+	if km == nil {
+		return
+	}
+	if _, exists := km.All()["slash.help"]; exists {
+		return
+	}
+	seen := map[string]bool{}
+	for _, s := range BuildSlashSuggestions() {
+		word := strings.TrimSpace(s.InsertText)
+		if i := strings.IndexAny(word, " \t"); i >= 0 {
+			word = word[:i]
+		}
+		word = strings.TrimPrefix(word, "/")
+		if word == "" || seen[word] {
+			continue
+		}
+		seen[word] = true
+		usage := s.Label
+		if s.Description != "" {
+			usage = s.Label + " — " + s.Description
+		}
+		km.Register("slash."+strings.ReplaceAll(word, "/", "_"),
+			terminal.KeybindingDef{Description: usage})
+	}
+}
+
+// handleSettings handles /settings
+func handleSettings(sctx *SlashContext, parts []string) bool {
+	if sctx.UI.OpenSettings != nil {
+		sctx.UI.OpenSettings()
+	} else {
+		sctx.UI.App.PrintSystem(i18n.T("system.settings_unavailable"))
+	}
+	return true
+}
+
+// handlePrompts handles /prompts
+func handlePrompts(sctx *SlashContext, parts []string) bool {
+	if sctx.UI.OpenPromptQueue != nil {
+		sctx.UI.OpenPromptQueue()
+		return true
+	}
+	queue := sctx.Runtime.State.PromptQueue()
+	if queue == nil || queue.IsEmpty() {
+		sctx.UI.App.PrintSystem(i18n.T("system.prompts_empty"))
+		return true
+	}
+	entries := queue.All()
+	var b strings.Builder
+	b.WriteString(i18n.T("system.pending_prompts_header", "count", strconv.Itoa(len(entries))) + "\n")
+	for i, e := range entries {
+		b.WriteString(fmt.Sprintf("  %d. %s\n", i+1, truncate(e.Text, 120)))
+	}
+	sctx.UI.App.PrintSystem(b.String())
 	return true
 }
 
