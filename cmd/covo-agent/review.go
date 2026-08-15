@@ -10,6 +10,7 @@ import (
 
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/spf13/cobra"
 )
 
@@ -101,7 +102,7 @@ Be direct and focus on meaningful problems.`)
 				return fmt.Errorf("build provider %q: %w", providerType, err)
 			}
 
-			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelError)}))
 			workingDir, _ := os.Getwd()
 
 			covoAgent, err := agent.NewCovoAgent(agent.CovoAgentConfig{

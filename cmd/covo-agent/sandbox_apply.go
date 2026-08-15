@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/sandbox/ossandbox"
 )
 
@@ -25,7 +26,7 @@ func applySandboxIfRequested(opts *rootOptions, runtime *commandRuntime) {
 
 	// Create a minimal logger that writes to stderr
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: logutil.ResolveLevel(slog.LevelInfo),
 	}))
 
 	workspace, err := os.Getwd()

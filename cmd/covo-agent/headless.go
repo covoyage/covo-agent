@@ -12,6 +12,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli"
 	"github.com/covoyage/covo-agent/internal/headless"
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/mdstream"
 	"github.com/covoyage/covonaut/agentcore"
 )
@@ -45,7 +46,7 @@ func runHeadless(opts *headless.Options) {
 		log.Fatalf("build provider %q: %v", providerStr, err)
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelError)}))
 	workingDir, _ := os.Getwd()
 
 	covoAgent, err := agent.NewCovoAgent(agent.CovoAgentConfig{

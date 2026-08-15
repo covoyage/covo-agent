@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/covoyage/covo-agent/internal/evolution"
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/plugin"
 	"github.com/covoyage/covo-agent/internal/plugin/builtin"
 	"github.com/spf13/cobra"
@@ -80,7 +81,7 @@ func newPluginToggleCommand(runtime *commandRuntime, enable bool) *cobra.Command
 }
 
 func withPluginSystem(homeDir string, logOutput io.Writer, run func(*plugin.System) error) error {
-	logger := slog.New(slog.NewTextHandler(logOutput, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	logger := slog.New(slog.NewTextHandler(logOutput, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelWarn)}))
 	system, err := plugin.NewSystem(context.Background(), plugin.SystemConfig{HomeDir: homeDir, Logger: logger})
 	if err != nil {
 		return fmt.Errorf("plugin system: %w", err)

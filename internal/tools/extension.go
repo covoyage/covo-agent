@@ -11,6 +11,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/goal"
 	"github.com/covoyage/covo-agent/internal/inbox"
 	"github.com/covoyage/covo-agent/internal/kanban"
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/sandbox"
 	toolscanvas "github.com/covoyage/covo-agent/internal/tools/canvas"
 	toolscodegraph "github.com/covoyage/covo-agent/internal/tools/codegraph"
@@ -126,7 +127,7 @@ type ExtensionConfig struct {
 func NewExtension(cfg ExtensionConfig) *Extension {
 	logger := cfg.Logger
 	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelInfo)}))
 	}
 
 	// Build SubagentRunner if config is non-zero

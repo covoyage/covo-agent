@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/covoyage/covo-agent/internal/logutil"
 )
 
 const defaultIdleTimeout = 10 * time.Minute
@@ -46,7 +48,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		clients:   make(map[ClientID]*Client),
 		brokenSet: make(map[ClientID]bool),
 		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
+			Level: logutil.ResolveLevel(slog.LevelInfo),
 		})),
 		active:        active,
 		idleTimeout:   cfg.IdleTimeout,

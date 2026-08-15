@@ -27,6 +27,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/crash"
 	"github.com/covoyage/covo-agent/internal/diff"
 	"github.com/covoyage/covo-agent/internal/i18n"
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/safego"
 	"github.com/covoyage/covo-agent/internal/slashcmd"
 	toolsplanning "github.com/covoyage/covo-agent/internal/tools/planning"
@@ -61,7 +62,7 @@ func configureInteractiveLogging(writer io.Writer) *slog.Logger {
 	if writer == nil {
 		writer = io.Discard
 	}
-	logger := slog.New(slog.NewTextHandler(writer, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	logger := slog.New(slog.NewTextHandler(writer, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelWarn)}))
 	slog.SetDefault(logger)
 	log.SetOutput(writer)
 	return logger

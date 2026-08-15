@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/safego"
 )
 
@@ -89,7 +90,7 @@ func NewClient(serverDef *ServerDef, workspaceRoot string) *Client {
 		lastOpen:      make(map[string]time.Time),
 		pending:       make(map[int]chan rpcResult),
 		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
+			Level: logutil.ResolveLevel(slog.LevelInfo),
 		})),
 	}
 }

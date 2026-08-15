@@ -18,6 +18,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli"
 	"github.com/covoyage/covo-agent/internal/gateway"
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/plugin"
 	"github.com/covoyage/covo-agent/internal/plugin/builtin"
 	"github.com/spf13/cobra"
@@ -368,7 +369,7 @@ func startGateway(pidFile string) {
 		log.Fatalf("load config: %v", err)
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelInfo)}))
 
 	// Initialize plugin system
 	ctx := context.Background()

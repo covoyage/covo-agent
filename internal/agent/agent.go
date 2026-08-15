@@ -25,6 +25,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/hunk"
 	"github.com/covoyage/covo-agent/internal/i18n"
 	"github.com/covoyage/covo-agent/internal/lifecycle"
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/lsp"
 	"github.com/covoyage/covo-agent/internal/repomap"
 	"github.com/covoyage/covo-agent/internal/safego"
@@ -652,7 +653,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	if cfg.CuratorCfg.Enabled {
 		curatorLogger := cfg.Logger
 		if curatorLogger == nil {
-			curatorLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+			curatorLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelInfo)}))
 		}
 		ca.curator = evolution.NewCurator(skillsDir, skillUsage, cfg.CuratorCfg, curatorLogger)
 		// Link curator to memory for nudge operations
@@ -817,7 +818,7 @@ func (ca *CovoAgent) wrapContextEngine(cfg CovoAgentConfig) {
 func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 	logger := cfg.Logger
 	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelWarn)}))
 	}
 
 	execMode := agentcore.ModeSerial

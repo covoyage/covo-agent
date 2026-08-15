@@ -12,6 +12,7 @@ import (
 
 	acpadapt "github.com/covoyage/covo-agent/internal/acp"
 	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/spf13/cobra"
 )
 
@@ -50,7 +51,7 @@ func newACPCommand() *cobra.Command {
 				logFile = os.Stderr
 			}
 			logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{
-				Level: slog.LevelWarn,
+				Level: logutil.ResolveLevel(slog.LevelWarn),
 			}))
 
 			if err := cli.LoadDotEnv(); err != nil {

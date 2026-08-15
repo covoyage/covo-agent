@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/plugin"
 	"github.com/covoyage/covo-agent/internal/plugin/platforms/messageutil"
 )
@@ -46,7 +47,7 @@ type Adapter struct {
 }
 
 func New() *Adapter {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelInfo)}))
 
 	return &Adapter{
 		webhookURL: strings.TrimSpace(os.Getenv("DINGTALK_WEBHOOK_URL")),

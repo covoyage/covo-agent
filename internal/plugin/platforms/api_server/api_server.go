@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/plugin"
 )
 
@@ -30,7 +31,7 @@ type Adapter struct {
 }
 
 func New() *Adapter {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelInfo)}))
 
 	addr := strings.TrimSpace(os.Getenv("API_SERVER_LISTEN_ADDR"))
 	if addr == "" {

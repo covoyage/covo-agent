@@ -10,6 +10,7 @@ import (
 
 	"github.com/covoyage/covonaut/agentcore"
 	"github.com/covoyage/covo-agent/internal/agent"
+	"github.com/covoyage/covo-agent/internal/logutil"
 )
 
 // MockTurn defines one LLM response in the agent loop.
@@ -61,7 +62,7 @@ func New(t *testing.T, sc *Scenario) *Harness {
 	homeDir := t.TempDir()
 
 	mock := newMockProvider(sc)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelError)}))
 
 	covoAgent, err := agent.NewCovoAgent(agent.CovoAgentConfig{
 		Mode:         agent.ModeGeneral,

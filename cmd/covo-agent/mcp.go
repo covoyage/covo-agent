@@ -13,6 +13,7 @@ import (
 
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/logutil"
 	mcpserver "github.com/covoyage/covo-agent/internal/mcpserver"
 	"github.com/covoyage/covo-agent/internal/plugin"
 	"github.com/covoyage/covo-agent/internal/plugin/builtin"
@@ -229,7 +230,7 @@ func cmdMCPServe() {
 		logFile = os.Stderr
 	}
 	logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{
-		Level: slog.LevelWarn,
+		Level: logutil.ResolveLevel(slog.LevelWarn),
 	}))
 
 	if err := cli.LoadDotEnv(); err != nil {

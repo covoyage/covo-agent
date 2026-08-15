@@ -9,6 +9,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/cli"
 	"github.com/covoyage/covo-agent/internal/headless"
 	"github.com/covoyage/covo-agent/internal/i18n"
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/plugin"
 	"github.com/spf13/cobra"
 )
@@ -25,6 +26,9 @@ type rootOptions struct {
 	appendSystemPrompt string
 	sessionID          string
 	sandbox            string
+
+	// Logging
+	logLevel string
 
 	// Headless mode flags
 	headless        bool
@@ -65,6 +69,9 @@ func newRootCommand() *cobra.Command {
 			return fmt.Errorf("unknown command %q for %q%s", args[0], cmd.CommandPath(), sugg)
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if err := applyLogLevelFlag(opts); err != nil {
+				return err
+			}
 			if err := initializeCommandRuntime(runtime); err != nil {
 				return err
 			}
@@ -107,6 +114,7 @@ func newRootCommand() *cobra.Command {
 	flags.StringVar(&opts.appendSystemPrompt, "append-system-prompt", "", "append content to the system prompt")
 	flags.StringVar(&opts.sessionID, "session-id", "", "resume or create a session with the given ID")
 	flags.StringVar(&opts.sandbox, "sandbox", "", "OS-level sandbox profile: workspace, read-only, strict, devbox, off, or custom profile name")
+	flags.StringVar(&opts.logLevel, "log-level", "", "log level: DEBUG, INFO, WARN, or ERROR (default: per-command)")
 
 	// Headless mode flags
 	flags.BoolVar(&opts.headless, "headless", false, "run in non-interactive headless mode (no TUI)")
@@ -119,6 +127,10 @@ func newRootCommand() *cobra.Command {
 	flags.DurationVar(&opts.headlessTimeout, "timeout", 0, "timeout for headless mode execution")
 
 	root.SuggestionsMinimumDistance = 2
+
+	_ = root.RegisterFlagCompletionFunc("log-level", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		return []string{"DEBUG", "INFO", "WARN", "ERROR"}, cobra.ShellCompDirectiveNoFileComp
+	})
 
 	root.AddCommand(newModelCommand(runtime))
 	root.AddCommand(newVersionCommand())
@@ -172,6 +184,18 @@ func newRootCommand() *cobra.Command {
 	}
 
 	return root
+}
+
+func applyLogLevelFlag(opts *rootOptions) error {
+	if opts.logLevel == "" {
+		return nil
+	}
+	lvl, err := logutil.ParseLevel(opts.logLevel)
+	if err != nil {
+		return err
+	}
+	logutil.SetLevel(lvl)
+	return nil
 }
 
 func initializeCommandRuntime(runtime *commandRuntime) error {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/plugin"
 )
 
@@ -25,7 +26,7 @@ type Adapter struct {
 }
 
 func New() *Adapter {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelInfo)}))
 
 	relaysStr := strings.TrimSpace(os.Getenv("NOSTR_RELAYS"))
 	var relays []string

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/plugin"
 	"github.com/covoyage/covo-agent/internal/safego"
 	"github.com/gobwas/ws"
@@ -33,15 +34,15 @@ type Adapter struct {
 	httpClient *http.Client
 	logger     *slog.Logger
 
-	mu          sync.Mutex
-	running     bool
-	cancel      context.CancelFunc
-	onMessage   func(plugin.IncomingMessage)
-	sequence    *int64
+	mu        sync.Mutex
+	running   bool
+	cancel    context.CancelFunc
+	onMessage func(plugin.IncomingMessage)
+	sequence  *int64
 }
 
 func New() *Adapter {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelInfo)}))
 
 	return &Adapter{
 		botToken:   strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN")),

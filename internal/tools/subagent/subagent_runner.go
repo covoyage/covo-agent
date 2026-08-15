@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/safego"
 	"github.com/covoyage/covonaut/agentcore"
 )
@@ -414,7 +415,7 @@ const (
 // NewSubagentRunner creates a new runner with the given config.
 func NewSubagentRunner(cfg SubagentRunnerConfig) *SubagentRunner {
 	if cfg.Logger == nil {
-		cfg.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+		cfg.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelInfo)}))
 	}
 	if cfg.HeartbeatInterval == 0 && cfg.HeartbeatFn != nil {
 		cfg.HeartbeatInterval = 30 * time.Second

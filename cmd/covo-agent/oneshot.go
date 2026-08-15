@@ -10,6 +10,7 @@ import (
 
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/logutil"
 )
 
 func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput bool, systemPrompt, appendSystemPrompt string) {
@@ -43,7 +44,7 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 		log.Fatalf("build provider %q: %v", providerStr, err)
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelError)}))
 	workingDir, _ := os.Getwd()
 
 	covoAgent, err := agent.NewCovoAgent(agent.CovoAgentConfig{

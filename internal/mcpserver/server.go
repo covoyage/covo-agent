@@ -10,6 +10,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/safego"
 	"github.com/covoyage/covonaut/agentcore"
 )
@@ -130,7 +131,7 @@ func NewServer(provider toolBridge) *Server {
 	return &Server{
 		provider: provider,
 		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-			Level: slog.LevelWarn,
+			Level: logutil.ResolveLevel(slog.LevelWarn),
 		})),
 		scanner:    bufio.NewScanner(os.Stdin),
 		output:     os.Stdout,
