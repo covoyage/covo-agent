@@ -113,6 +113,12 @@ func (p *codexProvider) RunOpt(ctx context.Context, task, cwd string, opts RunOp
 		_ = cmd.Process.Kill()
 	}()
 
+	// waited is closed once the process has fully exited and its stderr has
+	// been flushed. cmd.Wait() is owned by the reader goroutine (see below):
+	// it must run only after stdout has been read to EOF, because Wait closes
+	// the stdout pipe's read end.
+	waited := make(chan struct{})
+
 	conn := &codexConn{
 		stdin:    stdin,
 		pending:  make(map[int64]chan json.RawMessage),
@@ -126,6 +132,12 @@ func (p *codexProvider) RunOpt(ctx context.Context, task, cwd string, opts RunOp
 	go func() {
 		defer close(readerDone)
 		readerErr = conn.readLoop(stdout)
+		// stdout is drained to EOF. Only now is it safe to call cmd.Wait():
+		// it closes the stdout pipe's read end (no reads pending) and blocks
+		// until the stderr copy goroutine has flushed, so the stderr tail read
+		// below is complete.
+		_ = cmd.Wait()
+		close(waited)
 		if !conn.resultSent.Load() {
 			// The process exited (or the stream died) before settling the
 			// turn — fail every in-flight request so the run loop and the
@@ -177,13 +189,11 @@ func (p *codexProvider) RunOpt(ctx context.Context, task, cwd string, opts RunOp
 
 	// Close stdin to end the wire; wait for the app-server to exit.
 	_ = stdin.Close()
-	waitCh := make(chan error, 1)
-	go func() { waitCh <- cmd.Wait() }()
 	select {
-	case <-waitCh:
+	case <-waited:
 	case <-time.After(5 * time.Second):
 		_ = cmd.Process.Kill()
-		<-waitCh
+		<-waited
 	}
 
 	if res.isError {
