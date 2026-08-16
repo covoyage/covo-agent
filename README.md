@@ -261,6 +261,24 @@ Everything a session does exports as an OTel trace: the session root span carrie
 
 > Note: traces carry raw prompt/completion content, which is what makes token/cost analysis useful. Do not point it at a backend you do not trust with your prompts.
 
+## Claude Code & Codex hooks
+
+covo-agent speaks the [Claude Code hooks protocol](https://docs.anthropic.com/en/docs/claude-code/hooks) and the [OpenAI Codex hooks](https://docs.openai.com/codex/hooks/) configuration format, so hooks you already run in either tool work unchanged:
+
+- `~/.claude/hooks.json` (user-level) and `<project>/.claude/hooks.json` (project-level) are loaded at startup; both the `Hooks` array format and the settings.json-style `hooks` map format are supported.
+- `~/.codex/hooks.json` (user-level) and `<project>/.codex/hooks.json` (project-level) are loaded at startup using the Codex `{"hooks": {"Event": [{ "matcher": ..., "hooks": [{ "type": "command", ... }]}]}}` format (only `command` handlers; `timeout`/`timeoutSec` in seconds; matcher `"*"` matches all tools).
+- Codex and Claude Code share the same camelCase event names, so hooks from both sources land in the same buckets and can be mixed freely: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop` (already honored by the stop gate), and `SessionStart`. `Notification`-style hooks can be registered as `Async`.
+- Hooks receive the standard JSON payload on stdin (`hook_event_name`, `session_id`, `cwd`, `tool_name`, `tool_input`, `tool_response`, `prompt`, `hook_input`, plus Codex's `model`, `permission_mode` — `plan`/`bypassPermissions`/`acceptEdits` — and `source`) and return a decision on stdout: `approve`/`allow` allows, `deny`/`block` stops the operation (PreToolUse blocks the tool call, UserPromptSubmit aborts the run), and `ask` is treated as fail-open.
+- The existing `COVO_ACCEPT_HOOKS` allowlist and per-hook timeout/circuit-breaker protections apply. With the default `COVO_ACCEPT_HOOKS=false`, a hook command runs only after it has been allowlisted (interactive confirmation or `COVO_ACCEPT_HOOKS=true`) — hook registration is skipped until then.
+- `.covo-agent-hooks.json`, the Claude Code `.claude/hooks.json`, and the Codex `.codex/hooks.json` files are all hot-reloaded (500ms poll), so policy changes take effect without a restart.
+
+| Variable | Purpose |
+| --- | --- |
+| `COVO_CLAUDE_HOOKS_DISABLED` | Set `true` to skip loading Claude Code hooks. |
+| `COVO_CLAUDE_HOOKS_PATH` | Extra hooks files, colon-separated, loaded after the user/project files. |
+| `COVO_CODEX_HOOKS_DISABLED` | Set `true` to skip loading Codex hooks. |
+| `COVO_CODEX_HOOKS_PATH` | Extra hooks files, colon-separated, loaded after the user/project files. |
+
 ## Troubleshooting
 
 Run the environment and configuration checks:

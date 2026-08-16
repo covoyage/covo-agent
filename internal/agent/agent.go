@@ -618,7 +618,26 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	ca.thinkScrubber = NewStreamingThinkScrubber()
 	ca.shellHooks = NewShellHookManager(cfg.HomeDir, envBool("COVO_ACCEPT_HOOKS", false))
 	ca.shellHooks.LoadProjectHooksFile(cfg.WorkingDir)
-	ca.shellHooks.StartHotReload(cfg.WorkingDir)
+	var claudeHookPaths []string
+	if !envBool("COVO_CLAUDE_HOOKS_DISABLED", false) {
+		claudeHookPaths = claudeHooksPaths(cfg.WorkingDir, cfg.HomeDir)
+		if n := ca.shellHooks.LoadClaudeHooks(cfg.WorkingDir, cfg.HomeDir); n > 0 {
+			if cfg.Logger != nil {
+				cfg.Logger.Info("loaded Claude Code hooks", "count", n)
+			}
+		}
+	}
+	var codexHookPaths []string
+	if !envBool("COVO_CODEX_HOOKS_DISABLED", false) {
+		codexHookPaths = codexHooksPaths(cfg.WorkingDir, cfg.HomeDir)
+		if n := ca.shellHooks.LoadCodexHooks(cfg.WorkingDir, cfg.HomeDir); n > 0 {
+			if cfg.Logger != nil {
+				cfg.Logger.Info("loaded Codex hooks", "count", n)
+			}
+		}
+	}
+	reloadPaths := append(append([]string{}, claudeHookPaths...), codexHookPaths...)
+	ca.shellHooks.StartHotReload(cfg.WorkingDir, reloadPaths...)
 	// File-level snapshot service (isolated git repo, content-addressed).
 	// Enables /undo, revert-to-snapshot, and /rewind (chat + workspace rollback).
 	// Non-fatal if git unavailable.
@@ -744,6 +763,13 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	// Auto-connect MCP servers defined in config.
 	if len(cfg.MCPServers) > 0 && ca.agentTools != nil {
 		ca.agentTools.AutoConnectMCPServers(context.Background(), cfg.MCPServers)
+	}
+
+	// Claude Code protocol: fire SessionStart once the session is set up.
+	// Hook failures are non-fatal (the agent still starts); async hooks run
+	// in the background and never block construction.
+	if ca.shellHooks != nil {
+		ca.shellHooks.Invoke("SessionStart", ca.hookEventBase("SessionStart"))
 	}
 
 	return ca, nil
@@ -1257,6 +1283,12 @@ func (ca *CovoAgent) Run(ctx context.Context, input string) (result string, err 
 		}
 	}
 
+	// Claude Code protocol: UserPromptSubmit fires on every user message
+	// before the run starts. A "deny"/"block" decision aborts the run.
+	if err := ca.claudeHooksCheckUserPrompt(input); err != nil {
+		return "", err
+	}
+
 	result, err = ca.core.Run(ctx, input)
 
 	if ca.trajectory != nil {
@@ -1308,6 +1340,12 @@ func (ca *CovoAgent) RunDirectWithSession(ctx context.Context, input, sessionID 
 			err = fmt.Errorf("agent panic recovered: %v", r)
 		}
 	}()
+
+	// Claude Code protocol: headless/oneshot inputs get the same
+	// UserPromptSubmit gate as interactive runs.
+	if err := ca.claudeHooksCheckUserPrompt(input); err != nil {
+		return "", err
+	}
 
 	return ca.Core().Run(ctx, input)
 }

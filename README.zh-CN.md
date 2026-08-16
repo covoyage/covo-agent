@@ -261,6 +261,24 @@ export COVO_OTEL_HEADERS="Authorization: Bearer pk-lf-你的公钥"
 
 > 注意：trace 会携带原始 prompt/completion 内容，这正是 token 成本分析的依据。请勿指向你不信任的观测后端。
 
+## Claude Code 与 Codex hooks
+
+covo-agent 兼容 [Claude Code hooks 协议](https://docs.anthropic.com/en/docs/claude-code/hooks) 与 [OpenAI Codex hooks](https://docs.openai.com/codex/hooks/) 配置格式，你在两个工具里已配置的 hooks 均可原样复用：
+
+- 启动时加载 `~/.claude/hooks.json`（用户级）与 `<项目>/.claude/hooks.json`（项目级）；既支持 `Hooks` 数组格式，也支持 settings.json 风格的 `hooks` map 格式。
+- 启动时加载 `~/.codex/hooks.json`（用户级）与 `<项目>/.codex/hooks.json`（项目级），采用 Codex 的 `{"hooks": {"Event": [{ "matcher": ..., "hooks": [{ "type": "command", ... }]}]}}` 格式（仅支持 `command` 处理器；`timeout`/`timeoutSec` 单位为秒；matcher 为 `"*"` 时匹配所有工具）。
+- Codex 与 Claude Code 使用相同的驼峰事件名，两个来源的 hook 会落入同一桶并可自由混用：`PreToolUse`、`PostToolUse`、`UserPromptSubmit`、`Stop`（stop gate 已支持）与 `SessionStart`。通知类 hook 可声明为 `Async`。
+- hook 通过 stdin 收到标准 JSON 载荷（`hook_event_name`、`session_id`、`cwd`、`tool_name`、`tool_input`、`tool_response`、`prompt`、`hook_input`，以及 Codex 的 `model`、`permission_mode`——`plan`/`bypassPermissions`/`acceptEdits`——与 `source`），并在 stdout 返回决策：`approve`/`allow` 放行，`deny`/`block` 阻止操作（PreToolUse 阻止工具调用，UserPromptSubmit 中止本次运行），`ask` 按失败放行处理。
+- 沿用现有的 `COVO_ACCEPT_HOOKS` 白名单与超时/熔断保护。默认 `COVO_ACCEPT_HOOKS=false` 时，hook 命令需先通过交互确认或 `COVO_ACCEPT_HOOKS=true` 加入白名单后才会执行——在此之前注册会被跳过。
+- `.covo-agent-hooks.json`、Claude Code 的 `.claude/hooks.json` 与 Codex 的 `.codex/hooks.json` 均支持热重载（500ms 轮询），策略变更无需重启生效。
+
+| 变量 | 说明 |
+| --- | --- |
+| `COVO_CLAUDE_HOOKS_DISABLED` | 设为 `true` 跳过加载 Claude Code hooks。 |
+| `COVO_CLAUDE_HOOKS_PATH` | 额外 hooks 文件，冒号分隔，在用户/项目文件之后加载。 |
+| `COVO_CODEX_HOOKS_DISABLED` | 设为 `true` 跳过加载 Codex hooks。 |
+| `COVO_CODEX_HOOKS_PATH` | 额外 hooks 文件，冒号分隔，在用户/项目文件之后加载。 |
+
 ## 故障排查
 
 检查环境和配置：

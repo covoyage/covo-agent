@@ -692,7 +692,113 @@ func (ca *CovoAgent) chainAfterToolCall() func(
 		ca.guardrailWarningAfterToolCall(),
 		ca.persistLargeResultAfterToolCall(),
 		ca.untrustedWrapAfterToolCall(),
+		ca.claudeHooksPostToolUse(),
 	)
+}
+
+// hookPermissionMode maps covo-agent's permission posture onto the Codex
+// permission_mode vocabulary: plan mode → "plan", COVO_ACCEPT_HOOKS=true →
+// "bypassPermissions", otherwise "acceptEdits".
+func hookPermissionMode(planMode bool) string {
+	switch {
+	case planMode:
+		return "plan"
+	case envBool("COVO_ACCEPT_HOOKS", false):
+		return "bypassPermissions"
+	default:
+		return "acceptEdits"
+	}
+}
+
+// hookEventBase builds a HookEvent with the common Claude Code/Codex payload
+// fields (hook_event_name, session_id, cwd, model, permission_mode, source).
+// Callers extend the returned event with event-specific fields (tool_name,
+// prompt, ...).
+func (ca *CovoAgent) hookEventBase(event string) *HookEvent {
+	var sessionID string
+	if sm := ca.SessionManager(); sm != nil {
+		sessionID = sm.CurrentID()
+	}
+	return &HookEvent{
+		EventName:      event,
+		SessionID:      sessionID,
+		Cwd:            ca.workDir,
+		Model:          ca.model,
+		PermissionMode: hookPermissionMode(ca.IsPlanMode()),
+		Source:         "covo-agent",
+	}
+}
+
+// claudeHooksCheckUserPrompt runs Claude Code "UserPromptSubmit" hooks for a
+// user-supplied input. A "deny"/"block" decision returns an error that aborts
+// the run. Shared by Run and RunDirect so headless/oneshot inputs get the same
+// protection as interactive ones.
+func (ca *CovoAgent) claudeHooksCheckUserPrompt(input string) error {
+	if strings.TrimSpace(input) == "" || ca.shellHooks == nil || !ca.shellHooks.HasEvent("UserPromptSubmit") {
+		return nil
+	}
+	ev := ca.hookEventBase("UserPromptSubmit")
+	ev.Prompt = input
+	if res := ca.shellHooks.Invoke("UserPromptSubmit", ev); res != nil && res.Blocked {
+		return fmt.Errorf("input blocked by UserPromptSubmit hook: %s", res.Reason)
+	}
+	return nil
+}
+
+// claudeHooksPreToolUse runs Claude Code "PreToolUse" hooks registered via
+// .claude/hooks.json before a tool executes. A "deny"/"block" decision blocks
+// the tool call with the hook's reason surfaced to the model.
+func (ca *CovoAgent) claudeHooksPreToolUse() func(
+	ctx context.Context, tc agentcore.ToolCall,
+) *agentcore.ToolCallOverride {
+	return func(ctx context.Context, tc agentcore.ToolCall) *agentcore.ToolCallOverride {
+		if ca.shellHooks == nil || !ca.shellHooks.HasEvent("PreToolUse") {
+			return nil
+		}
+		var input map[string]any
+		if tc.Arguments != "" {
+			_ = json.Unmarshal([]byte(tc.Arguments), &input)
+		}
+		ev := ca.hookEventBase("PreToolUse")
+		ev.ToolName = tc.Name
+		ev.ToolInput = input
+		res := ca.shellHooks.Invoke("PreToolUse", ev)
+		if res != nil && res.Blocked {
+			return &agentcore.ToolCallOverride{
+				Block:   true,
+				Result:  fmt.Sprintf("tool call blocked by PreToolUse hook: %s", res.Reason),
+				IsError: true,
+			}
+		}
+		return nil
+	}
+}
+
+// claudeHooksPostToolUse runs Claude Code "PostToolUse" hooks after a tool
+// returns. Post-execution hooks are notification/audit oriented, so their
+// decision is not applied — the original result is returned unchanged.
+func (ca *CovoAgent) claudeHooksPostToolUse() func(
+	ctx context.Context, tc agentcore.ToolCall, result *agentcore.ToolResult,
+) *agentcore.ToolResult {
+	return func(ctx context.Context, tc agentcore.ToolCall, result *agentcore.ToolResult) *agentcore.ToolResult {
+		if ca.shellHooks == nil || !ca.shellHooks.HasEvent("PostToolUse") {
+			return result
+		}
+		var input map[string]any
+		if tc.Arguments != "" {
+			_ = json.Unmarshal([]byte(tc.Arguments), &input)
+		}
+		var output string
+		if result != nil {
+			output = result.Result
+		}
+		ev := ca.hookEventBase("PostToolUse")
+		ev.ToolName = tc.Name
+		ev.ToolInput = input
+		ev.ToolResponse = output
+		ca.shellHooks.Invoke("PostToolUse", ev)
+		return result
+	}
 }
 
 func (ca *CovoAgent) rateLimitToolMiddleware() agentcore.Middleware {
@@ -732,18 +838,22 @@ func (ca *CovoAgent) doomloopBudgetBeforeHook() func(
 	}
 }
 
-// combinedBeforeToolCall chains the guardrail halt check and doomloop budget
-// check into a single BeforeToolCall handler.
+// combinedBeforeToolCall chains the guardrail halt check, doomloop budget
+// check, and Claude Code PreToolUse hooks into a single BeforeToolCall handler.
 func (ca *CovoAgent) combinedBeforeToolCall() func(
 	ctx context.Context, tc agentcore.ToolCall,
 ) *agentcore.ToolCallOverride {
 	guardrailCheck := ca.guardrailHaltBeforeToolCall()
 	doomloopCheck := ca.doomloopBudgetBeforeHook()
+	claudeHookCheck := ca.claudeHooksPreToolUse()
 	return func(ctx context.Context, tc agentcore.ToolCall) *agentcore.ToolCallOverride {
 		if ov := guardrailCheck(ctx, tc); ov != nil {
 			return ov
 		}
 		if ov := doomloopCheck(ctx, tc); ov != nil {
+			return ov
+		}
+		if ov := claudeHookCheck(ctx, tc); ov != nil {
 			return ov
 		}
 		return nil

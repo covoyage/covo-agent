@@ -202,9 +202,12 @@ func (h *stopGateHook) tryExternalStopHook(arc *agentcore.AgentRunContext) bool 
 	}
 
 	payload := &HookEvent{
-		EventName: "stop",
-		SessionID: sessionID,
-		Cwd:       cwd,
+		EventName:      "stop",
+		SessionID:      sessionID,
+		Cwd:            cwd,
+		Model:          h.ca.model,
+		Source:         "covo-agent",
+		PermissionMode: hookPermissionMode(h.ca.IsPlanMode()),
 		Extra: map[string]any{
 			"last_assistant_message": lastAssistant,
 			"stop_attempt":           h.stopHookReentryCount + 1,
