@@ -261,6 +261,7 @@ func TestCodexHooks_MatcherStarMatchesAllTools(t *testing.T) {
 }
 
 func TestCodexHooks_PayloadIncludesModelPermissionAndSource(t *testing.T) {
+	requirePOSIXShell(t)
 	dir := t.TempDir()
 	out := filepath.Join(dir, "payload.json")
 	m := NewShellHookManager(t.TempDir(), true)

@@ -5,11 +5,23 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/covoyage/covonaut/agentcore"
 )
+
+// requirePOSIXShell skips the test on Windows, where the hook command relies
+// on POSIX shell utilities (touch, cat) that are not on the default PATH. The
+// hook payload/execution protocol is platform-neutral and is fully covered by
+// the Linux/macOS jobs.
+func requirePOSIXShell(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("hook command requires POSIX shell utilities (touch/cat), unavailable on Windows")
+	}
+}
 
 // --- normalizeEvent ---
 
@@ -264,6 +276,7 @@ func TestClaudeHooksPreToolUse_NoHooks(t *testing.T) {
 }
 
 func TestClaudeHooksPostToolUse_ExecutesAndKeepsResult(t *testing.T) {
+	requirePOSIXShell(t)
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "post-called")
 	m := NewShellHookManager(t.TempDir(), true)
@@ -285,6 +298,7 @@ func TestClaudeHooksPostToolUse_ExecutesAndKeepsResult(t *testing.T) {
 }
 
 func TestClaudeHooksPostToolUse_PayloadIncludesToolResponse(t *testing.T) {
+	requirePOSIXShell(t)
 	dir := t.TempDir()
 	out := filepath.Join(dir, "payload.json")
 	m := NewShellHookManager(t.TempDir(), true)
