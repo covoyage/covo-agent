@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -162,21 +163,30 @@ func TestBuildOTLP(t *testing.T) {
 }
 
 func TestSend(t *testing.T) {
+	var mu sync.Mutex
 	var receivedPayload map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/traces" {
 			t.Errorf("expected path /v1/traces, got %s", r.URL.Path)
 		}
-		json.NewDecoder(r.Body).Decode(&receivedPayload)
+		var payload map[string]any
+		json.NewDecoder(r.Body).Decode(&payload)
+		mu.Lock()
+		receivedPayload = payload
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer ts.Close()
 
 	store := newTestStore(t)
+	// ExportInterval must reach back further than the audit store's second
+	// granularity: entries logged just before a second boundary would
+	// otherwise be excluded by the Since filter.
 	exporter := New(Config{
-		Enabled:     true,
-		Endpoint:    ts.URL,
-		ServiceName: "test",
+		Enabled:        true,
+		Endpoint:       ts.URL,
+		ServiceName:    "test",
+		ExportInterval: time.Minute,
 	}, store)
 
 	store.Log("tool:start", "s1", "test_tool", "a1", nil)
@@ -191,6 +201,8 @@ func TestSend(t *testing.T) {
 		t.Fatalf("ExportNow: %v", err)
 	}
 
+	mu.Lock()
+	defer mu.Unlock()
 	if receivedPayload == nil {
 		t.Fatal("expected non-nil received payload")
 	}

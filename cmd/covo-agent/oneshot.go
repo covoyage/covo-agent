@@ -11,6 +11,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli"
 	"github.com/covoyage/covo-agent/internal/logutil"
+	"github.com/covoyage/covo-agent/internal/telemetry"
 )
 
 func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput bool, systemPrompt, appendSystemPrompt string) {
@@ -77,8 +78,12 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 	}
 
 	ctx := context.Background()
-	result, err := covoAgent.Core().Run(ctx, prompt)
+	// Flush buffered OTel spans before the process exits; the fatal error
+	// path above already flushes explicitly.
+	defer telemetry.ShutdownOtel(context.Background())
+	result, err := covoAgent.RunDirect(ctx, prompt)
 	if err != nil {
+		telemetry.ShutdownOtel(context.Background())
 		log.Fatalf("agent run: %v", err)
 	}
 

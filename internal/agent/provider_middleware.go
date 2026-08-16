@@ -24,21 +24,25 @@ func ApplyProviderMiddleware(p agentcore.Provider, mws []ProviderMiddleware) age
 
 type costTrackingMiddleware struct {
 	tracker *CostTracker
+	metrics costMetricsSink
 	inner   agentcore.Provider
 	logger  *slog.Logger
 }
 
-func (m *costTrackingMiddleware) recordUsage(usage *agentcore.TokenUsage) {
+func (m *costTrackingMiddleware) recordUsage(ctx context.Context, model string, usage *agentcore.TokenUsage) {
 	if usage == nil || (usage.PromptTokens == 0 && usage.CompletionTokens == 0) {
 		return
 	}
-	m.tracker.RecordUsage(&CanonicalUsage{
+	result := m.tracker.RecordUsage(&CanonicalUsage{
 		InputTokens:      int(usage.PromptTokens),
 		OutputTokens:     int(usage.CompletionTokens),
 		CacheReadTokens:  0,
 		CacheWriteTokens: 0,
 		RequestCount:     1,
 	})
+	if m.metrics != nil && result != nil {
+		m.metrics.RecordCost(ctx, model, result.AmountUSD, string(result.Status), result.Label)
+	}
 	// Record raw prompt_tokens for context window percentage display.
 	m.tracker.RecordPromptTokens(usage.PromptTokens)
 }
@@ -47,7 +51,7 @@ func (m *costTrackingMiddleware) Complete(ctx context.Context, req *agentcore.Pr
 	resp, err := m.inner.Complete(ctx, req)
 	if err == nil && resp != nil {
 		u := resp.Usage
-		m.recordUsage(&u)
+		m.recordUsage(ctx, req.Model, &u)
 	}
 	return resp, err
 }
@@ -68,14 +72,14 @@ func (m *costTrackingMiddleware) Stream(ctx context.Context, req *agentcore.Prov
 			}
 			out <- delta
 		}
-		m.recordUsage(usage)
+		m.recordUsage(ctx, req.Model, usage)
 	}, m.logger)
 	return out, nil
 }
 
-func NewCostTrackingMiddleware(tracker *CostTracker, logger *slog.Logger) ProviderMiddleware {
+func NewCostTrackingMiddleware(tracker *CostTracker, metrics costMetricsSink, logger *slog.Logger) ProviderMiddleware {
 	return func(inner agentcore.Provider) agentcore.Provider {
-		return &costTrackingMiddleware{tracker: tracker, inner: inner, logger: logger}
+		return &costTrackingMiddleware{tracker: tracker, metrics: metrics, inner: inner, logger: logger}
 	}
 }
 

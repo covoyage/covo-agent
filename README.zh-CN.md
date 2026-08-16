@@ -236,7 +236,30 @@ covo-agent --headless -z "运行测试并修复一个失败" \
 
 `--yolo` 会关闭危险操作审批。只应在允许工具不受限制执行的隔离环境中使用。
 
-Telemetry 默认为关闭。设置 `COVO_OTEL_ENDPOINT` 或 `COVO_OTEL_ENABLED=true` 后启用。审计和 Telemetry 数据在导出前会经过敏感信息脱敏。
+## 可观测性
+
+Telemetry 默认为关闭。将 covo-agent 指向任意 OTLP HTTP 后端（例如 [Langfuse](https://langfuse.com)、Jaeger、Grafana 或 OpenTelemetry Collector）：
+
+```bash
+export COVO_OTEL_ENDPOINT=https://cloud.langfuse.com/api/public/otel
+export COVO_OTEL_HEADERS="Authorization: Bearer pk-lf-你的公钥"
+```
+
+会话内所有行为都会以 OTel trace 导出：会话根 span 携带 `session.id` / `langfuse.session.id`，每次 LLM 调用（agent 主回合、上下文压缩、标题生成、代码审查、guardrail、辅助 provider）都会成为带 GenAI 语义约定属性的 model span（`gen_ai.request.*`、`gen_ai.prompt`、`gen_ai.completion`、`gen_ai.usage.*`、`gen_ai.response.*`），后端可据此计算 token 用量与成本。Headless、one-shot、review、后台任务与 cron 调用同样会被追踪并在退出时刷新导出。
+
+### 环境变量
+
+| 变量 | 说明 |
+| --- | --- |
+| `COVO_OTEL_ENDPOINT` | 追踪用的 OTLP HTTP 端点（自动补 `/v1/traces`）。设置后同时隐含 `COVO_OTEL_ENABLED=true`。 |
+| `COVO_OTEL_HEADERS` | 附加 HTTP 头，例如 `Authorization: Bearer pk-lf-...`。分隔符支持 `,` `;` `:` `=`。 |
+| `COVO_OTEL_SERVICE_NAME` | `service.name` 资源属性（默认 `covo-agent`）。 |
+| `COVO_OTEL_METRICS_ENABLED` | 选择开启 OTLP metrics（`true`/`1`）。输出 GenAI 用量/耗时计数器、单次调用成本、错误计数（模型调用/工具执行/agent 运行）与进程指标。 |
+| `COVO_OTEL_METRICS_ENDPOINT` | metrics 端点；默认沿用 `COVO_OTEL_ENDPOINT`。Langfuse 仅接收 trace，metrics 需指向 Collector。 |
+| `COVO_OTEL_EXPORT_INTERVAL` | 周期性导出间隔（默认 `30s`）。 |
+| `COVO_OTEL_ENABLED` | 旧版开关；仅设置 `COVO_OTEL_ENDPOINT` 即可启用导出。 |
+
+> 注意：trace 会携带原始 prompt/completion 内容，这正是 token 成本分析的依据。请勿指向你不信任的观测后端。
 
 ## 故障排查
 

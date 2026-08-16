@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/covoyage/covo-agent/internal/agent/recovery"
+	"github.com/covoyage/covo-agent/internal/telemetry"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -45,6 +46,10 @@ func (m *errorRecoveryMiddleware) Complete(ctx context.Context, req *agentcore.P
 
 		// Mark credential exhausted for future calls (doesn't affect this call)
 		if ce.ShouldRotateCred && m.ca.credentialPool != nil {
+			_, ev := telemetry.StartEvent(ctx, "recovery", "rotate_credential",
+				agentcore.Attr("error", err.Error()),
+			)
+			ev.End()
 			if current := m.ca.GetActiveCredential(); current != nil {
 				m.ca.credentialPool.MarkExhausted(current.ID, fmt.Sprintf("%d", ce.StatusCode))
 			}
@@ -52,6 +57,10 @@ func (m *errorRecoveryMiddleware) Complete(ctx context.Context, req *agentcore.P
 
 		// Context overflow: compact and retry.
 		if ce.ShouldCompress {
+			_, ev := telemetry.StartEvent(ctx, "recovery", "compact",
+				agentcore.Attr("error", err.Error()),
+			)
+			ev.End()
 			if compErr := m.ca.core.ForceCompact(ctx); compErr != nil {
 				return nil, fmt.Errorf("compact failed: %w / original: %w", compErr, err)
 			}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/covoyage/covo-agent/internal/telemetry"
 	"github.com/covoyage/covonaut/agentcore"
 	"github.com/covoyage/covonaut/provider/chatcompat"
 )
@@ -66,6 +67,11 @@ type AuxiliaryClient struct {
 	mainModel    string
 	logger       *slog.Logger
 
+	// metrics records per-call model telemetry (usage, cost, errors) for
+	// dedicated auxiliary providers. Defaults to telemetry.MetricsRecorder();
+	// settable for tests.
+	metrics metricsSink
+
 	// providerBuilder builds a new provider from an auxiliary config that
 	// specifies its own provider/base_url/api_key. When nil, only model-only
 	// overrides are supported (reusing the main provider with a different
@@ -83,6 +89,7 @@ func NewAuxiliaryClient(mainProvider agentcore.Provider, mainModel string, auxCf
 		mainProvider:    mainProvider,
 		mainModel:       mainModel,
 		logger:          logger,
+		metrics:         telemetry.MetricsRecorder(),
 		providerBuilder: builder,
 		resolved:        make(map[AuxiliaryTask]*resolvedModel),
 	}
@@ -157,6 +164,16 @@ func (ac *AuxiliaryClient) resolveTask(task AuxiliaryTask, cfg *AuxiliaryModelCo
 	model := cfg.Model
 	if model == "" {
 		model = ac.mainModel
+	}
+
+	// Wrap the dedicated provider in the model-span middleware so its LLM
+	// calls are traced even though they bypass the agent's main chain, in the
+	// library metrics middleware so usage/duration/errors are counted, and in
+	// the cost middleware so USD cost is reported for every call.
+	provider = agentcore.NewModelSpanMiddleware(telemetry.AgentTracer())(provider)
+	provider = agentcore.NewModelMetricsMiddleware(ac.metrics)(provider)
+	if ac.metrics != nil {
+		provider = NewCostTrackingMiddleware(NewCostTracker(providerType, model), ac.metrics, ac.logger)(provider)
 	}
 
 	ac.resolved[task] = &resolvedModel{
@@ -253,6 +270,12 @@ func (ac *AuxiliaryClient) CompleteWithMessages(ctx context.Context, task Auxili
 func (ac *AuxiliaryClient) HasProvider(task AuxiliaryTask) bool {
 	_, ok := ac.getResolved(task)
 	return ok
+}
+
+// SetMetricsRecorder overrides the metrics sink used for dedicated auxiliary
+// providers. Mainly useful in tests where no OTel pipeline is available.
+func (ac *AuxiliaryClient) SetMetricsRecorder(r metricsSink) {
+	ac.metrics = r
 }
 
 // SetMainProvider updates the main provider and model. Used when the agent is

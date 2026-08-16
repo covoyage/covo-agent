@@ -32,6 +32,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/sandbox"
 	"github.com/covoyage/covo-agent/internal/session"
 	"github.com/covoyage/covo-agent/internal/snapshot"
+	"github.com/covoyage/covo-agent/internal/telemetry"
 	agenttools "github.com/covoyage/covo-agent/internal/tools"
 	"github.com/covoyage/covo-agent/internal/tools/fileops"
 	toolsstandingorders "github.com/covoyage/covo-agent/internal/tools/standingorders"
@@ -774,13 +775,20 @@ func (ca *CovoAgent) invokeForReview(ctx context.Context, systemPrompt, userProm
 // and Rebuild to ensure the provider chain is consistent after a rebuild.
 func (ca *CovoAgent) setupProviderChain(cfg *CovoAgentConfig) {
 	var mws []ProviderMiddleware
+	// Outermost: trace every LLM call that bypasses agentcore's own model span
+	// (context compression, titles, review, guardrails, aux providers). Skips
+	// when a model span already exists, so agent turns are never double-traced.
+	mws = append(mws, agentcore.NewModelSpanMiddleware(telemetry.AgentTracer()))
+	// Metrics record every model call (including agent turns), so this
+	// middleware deliberately does not skip.
+	mws = append(mws, agentcore.NewModelMetricsMiddleware(telemetry.MetricsRecorder()))
 	mws = append(mws, cfg.ProviderMiddlewares...)
 	mws = append(mws, NewPromptCachingMiddleware(
 		os.Getenv("COVO_PROMPT_CACHE") != "false",
 		os.Getenv("COVO_PROMPT_CACHE_TTL"),
 	))
 	mws = append(mws, NewRateLimitTrackingMiddleware(ca.rateLimitState))
-	mws = append(mws, NewCostTrackingMiddleware(ca.costTracker, cfg.Logger))
+	mws = append(mws, NewCostTrackingMiddleware(ca.costTracker, telemetry.MetricsRecorder(), cfg.Logger))
 	mws = append(mws, NewStreamHealthMiddleware(cfg.Logger, 0, 0))
 	mws = append(mws, NewErrorRecoveryMiddleware(ca))
 	cfg.Provider = ApplyProviderMiddleware(cfg.Provider, mws)
@@ -1075,6 +1083,8 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		Store:              ca.sessionMgr.Store(),
 		Lifecycle:          agentcore.LifecycleChain(lifecycleHooks),
 		Extensions:         extensions,
+		Tracer:             telemetry.AgentTracer(),
+		Metrics:            telemetry.MetricsRecorder(),
 	}
 }
 
@@ -1192,6 +1202,23 @@ func (ca *CovoAgent) Close() {
 }
 
 func (ca *CovoAgent) Run(ctx context.Context, input string) (result string, err error) {
+	// Observability root span: carries the session id so model/tool spans nest
+	// under one trace per run and Langfuse can group by session. No-op when
+	// telemetry is disabled.
+	if tracer := telemetry.AgentTracer(); tracer != nil {
+		var span agentcore.Span
+		ctx, span, _ = agentcore.StartComponentRun(ctx, tracer, "covo_agent", "run")
+		defer span.End()
+		if sm := ca.SessionManager(); sm != nil {
+			if sessionID := sm.CurrentID(); sessionID != "" {
+				span.SetAttributes(
+					agentcore.Attr("session.id", sessionID),
+					agentcore.Attr("langfuse.session.id", sessionID),
+				)
+			}
+		}
+	}
+
 	if ca.trajectory != nil {
 		ca.trajectory.RecordUser(input)
 	}
@@ -1244,6 +1271,45 @@ func (ca *CovoAgent) Run(ctx context.Context, input string) (result string, err 
 	}
 
 	return result, err
+}
+
+// RunDirect runs a single Core().Run under a tracing root span (without the
+// session-manager wiring of Run). Used by headless, oneshot, review, background
+// tasks, and cron jobs so model/tool spans export as one trace per invocation.
+func (ca *CovoAgent) RunDirect(ctx context.Context, input string) (string, error) {
+	return ca.RunDirectWithSession(ctx, input, "")
+}
+
+// RunDirectWithSession is RunDirect with an explicit session id (used when the
+// caller wants a dedicated observability session, e.g. "bg-<task>"). When
+// sessionID is empty it falls back to the agent's current session manager id.
+func (ca *CovoAgent) RunDirectWithSession(ctx context.Context, input, sessionID string) (result string, err error) {
+	if tracer := telemetry.AgentTracer(); tracer != nil {
+		var span agentcore.Span
+		ctx, span, _ = agentcore.StartComponentRun(ctx, tracer, "covo_agent", "run")
+		defer span.End()
+		if sessionID == "" {
+			if sm := ca.SessionManager(); sm != nil {
+				sessionID = sm.CurrentID()
+			}
+		}
+		if sessionID != "" {
+			span.SetAttributes(
+				agentcore.Attr("session.id", sessionID),
+				agentcore.Attr("langfuse.session.id", sessionID),
+			)
+		}
+	}
+
+	// Recover from panics so a background task, cron job, or headless run
+	// cannot crash a process that may host the interactive TUI.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("agent panic recovered: %v", r)
+		}
+	}()
+
+	return ca.Core().Run(ctx, input)
 }
 
 func (ca *CovoAgent) State() *agentcore.AgentState {

@@ -14,10 +14,14 @@ import (
 	"github.com/covoyage/covo-agent/internal/headless"
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/mdstream"
+	"github.com/covoyage/covo-agent/internal/telemetry"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
 func runHeadless(opts *headless.Options) {
+	// Flush buffered OTel spans before the process exits (log.Fatalf on the
+	// error paths bypasses defers, so those branches flush explicitly too).
+	defer telemetry.ShutdownOtel(context.Background())
 	if err := headless.ValidateOptions(opts); err != nil {
 		log.Fatalf("invalid headless options: %v", err)
 	}
@@ -50,21 +54,21 @@ func runHeadless(opts *headless.Options) {
 	workingDir, _ := os.Getwd()
 
 	covoAgent, err := agent.NewCovoAgent(agent.CovoAgentConfig{
-		Mode:               mode,
-		Provider:           llm,
-		ProviderName:       providerStr,
-		Model:              modelStr,
-		WorkingDir:         workingDir,
-		HomeDir:            homeDir,
-		Logger:             logger,
-		ApprovalCfg:        approvalConfigFromCLI(cfg, true), // auto-approve in headless
-		ToolProfile:        runtimeState.ActiveProfile(),
-		ThinkingCfg:        thinkingConfigFromCLI(cfg),
-		FrequencyPenalty:   frequencyPenaltyFromCLI(cfg),
-		PresencePenalty:    presencePenaltyFromCLI(cfg),
-		SystemPrompt:       opts.SystemPrompt,
-		AppendSystemPrompt: opts.AppendSystemPrompt,
-		Auxiliary:          auxiliaryConfigFromCLI(cfg),
+		Mode:                     mode,
+		Provider:                 llm,
+		ProviderName:             providerStr,
+		Model:                    modelStr,
+		WorkingDir:               workingDir,
+		HomeDir:                  homeDir,
+		Logger:                   logger,
+		ApprovalCfg:              approvalConfigFromCLI(cfg, true), // auto-approve in headless
+		ToolProfile:              runtimeState.ActiveProfile(),
+		ThinkingCfg:              thinkingConfigFromCLI(cfg),
+		FrequencyPenalty:         frequencyPenaltyFromCLI(cfg),
+		PresencePenalty:          presencePenaltyFromCLI(cfg),
+		SystemPrompt:             opts.SystemPrompt,
+		AppendSystemPrompt:       opts.AppendSystemPrompt,
+		Auxiliary:                auxiliaryConfigFromCLI(cfg),
 		AuxiliaryProviderBuilder: cli.ResolveAuxiliaryProviderBuilder(),
 	})
 	if err != nil {
@@ -129,7 +133,7 @@ func runHeadless(opts *headless.Options) {
 		defer unsub()
 	}
 
-	result, err := covoAgent.Core().Run(ctx, opts.Prompt)
+	result, err := covoAgent.RunDirect(ctx, opts.Prompt)
 	if err != nil {
 		if renderer != nil {
 			flushed := renderer.Flush()
@@ -141,6 +145,7 @@ func runHeadless(opts *headless.Options) {
 			_ = writer.WriteError(err.Error())
 			_ = writer.WriteDone()
 		} else {
+			telemetry.ShutdownOtel(context.Background())
 			log.Fatalf("agent run: %v", err)
 		}
 		return

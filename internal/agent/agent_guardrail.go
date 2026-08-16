@@ -7,6 +7,7 @@ import (
 
 	"github.com/covoyage/covo-agent/internal/agent/approval"
 	"github.com/covoyage/covo-agent/internal/agent/safety"
+	"github.com/covoyage/covo-agent/internal/telemetry"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -92,16 +93,25 @@ func (ca *CovoAgent) wireSmartApproval() {
 		}
 		resp, err := ca.cfg.Provider.Complete(ctx, req)
 		if err != nil {
+			_, ev := telemetry.StartEvent(ctx, "guardrail", "approval_error",
+				agentcore.Attr("command", command),
+			)
+			ev.End()
 			return "escalate", err
 		}
 		answer := strings.TrimSpace(strings.ToUpper(resp.Content))
+		decision := "escalate"
 		if answer == "APPROVE" {
-			return "approve", nil
+			decision = "approve"
+		} else if answer == "DENY" {
+			decision = "deny"
 		}
-		if answer == "DENY" {
-			return "deny", nil
-		}
-		return "escalate", nil
+		_, ev := telemetry.StartEvent(ctx, "guardrail", "approval",
+			agentcore.Attr("decision", decision),
+			agentcore.Attr("command", command),
+		)
+		ev.End()
+		return decision, nil
 	})
 }
 

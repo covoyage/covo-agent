@@ -11,6 +11,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli"
 	"github.com/covoyage/covo-agent/internal/logutil"
+	"github.com/covoyage/covo-agent/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 
@@ -129,7 +130,9 @@ Be direct and focus on meaningful problems.`)
 			defer covoAgent.Close()
 
 			ctx := context.Background()
-			result, err := covoAgent.Core().Run(ctx, promptBuilder.String())
+			// Flush buffered OTel spans before the process exits.
+			defer telemetry.ShutdownOtel(context.Background())
+			result, err := covoAgent.RunDirect(ctx, promptBuilder.String())
 			if err != nil {
 				return fmt.Errorf("agent run: %w", err)
 			}
@@ -146,7 +149,7 @@ Be direct and focus on meaningful problems.`)
 					"Based on this code review, produce a unified diff patch that implements the suggested improvements.\n\n%s\n\n```diff\n%s\n```\n\nOutput ONLY the patch (unified diff format) with no explanation.",
 					result, diff,
 				)
-				patchResult, err := covoAgent.Core().Run(ctx, patchPrompt)
+				patchResult, err := covoAgent.RunDirect(ctx, patchPrompt)
 				if err != nil {
 					return fmt.Errorf("generate patch: %w", err)
 				}

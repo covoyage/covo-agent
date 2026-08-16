@@ -31,6 +31,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/safego"
 	"github.com/covoyage/covo-agent/internal/slashcmd"
+	"github.com/covoyage/covo-agent/internal/telemetry"
 	agenttheme "github.com/covoyage/covo-agent/internal/theme"
 	"github.com/covoyage/covo-agent/internal/tools"
 	toolsplanning "github.com/covoyage/covo-agent/internal/tools/planning"
@@ -1382,7 +1383,10 @@ func runInteractive(opts *rootOptions, runtime *commandRuntime) {
 			return "", fmt.Errorf("failed to create agent for cron job %s", jobID)
 		}
 		defer ca.Close()
-		output, err := ca.Core().Run(runCtx, prompt)
+		// Flush this cron job's spans promptly; the interactive session keeps
+		// running in this process, so do not shut down the pipeline.
+		defer telemetry.FlushOtel(context.Background())
+		output, err := ca.RunDirectWithSession(runCtx, prompt, "cron-"+jobID)
 		if err != nil {
 			return "", fmt.Errorf("cron job %s: %w", jobID, err)
 		}

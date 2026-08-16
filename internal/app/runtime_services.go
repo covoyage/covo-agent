@@ -57,6 +57,9 @@ func NewRuntimeServices(homeDir string, logger *slog.Logger, agents *AgentRuntim
 		sidecar: sessiontools.NewAtomicSessionWriter(filepath.Join(homeDir, "sessions", "events")),
 	}
 	telemetryConfig := telemetry.ConfigFromEnv()
+	// Initialize the OpenTelemetry tracing pipeline (model/tool spans). No-op
+	// unless COVO_OTEL_ENDPOINT is set. Shut down in Stop().
+	telemetry.InitOtel(context.Background(), logger)
 	if telemetryConfig.Enabled {
 		store, err := audit.NewStore(homeDir)
 		if err != nil {
@@ -108,6 +111,10 @@ func (services *RuntimeServices) Stop() {
 		if services.auditStore != nil {
 			_ = services.auditStore.Close()
 		}
+		// Flush buffered OTel spans (batch processor) before process exit.
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		telemetry.ShutdownOtel(flushCtx)
 	})
 }
 

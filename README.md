@@ -236,7 +236,30 @@ covo-agent --headless -z "run the test suite and fix one failure" \
 
 `--yolo` disables dangerous-operation approval prompts. Use it only in an environment where unrestricted tool execution is acceptable.
 
-Telemetry export is opt-in. Set `COVO_OTEL_ENDPOINT` or `COVO_OTEL_ENABLED=true` to enable it. Audit and telemetry payloads pass through secret redaction before export.
+## Observability
+
+Telemetry export is opt-in. Point covo-agent at an OTLP HTTP collector (e.g. [Langfuse](https://langfuse.com), Jaeger, Grafana, or any OpenTelemetry collector) with:
+
+```bash
+export COVO_OTEL_ENDPOINT=https://cloud.langfuse.com/api/public/otel
+export COVO_OTEL_HEADERS="Authorization: Bearer pk-lf-your-public-key"
+```
+
+Everything a session does exports as an OTel trace: the session root span carries `session.id` / `langfuse.session.id`, and every LLM call (agent turns, context compression, title generation, reviews, guardrails, auxiliary providers) becomes a model span with GenAI semantic-convention attributes (`gen_ai.request.*`, `gen_ai.prompt`, `gen_ai.completion`, `gen_ai.usage.*`, `gen_ai.response.*`) so backends can compute token usage and cost. Headless, one-shot, review, background-task, and cron invocations are traced and flushed the same way.
+
+### Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `COVO_OTEL_ENDPOINT` | OTLP HTTP endpoint for traces (`/v1/traces` is appended automatically). Also implies `COVO_OTEL_ENABLED=true`. |
+| `COVO_OTEL_HEADERS` | Extra HTTP headers, e.g. `Authorization: Bearer pk-lf-...`. Separators: `,` `;` `:` `=`. |
+| `COVO_OTEL_SERVICE_NAME` | `service.name` resource attribute (default `covo-agent`). |
+| `COVO_OTEL_METRICS_ENABLED` | Opt-in OTLP metrics (`true`/`1`). Emits GenAI usage/duration counters, per-call USD cost, error counters (model calls, tool executions, agent runs), and process gauges. |
+| `COVO_OTEL_METRICS_ENDPOINT` | Metrics endpoint; defaults to `COVO_OTEL_ENDPOINT`. Langfuse only ingests traces, so target a collector for metrics. |
+| `COVO_OTEL_EXPORT_INTERVAL` | Periodic export interval (default `30s`). |
+| `COVO_OTEL_ENABLED` | Legacy opt-in flag; setting `COVO_OTEL_ENDPOINT` alone enables export. |
+
+> Note: traces carry raw prompt/completion content, which is what makes token/cost analysis useful. Do not point it at a backend you do not trust with your prompts.
 
 ## Troubleshooting
 

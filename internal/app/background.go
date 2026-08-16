@@ -11,6 +11,7 @@ import (
 
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/safego"
+	"github.com/covoyage/covo-agent/internal/telemetry"
 )
 
 // TaskStatus represents the status of a background task.
@@ -98,8 +99,11 @@ func (m *BackgroundManager) Start(input string, createAgent func() *agent.CovoAg
 	safego.SafeGo(func() {
 		defer ca.Close()
 		defer cancel()
+		// Flush this task's spans promptly; do NOT shut down the pipeline —
+		// the interactive session keeps running in this process.
+		defer telemetry.FlushOtel(context.Background())
 
-		output, err := ca.Core().Run(ctx, input)
+		output, err := ca.RunDirectWithSession(ctx, input, "bg-"+bt.ID)
 
 		m.mu.Lock()
 		bt.Output = output

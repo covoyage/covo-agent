@@ -29,18 +29,29 @@ import (
 // Config holds the telemetry exporter configuration.
 type Config struct {
 	Enabled        bool
-	Endpoint       string        // OTLP HTTP endpoint, e.g. "http://localhost:4318"
-	ServiceName    string        // service.name attribute
-	ExportInterval time.Duration // how often to flush
+	Endpoint       string            // OTLP HTTP endpoint, e.g. "http://localhost:4318"
+	ServiceName    string            // service.name attribute
+	ExportInterval time.Duration     // how often to flush
+	Headers        map[string]string // extra HTTP headers, e.g. Authorization for Langfuse
+
+	// Metrics controls OTLP metrics export (gen_ai.* counters/histograms).
+	// Metrics are opt-in via COVO_OTEL_METRICS_ENABLED and sent to
+	// COVO_OTEL_METRICS_ENDPOINT (falling back to Endpoint). Langfuse only
+	// ingests traces, so leave metrics disabled when targeting it directly.
+	MetricsEnabled  bool
+	MetricsEndpoint string
 }
 
 // ConfigFromEnv reads telemetry config from environment variables.
 func ConfigFromEnv() Config {
 	cfg := Config{
-		Enabled:        os.Getenv("COVO_OTEL_ENABLED") == "true" || os.Getenv("COVO_OTEL_ENABLED") == "1",
-		Endpoint:       os.Getenv("COVO_OTEL_ENDPOINT"),
-		ServiceName:    os.Getenv("COVO_OTEL_SERVICE_NAME"),
-		ExportInterval: 30 * time.Second,
+		Enabled:         os.Getenv("COVO_OTEL_ENABLED") == "true" || os.Getenv("COVO_OTEL_ENABLED") == "1",
+		Endpoint:        os.Getenv("COVO_OTEL_ENDPOINT"),
+		ServiceName:     os.Getenv("COVO_OTEL_SERVICE_NAME"),
+		ExportInterval:  30 * time.Second,
+		Headers:         parseHeaders(os.Getenv("COVO_OTEL_HEADERS")),
+		MetricsEnabled:  os.Getenv("COVO_OTEL_METRICS_ENABLED") == "true" || os.Getenv("COVO_OTEL_METRICS_ENABLED") == "1",
+		MetricsEndpoint: os.Getenv("COVO_OTEL_METRICS_ENDPOINT"),
 	}
 	if cfg.ServiceName == "" {
 		cfg.ServiceName = "covo-agent"
@@ -54,6 +65,34 @@ func ConfigFromEnv() Config {
 		cfg.Enabled = true
 	}
 	return cfg
+}
+
+// parseHeaders parses "key: value, key2: value2" (also accepts "=" and ";" as
+// separators) into a header map.
+func parseHeaders(raw string) map[string]string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	headers := make(map[string]string)
+	for _, pair := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' }) {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		sep := strings.IndexAny(pair, ":=")
+		if sep <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(pair[:sep])
+		value := strings.TrimSpace(pair[sep+1:])
+		if key != "" && value != "" {
+			headers[key] = value
+		}
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	return headers
 }
 
 // Exporter bridges audit log entries to OpenTelemetry-compatible export.
@@ -107,6 +146,13 @@ func (e *Exporter) SetRedactor(redact func(string) string) {
 // Start begins periodic export of telemetry data. Call Stop() to clean up.
 func (e *Exporter) Start(ctx context.Context) {
 	if !e.cfg.Enabled {
+		return
+	}
+	// The OTel SDK pipeline (InitOtel) exports real, richly-attribute'd spans
+	// to the same endpoint. When it is active, the audit-derived exporter
+	// would duplicate exports — skip it.
+	if sdkPipelineActive() {
+		e.logger.Info("telemetry exporter: skipped (OpenTelemetry SDK pipeline active)")
 		return
 	}
 
@@ -304,6 +350,10 @@ func (e *Exporter) buildOTLP(spans []traceSpan) map[string]any {
 // send sends the OTLP payload to the collector via HTTP.
 func (e *Exporter) send(ctx context.Context, payload map[string]any) error {
 	if e.cfg.Endpoint == "" {
+		return nil
+	}
+	// Never double-export: the OTel SDK pipeline owns trace export when active.
+	if sdkPipelineActive() {
 		return nil
 	}
 
