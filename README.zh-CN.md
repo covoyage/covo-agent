@@ -279,6 +279,24 @@ covo-agent 兼容 [Claude Code hooks 协议](https://docs.anthropic.com/en/docs/
 | `COVO_CODEX_HOOKS_DISABLED` | 设为 `true` 跳过加载 Codex hooks。 |
 | `COVO_CODEX_HOOKS_PATH` | 额外 hooks 文件，冒号分隔，在用户/项目文件之后加载。 |
 
+## 外部代理委托
+
+covo-agent 可以通过 `external_agent` 工具，将独立、自包含的任务委托给以独立进程运行的外部编程代理。支持的 Provider：
+
+- **Claude Code** —— 通过其 `stream-json` 控制协议驱动，与官方 [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) 使用的传输层相同：Provider 执行 `initialize` 握手、通过 stdin 流式发送提示词、应答 `can_use_tool` 权限控制请求（自动放行只读工具，拒绝一切未明确允许的操作）、在取消时发送 `interrupt`，并收集最终的 `result` 消息。需要 Claude Code `>= 2.0.0`（通过 `claude --version` 校验）。
+- **OpenAI Codex** —— 通过其 `app-server` 协议（`codex app-server --stdio`）驱动，与官方 [Codex SDK](https://developers.openai.com/codex/app-server) 和 VS Code 扩展使用的 JSON-RPC-over-stdio 传输层相同：Provider 执行 `initialize` → `initialized` 握手、创建 `ephemeral` 线程、运行一个 `turn`、无人值守地应答审批服务器请求（命令/文件审批默认拒绝——在 `permission_mode: bypassPermissions` 下允许——权限升级与用户输入提示一律拒绝）、在取消时发送 `turn/interrupt`，并返回 `phase: "final_answer"` 的消息（回退到最新的无 phase 代理消息）。需要 Codex `>= 0.136.0`（通过 `codex --version` 校验）。
+- **opencode** —— `opencode run`。
+
+不安装任何产品 SDK；每个 Provider 直接驱动产品自己的 CLI（也就是那些 SDK 底层包装的同一个二进制）。由于外部代理无法看到当前对话，任务必须完全自包含。`permission_mode`（`default`/`acceptEdits`/`plan`/`bypassPermissions`）适用于 Claude 和 Codex；`allowed_tools`/`disallowed_tools`/`max_turns` 为 Claude 专属；`model` 适用于 Claude 和 Codex。
+
+每个 Provider 只有在对应 CLI 二进制已安装、已登录并在 `PATH` 上时才可用。`COVO_EXTERNAL_AGENTS` 控制暴露哪些 Provider：
+
+| 值 | 效果 |
+| --- | --- |
+| `all`（默认） | 注册所有已知 Provider（Claude Code、Codex、opencode）。 |
+| `claude,codex` | 只注册列出的 Provider（逗号分隔）。 |
+| `off` / `none` | 禁用委托；`external_agent` 工具不暴露。 |
+
 ## 故障排查
 
 检查环境和配置：

@@ -279,6 +279,24 @@ covo-agent speaks the [Claude Code hooks protocol](https://docs.anthropic.com/en
 | `COVO_CODEX_HOOKS_DISABLED` | Set `true` to skip loading Codex hooks. |
 | `COVO_CODEX_HOOKS_PATH` | Extra hooks files, colon-separated, loaded after the user/project files. |
 
+## External agent delegation
+
+covo-agent can delegate standalone, self-contained tasks to external coding agents that run as their own processes via the `external_agent` tool. Supported providers:
+
+- **Claude Code** — driven over its `stream-json` control protocol, the same transport the official [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) uses: the provider performs the `initialize` handshake, streams the prompt over stdin, answers `can_use_tool` permission control requests (auto-approving read-only tools, denying everything not explicitly allowed), delivers an `interrupt` on cancellation, and collects the final `result` message. Requires Claude Code `>= 2.0.0` (checked via `claude --version`).
+- **OpenAI Codex** — driven over its `app-server` protocol (`codex app-server --stdio`), the same JSON-RPC-over-stdio transport the official [Codex SDKs](https://developers.openai.com/codex/app-server) and the VS Code extension use: the provider performs the `initialize` → `initialized` handshake, creates an `ephemeral` thread, runs one `turn`, answers approval server requests unattended (command/file approvals are declined — or allowed under `permission_mode: bypassPermissions` — permission upgrades and user-input prompts are denied), sends `turn/interrupt` on cancellation, and returns the message with `phase: "final_answer"` (falling back to the latest unphased agent message). Requires Codex `>= 0.136.0` (checked via `codex --version`).
+- **opencode** — `opencode run`.
+
+No product SDK is installed; each provider drives the product's own CLI (the same binary those SDKs wrap). The task must be fully self-contained since the external agent cannot see the current conversation. `permission_mode` (`default`/`acceptEdits`/`plan`/`bypassPermissions`) applies to Claude and Codex; `allowed_tools`/`disallowed_tools`/`max_turns` are Claude-specific; `model` applies to Claude and Codex.
+
+Each provider is usable only when its CLI binary is installed, signed in, and on `PATH`. `COVO_EXTERNAL_AGENTS` controls which providers are exposed:
+
+| Value | Effect |
+| --- | --- |
+| `all` (default) | Register every known provider (Claude Code, Codex, opencode). |
+| `claude,codex` | Register only the listed providers (comma-separated). |
+| `off` / `none` | Disable delegation; the `external_agent` tool is not exposed. |
+
 ## Troubleshooting
 
 Run the environment and configuration checks:

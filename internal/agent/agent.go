@@ -534,6 +534,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 		Sandbox:         sb,
 		SpawnRunner:     spawnRunner,
 		ToolProfile:     cfg.ToolProfile,
+		WorkDir:         cfg.WorkingDir,
 	})
 
 	// Wire the standing orders store into the extension (same instance used

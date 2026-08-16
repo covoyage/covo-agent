@@ -17,6 +17,7 @@ import (
 	toolscodegraph "github.com/covoyage/covo-agent/internal/tools/codegraph"
 	toolscommitments "github.com/covoyage/covo-agent/internal/tools/commitments"
 	toolscontext "github.com/covoyage/covo-agent/internal/tools/context"
+	externalagent "github.com/covoyage/covo-agent/internal/tools/external_agent"
 	toolsfeishu "github.com/covoyage/covo-agent/internal/tools/feishu"
 	"github.com/covoyage/covo-agent/internal/tools/fileops"
 	toolshardware "github.com/covoyage/covo-agent/internal/tools/hardware"
@@ -87,6 +88,7 @@ type Extension struct {
 	toolProfile     string
 	parentMessages  func() []agentcore.Message
 	phaseTransition toolsplanning.PhaseTransitioner
+	externalAgents  *externalagent.Registry
 }
 
 // ExtensionConfig configures the agent tools extension.
@@ -110,6 +112,10 @@ type ExtensionConfig struct {
 	// ToolProfile restricts the available tools to a named profile.
 	// Supported values: "minimal", "coding", "messaging", "full" (default: "full").
 	ToolProfile string
+
+	// WorkDir is the default working directory used for external agent
+	// delegation tasks (external_agent tool). May be empty.
+	WorkDir string
 
 	// ParentMessages returns the parent agent's current conversation messages,
 	// used by "state" and "full" context modes for sessions_spawn. May be nil
@@ -219,6 +225,7 @@ func NewExtension(cfg ExtensionConfig) *Extension {
 		toolProfile:     cfg.ToolProfile,
 		parentMessages:  cfg.ParentMessages,
 		phaseTransition: cfg.PhaseTransitioner,
+		externalAgents:  externalagent.NewRegistry(cfg.WorkDir, os.Getenv("COVO_EXTERNAL_AGENTS")),
 	}
 	// Wire registry into subagent runner
 	if ext.subagentRunner != nil {
@@ -515,6 +522,12 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 
 		// Batch 27: code graph (Go package dependency analysis)
 		toolscodegraph.BuildCodeGraphTool(),
+	}
+
+	// Batch 28: external coding agents (Claude Code, Codex, opencode).
+	// Only exposed when COVO_EXTERNAL_AGENTS enables at least one provider.
+	if e.externalAgents != nil && e.externalAgents.AnyEnabled() {
+		e.tools = append(e.tools, externalagent.BuildExternalAgentTool(e.externalAgents))
 	}
 
 	// Apply tool profile filter if not "full"
