@@ -46,6 +46,15 @@ type SnapshotManager struct {
 	// lastGC bounds how often the object store is garbage-collected when
 	// entries are pruned.
 	lastGC time.Time
+
+	// baseline controls the async initial snapshot. The startup path no
+	// longer runs a full `git add --all` walk synchronously; the full
+	// staging happens in a background goroutine (TrackBaselineAsync). Any
+	// Track/Revert/undo call arriving before it completes waits on
+	// baselineReady, so the first file-mutating tool never observes a
+	// half-initialized store.
+	asyncBaselineDone bool
+	baselineReady     chan struct{}
 }
 
 // NewSnapshotManager creates a manager wrapping the given snapshot service.
@@ -59,6 +68,60 @@ func (m *SnapshotManager) Service() *snapshot.Service { return m.service }
 // Enabled reports whether snapshot tracking is available.
 func (m *SnapshotManager) Enabled() bool {
 	return m != nil && m.service != nil && m.service.Enabled()
+}
+
+// TrackBaselineAsync records the initial baseline snapshot without blocking
+// the caller: the full staging walk runs in a background goroutine. It is the
+// startup replacement for a synchronous Track("baseline", 0). Correctness for
+// late observers is preserved via waitBaseline: the first Track, Revert, or
+// undo/rewind call blocks until the background baseline completes.
+func (m *SnapshotManager) TrackBaselineAsync() {
+	if m == nil || !m.Enabled() {
+		return
+	}
+	m.mu.Lock()
+	if m.asyncBaselineDone || m.baselineReady != nil {
+		m.mu.Unlock()
+		return // already done or already running
+	}
+	m.baselineReady = make(chan struct{})
+	m.mu.Unlock()
+
+	go func() {
+		// The full staging walk may take a while on large work trees; it
+		// runs outside any lock held by the caller.
+		hash, err := m.service.Track()
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.asyncBaselineDone = true
+		close(m.baselineReady)
+		if err == nil && hash != "" {
+			m.recordEntryLocked(hash, "baseline", 0, nil)
+		}
+	}()
+}
+
+// waitBaseline blocks until any in-flight async baseline finishes (or returns
+// immediately if none was started or it already completed).
+func (m *SnapshotManager) waitBaseline() {
+	m.mu.Lock()
+	ch := m.baselineReady
+	m.mu.Unlock()
+	if ch != nil {
+		<-ch
+	}
+}
+
+// BaselineDone reports whether the async baseline (if started) has finished.
+// Managers that never started one (or are disabled) report done: there is no
+// background work in flight.
+func (m *SnapshotManager) BaselineDone() bool {
+	if m == nil {
+		return true
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.asyncBaselineDone || m.baselineReady == nil
 }
 
 // ShouldSnapshot returns true if the given tool name is a file-mutating tool
@@ -86,6 +149,10 @@ func (m *SnapshotManager) Track(toolName string, msgIdx int) error {
 	if !m.Enabled() {
 		return nil
 	}
+	// If an async baseline is still in flight, let it finish first so the
+	// entry history stays ordered and the store is fully staged.
+	m.waitBaseline()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -118,25 +185,33 @@ func (m *SnapshotManager) Track(toolName string, msgIdx int) error {
 		return nil
 	}
 
+	// Compute changed files since previous snapshot.
+	var files []string
+	if prevHash != "" && hash != prevHash {
+		patch, err := m.service.Patch(prevHash)
+		if err == nil {
+			files = patch.Files
+		}
+	}
+
+	m.recordEntryLocked(hash, toolName, msgIdx, files)
+	return nil
+}
+
+// recordEntryLocked appends a snapshot entry (with the given changed-files
+// list, which callers may have computed already) and persists the history.
+// Callers must hold m.mu.
+func (m *SnapshotManager) recordEntryLocked(hash, toolName string, msgIdx int, files []string) {
 	entry := snapshot.Entry{
 		Hash:         hash,
 		ToolName:     toolName,
 		Timestamp:    time.Now().Unix(),
 		MessageIndex: msgIdx,
+		Files:        files,
 	}
-
-	// Compute changed files since previous snapshot.
-	if prevHash != "" && hash != prevHash {
-		patch, err := m.service.Patch(prevHash)
-		if err == nil {
-			entry.Files = patch.Files
-		}
-	}
-
 	m.entries = append(m.entries, entry)
 	m.reverted = false // new activity clears reverted state
 	m.persistLocked()
-	return nil
 }
 
 // FindClosest returns a copy of the entry whose MessageIndex is closest to
@@ -190,6 +265,7 @@ func (m *SnapshotManager) Undo() (int, error) {
 	if !m.Enabled() {
 		return 0, fmt.Errorf("snapshot service not available")
 	}
+	m.waitBaseline()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -230,6 +306,7 @@ func (m *SnapshotManager) RevertTo(index int) (int, error) {
 	if !m.Enabled() {
 		return 0, fmt.Errorf("snapshot service not available")
 	}
+	m.waitBaseline()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -279,6 +356,7 @@ func (m *SnapshotManager) Unrevert() error {
 	if !m.Enabled() {
 		return fmt.Errorf("snapshot service not available")
 	}
+	m.waitBaseline()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -314,6 +392,7 @@ func (m *SnapshotManager) Restore(hash string) error {
 	if !m.Enabled() {
 		return fmt.Errorf("snapshot service not available")
 	}
+	m.waitBaseline()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.service.Restore(hash)
@@ -326,6 +405,7 @@ func (m *SnapshotManager) Diff(index int) (string, error) {
 	if !m.Enabled() {
 		return "", fmt.Errorf("snapshot service not available")
 	}
+	m.waitBaseline()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

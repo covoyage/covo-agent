@@ -209,12 +209,57 @@ func (s *Service) NeedsTracking(lastHash string) bool {
 	return false
 }
 
+// CaptureIndexHash returns the current tree hash by reading the index state
+// only: it refreshes the stat cache and runs write-tree, without staging the
+// working tree (no add). This is a cheap "anchor" (~a few git calls) that
+// callers can capture synchronously at startup, before the full baseline
+// snapshot runs in the background. It returns "" when the tree cannot be
+// determined cheaply (disabled service, dirty tree, or git error) — callers
+// should treat "" as "wait for the full snapshot".
+//
+// It is meaningful right after Service creation or a Track call, when the
+// index already reflects the working tree. On a fresh (empty) index with a
+// clean tree it returns the hash of the empty tree.
+func (s *Service) CaptureIndexHash() string {
+	if !s.enabled {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.captureIndexHashLocked()
+}
+
+// captureIndexHashLocked implements CaptureIndexHash; callers must hold s.mu.
+func (s *Service) captureIndexHashLocked() string {
+	// Untracked files would make the index hash incomplete.
+	if out, err := s.git("ls-files", "--others", "--exclude-standard"); err == nil && strings.TrimSpace(out) != "" {
+		return ""
+	}
+	// Stat-cache refresh; nonzero exit means tracked files differ from the
+	// index, so the index does not reflect the working tree.
+	if code := s.runExitCode("update-index", "--refresh"); code != 0 {
+		return ""
+	}
+	out, err := s.git("write-tree")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// emptyTreeHash is git's well-known empty tree object. git treats it as
+// always present (cat-file -e succeeds even when no such object was ever
+// written), so it must never be used as evidence that an entry is valid.
+const emptyTreeHash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
 // HasTree reports whether the object store still contains the given tree
 // hash. Used to validate persisted snapshot entries on load: entries whose
 // objects were pruned or lost (e.g. a deleted store) are not usable for
-// undo/revert and should be dropped.
+// undo/revert and should be dropped. The empty tree is excluded: git answers
+// "exists" for it unconditionally, which would let empty-tree entries
+// survive every cleanup without backing objects.
 func (s *Service) HasTree(hash string) bool {
-	if !s.enabled || hash == "" {
+	if !s.enabled || hash == "" || hash == emptyTreeHash {
 		return false
 	}
 	s.mu.Lock()

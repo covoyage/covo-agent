@@ -222,3 +222,13 @@ func TestAnchorPattern(t *testing.T) {
 		t.Errorf("anchorPattern escaping failed: %q", got)
 	}
 }
+
+// TestHasTreeRejectsEmptyTreeHash guards the cleanup path: git answers
+// "exists" for the well-known empty tree hash even when no object was ever
+// written, so stale empty-tree entries must be rejected explicitly.
+func TestHasTreeRejectsEmptyTreeHash(t *testing.T) {
+	s := newTestService(t)
+	if s.HasTree(emptyTreeHash) {
+		t.Error("HasTree(emptyTreeHash) = true, want false (builtin object, not store evidence)")
+	}
+}

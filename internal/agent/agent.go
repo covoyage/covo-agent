@@ -649,8 +649,10 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	}
 	ca.snapshotMgr.SetStoreDir(cfg.HomeDir)
 	// Capture a baseline snapshot so there's always an initial state to
-	// rewind to, even before any file-mutating tool has run.
-	ca.snapshotMgr.Track("baseline", 0)
+	// rewind to, even before any file-mutating tool has run. The full
+	// staging walk runs in the background so startup stays fast on large
+	// work trees; the first file-mutating tool waits for it if needed.
+	ca.snapshotMgr.TrackBaselineAsync()
 	ca.readTracker = NewReadTracker()
 	ca.workDir = cfg.WorkingDir
 	ca.workspaceOnly = cfg.WorkspaceOnly
