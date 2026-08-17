@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,8 +31,10 @@ func TestShouldSnapshot_NonFileMutatingTools(t *testing.T) {
 }
 
 // newTestSnapshotManager creates a SnapshotManager backed by a real snapshot
-// service operating in a temp directory.
-func newTestSnapshotManager(t *testing.T) *SnapshotManager {
+// service operating in a temp directory, and returns it with the work dir so
+// tests can modify files between snapshots (snapshots with an unchanged tree
+// are deduplicated and do not create entries).
+func newTestSnapshotManager(t *testing.T) (*SnapshotManager, string) {
 	t.Helper()
 	workDir := t.TempDir()
 	dataDir := t.TempDir()
@@ -46,17 +49,29 @@ func newTestSnapshotManager(t *testing.T) *SnapshotManager {
 	if !svc.Enabled() {
 		t.Skip("snapshot service not enabled (git unavailable)")
 	}
-	return NewSnapshotManager(svc)
+	return NewSnapshotManager(svc), workDir
+}
+
+// mutateWorkDir changes a file in the work dir so the next Track() records a
+// new tree (unchanged trees are deduplicated).
+func mutateWorkDir(t *testing.T, workDir string, n int) {
+	t.Helper()
+	path := filepath.Join(workDir, "hello.txt")
+	if err := os.WriteFile(path, []byte(fmt.Sprintf("hello v%d\n", n)), 0644); err != nil {
+		t.Fatalf("mutate workdir: %v", err)
+	}
 }
 
 func TestSnapshotAfterHook_TracksFileMutatingTool(t *testing.T) {
-	mgr := newTestSnapshotManager(t)
+	mgr, workDir := newTestSnapshotManager(t)
 	ca := &CovoAgent{snapshotMgr: mgr}
 
 	// Initial snapshot — captures the seeded file.
 	if err := mgr.Track("setup", 0); err != nil {
 		t.Fatalf("initial track: %v", err)
 	}
+	// Change a file so the post-hook snapshot records a new tree.
+	mutateWorkDir(t, workDir, 1)
 
 	hook := ca.snapshotAfterHook()
 	hc := &agentcore.HookContext{
@@ -79,12 +94,13 @@ func TestSnapshotAfterHook_TracksFileMutatingTool(t *testing.T) {
 }
 
 func TestSnapshotAfterHook_IgnoresReadOnlyTool(t *testing.T) {
-	mgr := newTestSnapshotManager(t)
+	mgr, workDir := newTestSnapshotManager(t)
 	ca := &CovoAgent{snapshotMgr: mgr}
 
 	if err := mgr.Track("setup", 0); err != nil {
 		t.Fatalf("initial track: %v", err)
 	}
+	mutateWorkDir(t, workDir, 1)
 	before := len(mgr.List())
 
 	hook := ca.snapshotAfterHook()
@@ -130,15 +146,18 @@ func TestSnapshotAfterHook_NoOpWhenManagerNil(t *testing.T) {
 }
 
 func TestSnapshotManager_FindClosest(t *testing.T) {
-	mgr := newTestSnapshotManager(t)
+	mgr, workDir := newTestSnapshotManager(t)
 
-	// Track three snapshots at different message indices.
+	// Track three snapshots at different message indices, mutating the
+	// tree in between so each Track records a distinct state.
 	if err := mgr.Track("baseline", 0); err != nil {
 		t.Fatalf("track baseline: %v", err)
 	}
+	mutateWorkDir(t, workDir, 1)
 	if err := mgr.Track("write_file", 5); err != nil {
 		t.Fatalf("track write_file: %v", err)
 	}
+	mutateWorkDir(t, workDir, 2)
 	if err := mgr.Track("edit_block", 10); err != nil {
 		t.Fatalf("track edit_block: %v", err)
 	}
@@ -188,7 +207,7 @@ func TestSnapshotManager_FindClosest_Empty(t *testing.T) {
 }
 
 func TestSnapshotManager_Get_OutOfRange(t *testing.T) {
-	mgr := newTestSnapshotManager(t)
+	mgr, _ := newTestSnapshotManager(t)
 	if _, ok := mgr.Get(0); ok {
 		t.Error("Get(0) on empty manager should return false")
 	}
@@ -196,13 +215,29 @@ func TestSnapshotManager_Get_OutOfRange(t *testing.T) {
 
 func TestSnapshotManager_PersistAndLoad(t *testing.T) {
 	dir := t.TempDir()
+	workDir := t.TempDir()
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workDir, "hello.txt"), []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
-	// Create and populate a manager with persistence.
-	mgr1 := newTestSnapshotManager(t)
+	// Create and populate a manager with persistence. The second manager
+	// must reuse the same workDir/dataDir so its object store still holds
+	// the recorded trees (entries against a fresh/empty store are pruned
+	// on load by design).
+	svc1, err := snapshot.NewService(workDir, dataDir)
+	if err != nil {
+		t.Fatalf("snapshot.NewService: %v", err)
+	}
+	if !svc1.Enabled() {
+		t.Skip("snapshot service not enabled (git unavailable)")
+	}
+	mgr1 := NewSnapshotManager(svc1)
 	mgr1.SetStoreDir(dir)
 	if err := mgr1.Track("baseline", 0); err != nil {
 		t.Fatalf("track: %v", err)
 	}
+	mutateWorkDir(t, workDir, 1)
 	if err := mgr1.Track("write_file", 5); err != nil {
 		t.Fatalf("track: %v", err)
 	}
@@ -213,8 +248,13 @@ func TestSnapshotManager_PersistAndLoad(t *testing.T) {
 		t.Fatalf("persistence file not created: %v", err)
 	}
 
-	// Create a new manager with the same store dir — should load entries.
-	mgr2 := newTestSnapshotManager(t)
+	// Create a new manager over the same store (workDir/dataDir) — should
+	// load entries from disk.
+	svc2, err := snapshot.NewService(workDir, dataDir)
+	if err != nil {
+		t.Fatalf("snapshot.NewService 2: %v", err)
+	}
+	mgr2 := NewSnapshotManager(svc2)
 	mgr2.SetStoreDir(dir)
 	entries := mgr2.List()
 	if len(entries) != 2 {
@@ -229,12 +269,13 @@ func TestSnapshotManager_PersistAndLoad(t *testing.T) {
 }
 
 func TestSnapshotManager_AutoPrune(t *testing.T) {
-	mgr := newTestSnapshotManager(t)
+	mgr, workDir := newTestSnapshotManager(t)
 	dir := t.TempDir()
 	mgr.SetStoreDir(dir)
 
-	// Record more than maxSnapshotEntries.
+	// Record more than maxSnapshotEntries distinct states.
 	for i := 0; i < maxSnapshotEntries+10; i++ {
+		mutateWorkDir(t, workDir, i)
 		if err := mgr.Track("tool", i); err != nil {
 			t.Fatalf("track %d: %v", i, err)
 		}

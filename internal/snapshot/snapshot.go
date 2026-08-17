@@ -5,7 +5,7 @@
 //   - An isolated git repository at <dataDir>/snapshot/<workdirHash>/ stores
 //     tree/blob objects (content-addressed, deduplicated). The user's working
 //     repo is never touched.
-//   - Track() captures the current working tree state as a git tree object
+//   - Track() captures the current working tree as a git tree object
 //     (git add --all + git write-tree). Returns the tree hash.
 //   - Patch(fromHash) lists files changed since the given snapshot.
 //   - Revert(patches) checks out each file from its snapshot hash, achieving
@@ -15,6 +15,15 @@
 //
 // This gives covo-agent file-level revert that survives process restarts
 // (snapshots are in the isolated git object store, not in-memory).
+//
+// Disk-safety guards:
+//   - The object store itself (and the whole data dir) is excluded from
+//     snapshots via info/exclude, so a session whose workDir contains the
+//     data dir never snapshots its own object store.
+//   - Files larger than maxFileBytes (env COVO_SNAPSHOT_MAX_FILE_MB, default
+//     64 MiB) are excluded: large binary payloads gain nothing from content
+//     addressing and would balloon the store.
+//   - GC(retained) prunes objects that no retained snapshot references.
 package snapshot
 
 import (
@@ -24,8 +33,23 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
+)
+
+const (
+	// defaultMaxFileBytes is the default per-file size limit for snapshot
+	// tracking (64 MiB).
+	defaultMaxFileBytes = 64 << 20
+
+	// excludeRefreshInterval is how often the dynamic (big-file) portion of
+	// the exclude list is recomputed during Track().
+	excludeRefreshInterval = 10 * time.Minute
+
+	// excludeFileHeader marks lines managed by covo-agent in info/exclude.
+	excludeFileHeader = "# Managed by covo-agent snapshot service. Do not edit."
 )
 
 // Patch describes the files changed in one snapshot step.
@@ -47,8 +71,25 @@ type Entry struct {
 type Service struct {
 	mu      sync.Mutex
 	gitDir  string // isolated git repo path
+	dataDir string // absolute path of the covo-agent data dir (parent of snapshot stores)
 	workDir string // user's working directory
 	enabled bool
+
+	// maxFileBytes excludes files larger than this from snapshots.
+	// 0 or negative disables the size limit.
+	maxFileBytes int64
+
+	// staticExcludes are gitignore-style patterns that never change for the
+	// lifetime of the service: the snapshot object store itself (when it
+	// lives inside workDir) and the whole data dir. This keeps the store
+	// self-contained and bounded when workDir overlaps the data dir.
+	staticExcludes []string
+
+	// excludesRefreshedAt caches the last big-file exclude scan.
+	excludesRefreshedAt time.Time
+	// lastExcludeContent is the last content written to info/exclude; used
+	// to detect when the index must be re-staged from scratch.
+	lastExcludeContent string
 }
 
 // NewService initializes an isolated git repository for tracking snapshots of
@@ -59,12 +100,18 @@ func NewService(workDir, dataDir string) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("snapshot: resolve workdir: %w", err)
 	}
+	dataDirAbs, err := filepath.Abs(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot: resolve datadir: %w", err)
+	}
 	workdirHash := hashPath(workDirAbs)
-	gitDir := filepath.Join(dataDir, "snapshot", workdirHash)
+	gitDir := filepath.Join(dataDirAbs, "snapshot", workdirHash)
 
 	s := &Service{
-		gitDir:  gitDir,
-		workDir: workDirAbs,
+		gitDir:       gitDir,
+		dataDir:      dataDirAbs,
+		workDir:      workDirAbs,
+		maxFileBytes: maxFileBytesFromEnv(),
 	}
 
 	// Initialize the isolated git repo if not already present.
@@ -74,6 +121,13 @@ func NewService(workDir, dataDir string) (*Service, error) {
 		return s, nil
 	}
 	s.enabled = true
+
+	// Configure excludes (self-recursion guard + big files) before any
+	// Track() call can stage objects.
+	s.mu.Lock()
+	s.computeStaticExcludes()
+	s.refreshExcludesLocked()
+	s.mu.Unlock()
 	return s, nil
 }
 
@@ -121,6 +175,75 @@ func (s *Service) git(args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
+// NeedsTracking reports whether the working tree differs from the given
+// snapshot tree hash, using cheap stat-based checks that do not hash file
+// contents, stage the tree, or write objects:
+//
+//  1. ls-files --others: any untracked (non-excluded) file means dirty.
+//  2. update-index --refresh: nonzero exit means the work tree differs from
+//     the index's stat cache, i.e. dirty.
+//  3. diff-index --quiet: nonzero exit means the index differs from lastHash.
+//
+// It returns true on any doubt (disabled service, empty hash, git errors) --
+// the safe default is to run the full Track.
+func (s *Service) NeedsTracking(lastHash string) bool {
+	if !s.enabled || lastHash == "" {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Untracked files would be picked up by `git add --all`.
+	if out, err := s.git("ls-files", "--others", "--exclude-standard"); err == nil && strings.TrimSpace(out) != "" {
+		return true
+	}
+	// Refresh the stat cache: nonzero exit reports files that differ from
+	// the index (changed, or stat-dirty needing content comparison).
+	if code := s.runExitCode("update-index", "--refresh"); code != 0 {
+		return true
+	}
+	// Compare index against the last recorded tree.
+	if code := s.runExitCode("diff-index", "--quiet", lastHash); code != 0 {
+		return true
+	}
+	return false
+}
+
+// HasTree reports whether the object store still contains the given tree
+// hash. Used to validate persisted snapshot entries on load: entries whose
+// objects were pruned or lost (e.g. a deleted store) are not usable for
+// undo/revert and should be dropped.
+func (s *Service) HasTree(hash string) bool {
+	if !s.enabled || hash == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	code := s.runExitCode("cat-file", "-e", hash+"^{tree}")
+	return code == 0
+}
+
+// runExitCode runs a git command and returns its exit code (0 on success).
+// Like git(), it targets the isolated repo and the user's work tree.
+func (s *Service) runExitCode(args ...string) int {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = s.workDir
+	cmd.Env = append(os.Environ(),
+		"GIT_DIR="+s.gitDir,
+		"GIT_WORK_TREE="+s.workDir,
+	)
+	// Discard output: these commands are pure predicates for our use.
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return exitErr.ExitCode()
+		}
+		return -1 // spawn failure etc.
+	}
+	return 0
+}
+
 // Track captures the current working tree as a git tree object and returns
 // the tree hash. This is the snapshot primitive: call before/after file
 // changes to record points you can later revert to.
@@ -131,7 +254,12 @@ func (s *Service) Track() (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Keep the exclude list (big files) fresh so `git add --all` respects it.
+	s.refreshExcludesLocked()
+
 	// Stage all working tree files into the isolated repo's index.
+	// info/exclude (written by refreshExcludesLocked) keeps the object store
+	// itself, the data dir, and oversized files out of the snapshot.
 	if _, err := s.git("add", "--all"); err != nil {
 		return "", fmt.Errorf("track: add: %w", err)
 	}
@@ -172,6 +300,12 @@ func (s *Service) Revert(patches []Patch) error {
 
 	for _, p := range patches {
 		for _, file := range p.Files {
+			// Never touch paths under the snapshot store itself; a stale
+			// entry from a legacy (pre-exclude) store could otherwise make
+			// revert delete live object files.
+			if s.isExcludedPath(file) {
+				continue
+			}
 			// Check if the file exists in the snapshot tree.
 			out, err := s.git("ls-tree", p.Hash, "--", file)
 			if err != nil {
@@ -204,6 +338,11 @@ func (s *Service) Restore(snapshot string) error {
 	if _, err := s.git("read-tree", snapshot); err != nil {
 		return fmt.Errorf("restore: read-tree: %w", err)
 	}
+	// Strip excluded paths (object store / data dir) from the restored tree
+	// before checkout: legacy trees recorded before the exclude guard may
+	// contain snapshot-store paths, and checkout-index would overwrite the
+	// live object store with stale object files.
+	s.dropExcludedFromIndexLocked()
 	if _, err := s.git("checkout-index", "-a", "-f"); err != nil {
 		return fmt.Errorf("restore: checkout-index: %w", err)
 	}
@@ -257,10 +396,246 @@ func (s *Service) ListFiles(hash string) ([]string, error) {
 	return splitLines(out), nil
 }
 
+// GC garbage-collects the object store: it points refs at the retained tree
+// hashes (so their objects stay reachable) and then prunes everything else.
+// Call this when snapshot entries are pruned so that trimmed-away snapshots
+// do not keep their objects on disk forever.
+func (s *Service) GC(retained []string) error {
+	if !s.enabled {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Drop previous refs/snapshots/* refs.
+	out, err := s.git("for-each-ref", "--format=%(refname)", "refs/snapshots")
+	if err != nil {
+		return fmt.Errorf("gc: for-each-ref: %w", err)
+	}
+	for _, ref := range splitLines(out) {
+		if _, err := s.git("update-ref", "-d", ref); err != nil {
+			return fmt.Errorf("gc: delete ref %s: %w", ref, err)
+		}
+	}
+
+	// Pin the retained hashes.
+	seen := make(map[string]bool, len(retained))
+	for _, h := range retained {
+		h = strings.TrimSpace(h)
+		if h == "" || seen[h] {
+			continue
+		}
+		seen[h] = true
+		if _, err := s.git("update-ref", "refs/snapshots/"+h, h); err != nil {
+			return fmt.Errorf("gc: pin %s: %w", h, err)
+		}
+	}
+
+	// Prune unreachable objects. The index is treated as a reachability root
+	// by git gc, so currently-staged state is never collected.
+	if _, err := s.git("gc", "--quiet", "--prune=now"); err != nil {
+		return fmt.Errorf("gc: %w", err)
+	}
+	return nil
+}
+
+// --- exclude management ---
+
+// computeStaticExcludes populates staticExcludes with the data dir (and thus
+// the object store) whenever it lives inside the working directory. It must
+// be called with s.mu held.
+func (s *Service) computeStaticExcludes() {
+	s.staticExcludes = nil
+	for _, root := range []string{s.dataDir, s.gitDir} {
+		rel, ok := s.relToWorkDir(root)
+		if !ok {
+			continue // outside the work tree; git will never see it
+		}
+		s.staticExcludes = appendUnique(s.staticExcludes, anchorPattern(rel))
+	}
+}
+
+// refreshExcludesLocked (re)computes the exclude file: static patterns plus
+// patterns for every file larger than maxFileBytes. When the exclude set
+// changes, the index is emptied so the next `git add --all` re-stages the
+// tree without previously-staged excluded paths. Callers must hold s.mu.
+func (s *Service) refreshExcludesLocked() {
+	// Respect the TTL: skip the (potentially expensive) walk if the exclude
+	// file was computed recently.
+	if s.lastExcludeContent != "" && time.Since(s.excludesRefreshedAt) < excludeRefreshInterval {
+		return
+	}
+	s.excludesRefreshedAt = time.Now()
+	patterns := append([]string{}, s.staticExcludes...)
+	if s.maxFileBytes > 0 {
+		patterns = append(patterns, s.scanBigFilesLocked()...)
+	}
+
+	var b strings.Builder
+	b.WriteString(excludeFileHeader + "\n")
+	for _, p := range patterns {
+		b.WriteString(p + "\n")
+	}
+	content := b.String()
+	if content == s.lastExcludeContent {
+		return // nothing changed
+	}
+
+	excludePath := filepath.Join(s.gitDir, "info", "exclude")
+	if err := os.MkdirAll(filepath.Dir(excludePath), 0755); err != nil {
+		return // best-effort
+	}
+	if err := os.WriteFile(excludePath, []byte(content), 0644); err != nil {
+		return // best-effort
+	}
+	s.lastExcludeContent = content
+
+	// The exclude set changed: empty the index so already-staged excluded
+	// paths (from a legacy store, or newly oversized files) drop out on the
+	// next add. --ignore-unmatch makes this a no-op-safe operation.
+	_, _ = s.git("rm", "--cached", "-r", "--quiet", "--ignore-unmatch", ".")
+}
+
+// scanBigFilesLocked walks the working tree and returns anchored gitignore
+// patterns for every regular file larger than maxFileBytes. Skips the
+// excluded roots (data dir / object store) and .git directories. Callers must
+// hold s.mu.
+func (s *Service) scanBigFilesLocked() []string {
+	var patterns []string
+	_ = filepath.WalkDir(s.workDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // unreadable entries are skipped, not fatal
+		}
+		rel, ok := s.relToWorkDir(path)
+		if !ok {
+			return nil
+		}
+		if d.IsDir() {
+			if rel == ".git" || d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			if s.isExcludedPath(rel) {
+				return filepath.SkipDir // data dir / object store subtree
+			}
+			return nil
+		}
+		if s.isExcludedPath(rel) {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			return nil
+		}
+		if info.Size() > s.maxFileBytes {
+			patterns = appendUnique(patterns, anchorPattern(rel))
+		}
+		return nil
+	})
+	return patterns
+}
+
+// isExcludedPath reports whether rel (relative to workDir) falls under one of
+// the static exclude roots. Callers must hold s.mu (reads staticExcludes).
+func (s *Service) isExcludedPath(rel string) bool {
+	clean := filepath.ToSlash(filepath.Clean(rel))
+	for _, pattern := range s.staticExcludes {
+		root := strings.TrimSuffix(strings.TrimPrefix(pattern, "/"), "/")
+		if root == "" {
+			continue
+		}
+		if clean == root || strings.HasPrefix(clean, root+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// relToWorkDir returns path relative to the working directory. ok is false
+// when path is outside the working directory.
+func (s *Service) relToWorkDir(path string) (string, bool) {
+	rel, err := filepath.Rel(s.workDir, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
+}
+
+// dropExcludedFromIndexLocked removes all statically excluded paths from
+// the current index without touching the working tree. Callers must hold s.mu.
+func (s *Service) dropExcludedFromIndexLocked() {
+	roots := make([]string, 0, len(s.staticExcludes))
+	for _, pattern := range s.staticExcludes {
+		root := strings.TrimSuffix(strings.TrimPrefix(pattern, "/"), "/")
+		if root != "" {
+			roots = append(roots, root)
+		}
+	}
+	if len(roots) == 0 {
+		return
+	}
+	args := append([]string{"rm", "--cached", "-r", "--quiet", "--ignore-unmatch", "--"}, roots...)
+	_, _ = s.git(args...)
+}
+
+// restageWithoutExcludes empties the index and re-stages the working tree so
+// that excluded paths (object store, big files) are not part of the index
+// after an index-mutating operation. Callers must hold s.mu.
+func (s *Service) restageWithoutExcludes() {
+	_, _ = s.git("rm", "--cached", "-r", "--quiet", "--ignore-unmatch", ".")
+	_, _ = s.git("add", "--all")
+}
+
+// anchorPattern converts a relative path into an anchored gitignore pattern.
+func anchorPattern(rel string) string {
+	return "/" + escapeGitignore(filepath.ToSlash(filepath.Clean(rel)))
+}
+
+// escapeGitignore escapes gitignore metacharacters so the pattern matches a
+// literal path.
+func escapeGitignore(p string) string {
+	var b strings.Builder
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		switch c {
+		case '\\', '*', '?', '[', ']', '#', '!':
+			b.WriteByte('\\')
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+// maxFileBytesFromEnv reads COVO_SNAPSHOT_MAX_FILE_MB. Absent/invalid values
+// fall back to the default; an explicit 0 disables the size limit.
+func maxFileBytesFromEnv() int64 {
+	v := strings.TrimSpace(os.Getenv("COVO_SNAPSHOT_MAX_FILE_MB"))
+	if v == "" {
+		return defaultMaxFileBytes
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return defaultMaxFileBytes
+	}
+	if n == 0 {
+		return 0 // explicit opt-out of the size limit
+	}
+	return n << 20
+}
+
 // hashPath creates a stable filesystem-safe hash for a working directory path.
 func hashPath(p string) string {
 	h := sha1.Sum([]byte(p))
 	return hex.EncodeToString(h[:8])
+}
+
+// appendUnique appends s to list if not already present.
+func appendUnique(list []string, s string) []string {
+	for _, existing := range list {
+		if existing == s {
+			return list
+		}
+	}
+	return append(list, s)
 }
 
 // splitLines splits output into trimmed non-empty lines.

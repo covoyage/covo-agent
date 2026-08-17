@@ -43,6 +43,9 @@ type SnapshotManager struct {
 	revertSnapshot string
 	// reverted tracks whether we're currently in a reverted state.
 	reverted bool
+	// lastGC bounds how often the object store is garbage-collected when
+	// entries are pruned.
+	lastGC time.Time
 }
 
 // NewSnapshotManager creates a manager wrapping the given snapshot service.
@@ -91,11 +94,27 @@ func (m *SnapshotManager) Track(toolName string, msgIdx int) error {
 		prevHash = m.entries[len(m.entries)-1].Hash
 	}
 
+	// Fast path: if the work tree is identical to the last recorded
+	// snapshot (stat-based check, no staging or object writes), skip the
+	// full Track entirely. Frequent tool hooks then pay only for a cheap
+	// dirty check instead of a full `git add --all` walk when nothing
+	// changed.
+	if prevHash != "" && !m.service.NeedsTracking(prevHash) {
+		return nil
+	}
+
 	hash, err := m.service.Track()
 	if err != nil {
 		return fmt.Errorf("snapshot track: %w", err)
 	}
 	if hash == "" {
+		return nil
+	}
+
+	// Skip no-op snapshots: if the tree hash is unchanged since the last
+	// entry there is nothing new to revert to, and recording a duplicate
+	// entry would only grow snapshots.json without value.
+	if hash == prevHash {
 		return nil
 	}
 
@@ -423,21 +442,40 @@ func (m *SnapshotManager) FormatList() string {
 // recorded, preventing unbounded growth during long sessions.
 const maxSnapshotEntries = 100
 
+// snapshotGCInterval bounds how often the snapshot object store is pruned of
+// objects that no retained entry references anymore.
+const snapshotGCInterval = time.Hour
+
 func (m *SnapshotManager) persistLocked() {
 	if m.storeDir == "" {
 		return
 	}
 	// Auto-prune: keep only the most recent maxSnapshotEntries.
-	if len(m.entries) > maxSnapshotEntries {
+	trimmed := len(m.entries) > maxSnapshotEntries
+	if trimmed {
 		m.entries = m.entries[len(m.entries)-maxSnapshotEntries:]
 	}
-	_ = os.MkdirAll(m.storeDir, 0755)
+	os.MkdirAll(m.storeDir, 0755)
 	path := filepath.Join(m.storeDir, "snapshots.json")
 	data, err := json.Marshal(m.entries)
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(path, data, 0644)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return
+	}
+	// When entries have been pruned away (either by the cap above or by
+	// undo/revert truncation), the objects they referenced are unreachable:
+	// garbage-collect the store so pruned snapshots stop occupying disk.
+	// Rate-limited because git gc walks the whole object store.
+	if trimmed && time.Since(m.lastGC) > snapshotGCInterval && m.service != nil {
+		m.lastGC = time.Now()
+		retained := make([]string, len(m.entries))
+		for i, e := range m.entries {
+			retained[i] = e.Hash
+		}
+		_ = m.service.GC(retained)
+	}
 }
 
 func (m *SnapshotManager) loadPersistedLocked() {
@@ -452,6 +490,25 @@ func (m *SnapshotManager) loadPersistedLocked() {
 	var loaded []snapshot.Entry
 	if err := json.Unmarshal(data, &loaded); err != nil {
 		return
+	}
+
+	// Validate entries against the object store: entries whose tree objects
+	// are missing (pruned, or the store itself was removed) cannot be
+	// reverted to and would only produce git errors in undo/rewind. Drop
+	// them and persist the pruned list so the file self-heals on first load.
+	if m.service != nil && m.service.Enabled() {
+		kept := make([]snapshot.Entry, 0, len(loaded))
+		for _, e := range loaded {
+			if m.service.HasTree(e.Hash) {
+				kept = append(kept, e)
+			}
+		}
+		if len(kept) != len(loaded) {
+			loaded = kept
+			if jsonBytes, err := json.Marshal(loaded); err == nil {
+				_ = os.WriteFile(path, jsonBytes, 0644)
+			}
+		}
 	}
 	m.entries = loaded
 }
