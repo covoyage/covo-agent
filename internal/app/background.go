@@ -97,13 +97,18 @@ func (m *BackgroundManager) Start(input string, createAgent func() *agent.CovoAg
 	m.mu.Unlock()
 
 	safego.SafeGo(func() {
-		defer ca.Close()
 		defer cancel()
 		// Flush this task's spans promptly; do NOT shut down the pipeline —
 		// the interactive session keeps running in this process.
 		defer telemetry.FlushOtel(context.Background())
 
 		output, err := ca.RunDirectWithSession(ctx, input, "bg-"+bt.ID)
+
+		// Close the agent BEFORE marking the task finished: Close waits out
+		// background work (e.g. the async snapshot baseline), so once an
+		// observer sees a terminal status the agent is fully torn down and
+		// nothing writes into its data dir anymore.
+		ca.Close()
 
 		m.mu.Lock()
 		bt.Output = output

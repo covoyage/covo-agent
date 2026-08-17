@@ -124,6 +124,17 @@ func (m *SnapshotManager) BaselineDone() bool {
 	return m.asyncBaselineDone || m.baselineReady == nil
 }
 
+// Shutdown waits for any in-flight async baseline to finish. Call this before
+// discarding the manager or deleting its data dir (agent Close, test
+// cleanup): the background goroutine must not write into a store that is
+// being torn down concurrently.
+func (m *SnapshotManager) Shutdown() {
+	if m == nil {
+		return
+	}
+	m.waitBaseline()
+}
+
 // ShouldSnapshot returns true if the given tool name is a file-mutating tool
 // that should trigger a snapshot.
 func ShouldSnapshot(toolName string) bool {

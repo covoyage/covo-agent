@@ -1196,6 +1196,13 @@ func splitAndTrim(s string) []string {
 }
 
 func (ca *CovoAgent) Close() {
+	// Wait out the async baseline snapshot: after Close no new work arrives,
+	// and the background goroutine must not outlive the store it writes to
+	// (its data dir may be torn down right after this, e.g. in tests).
+	if ca.snapshotMgr != nil {
+		ca.snapshotMgr.Shutdown()
+	}
+
 	if ca.trajectory != nil {
 		ca.trajectory.Save(false)
 	}
