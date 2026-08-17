@@ -93,11 +93,14 @@ func (m *SnapshotManager) TrackBaselineAsync() {
 		hash, err := m.service.Track()
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		m.asyncBaselineDone = true
-		close(m.baselineReady)
+		// Record the entry (persists snapshots.json) BEFORE signalling
+		// baselineReady: waitBaseline / Shutdown must not return while a
+		// write into the store's data dir is still in flight.
 		if err == nil && hash != "" {
 			m.recordEntryLocked(hash, "baseline", 0, nil)
 		}
+		m.asyncBaselineDone = true
+		close(m.baselineReady)
 	}()
 }
 
