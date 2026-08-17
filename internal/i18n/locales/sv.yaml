@@ -53,6 +53,9 @@ system:
   language_switched: Språk ändrat till {name}
   language_unknown: 'Okänt språk: {code}'
   language_usage: 'Användning: /language <kod> | /language list'
+ask_user:
+  title: "❓ Fråga"
+  navigation: "↑↓ välj  Enter bekräfta  Esc avbryt"
 keybinding:
   help: Genvägshjälp
   quit: Avsluta

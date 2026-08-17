@@ -52,6 +52,9 @@ system:
   language_switched: เปลี่ยนภาษาเป็น {name}
   language_unknown: 'ภาษาไม่รู้จัก: {code}'
   language_usage: 'วิธีใช้: /language <รหัส> | /language list'
+ask_user:
+  title: "❓ คำถาม"
+  navigation: "↑↓ เลือก  Enter ยืนยัน  Esc ยกเลิก"
 keybinding:
   help: ช่วยเหลือทางลัด
   quit: ออก

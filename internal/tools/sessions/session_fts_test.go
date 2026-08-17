@@ -772,3 +772,129 @@ func TestExtractSnippet(t *testing.T) {
 		}
 	})
 }
+
+// --- IndexSpill: spill metadata + preview becomes searchable ---
+
+func TestFTSSearcher_IndexSpill(t *testing.T) {
+	fts, dir := newTestFTS(t)
+
+	// Write a normal session so the test isn't empty
+	writeTestSession(t, dir, "sess-1", "Test", []sessionMessage{
+		{Role: "user", Content: "hello world"},
+	})
+	if err := fts.Rebuild(); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	// Index a spill directly via the API
+	spillContent := "This is a very long webpack config dump with lots of stuff\nmodule.exports = { entry: './src/index.js' }"
+	if err := fts.IndexSpill("sess-1", "webpack_config", "parse later", spillContent, "/tmp/spill.txt", 2000); err != nil {
+		t.Fatalf("IndexSpill: %v", err)
+	}
+
+	// Search for a term in the spill content — should find it
+	results, err := fts.Search(context.Background(), "webpack", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected spill to be searchable via IndexSpill")
+	}
+
+	found := false
+	for _, r := range results {
+		if r.SessionID == "sess-1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected sess-1 to appear in results for spill content 'webpack'")
+	}
+
+	// Search for the spill name (also indexed)
+	results, err = fts.Search(context.Background(), "webpack_config", 10)
+	if err != nil {
+		t.Fatalf("Search by name: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected spill name 'webpack_config' to be searchable")
+	}
+}
+
+// --- IndexSpill: preview truncation ---
+
+func TestFTSSearcher_IndexSpill_Truncation(t *testing.T) {
+	fts, dir := newTestFTS(t)
+	writeTestSession(t, dir, "sess-1", "Test", []sessionMessage{
+		{Role: "user", Content: "hello"},
+	})
+	if err := fts.Rebuild(); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	// Content 5000 chars; previewLen=100 → only first 100 chars indexed
+	longContent := strings.Repeat("a", 4900) + "UNIQUEMARKER"
+	if err := fts.IndexSpill("sess-1", "big-spill", "test", longContent, "/tmp/spill.txt", 100); err != nil {
+		t.Fatalf("IndexSpill: %v", err)
+	}
+
+	// "UNIQUEMARKER" should NOT be found (it's past the 100-char preview)
+	results, err := fts.Search(context.Background(), "UNIQUEMARKER", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	for _, r := range results {
+		if r.SessionID == "sess-1" {
+			t.Error("UNIQUEMARKER should not appear in search results (beyond preview window)")
+		}
+	}
+
+	// "big-spill" (the name) should still be found
+	results, err = fts.Search(context.Background(), "big-spill", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) == 0 {
+		t.Error("expected spill name 'big-spill' to be found")
+	}
+}
+
+// --- IndexSpill: snippet prefix is [spill] ---
+
+func TestFTSSearcher_IndexSpill_SnippetRole(t *testing.T) {
+	fts, dir := newTestFTS(t)
+	writeTestSession(t, dir, "sess-1", "Test", []sessionMessage{
+		{Role: "user", Content: "hello"},
+	})
+	if err := fts.Rebuild(); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	if err := fts.IndexSpill("sess-1", "my-spill", "for later", "searchable spill text here", "/tmp/spill.txt", 2000); err != nil {
+		t.Fatalf("IndexSpill: %v", err)
+	}
+
+	results, err := fts.Search(context.Background(), "searchable", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected results")
+	}
+
+	// Find the snippet that contains "searchable"
+	found := false
+	for _, s := range results[0].Snippets {
+		if strings.Contains(s, "searchable") {
+			if !strings.HasPrefix(s, "[spill]") {
+				t.Errorf("expected spill snippet to start with '[spill]', got prefix %q", s[:min(20, len(s))])
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected snippet containing 'searchable'")
+	}
+}

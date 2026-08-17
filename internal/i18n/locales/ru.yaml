@@ -114,6 +114,9 @@ system:
   language_switched: Язык изменён на {name}
   language_unknown: 'Неизвестный язык: {code}'
   language_usage: 'Использование: /language <код> | /language list'
+ask_user:
+  title: "❓ Вопрос"
+  navigation: "↑↓ выбрать  Enter подтвердить  Esc отмена"
 keybinding:
   help: Помощь по клавишам
   quit: Выход

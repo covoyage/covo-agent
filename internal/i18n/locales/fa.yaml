@@ -53,6 +53,9 @@ system:
   language_switched: زبان تغییر یافت به {name}
   language_unknown: 'زبان ناشناخته: {code}'
   language_usage: 'استفاده: /language <کد> | /language list'
+ask_user:
+  title: "❓ سؤال"
+  navigation: "↑↓ انتخاب  Enter تأیید  Esc لغو"
 keybinding:
   help: راهنمای میانبرها
   quit: خروج

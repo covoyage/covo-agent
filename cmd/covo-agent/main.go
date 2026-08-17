@@ -883,6 +883,62 @@ func runInteractive(opts *rootOptions, runtime *commandRuntime) {
 		return agent.ReadStdinLine(ctx)
 	})
 
+	// Wire TUI-friendly structured questions (ask_user tool): when the model
+	// supplied options, show an option picker; otherwise print the question
+	// and read a line from stdin (same path as human_handoff). An unanswered
+	// or cancelled question falls back to the model-provided default.
+	covoAgent.SetAskUserCallback(func(ctx context.Context, question string, options []string, defaultValue string) (string, error) {
+		fallback := func(err error) (string, error) {
+			if defaultValue != "" {
+				return defaultValue, nil
+			}
+			return "", err
+		}
+
+		host := loadUIBus().Host()
+		if len(options) > 0 && host != nil {
+			chosen := make(chan string, 1)
+			var ov chat.OverlayRef
+			picker := agentpanels.NewAskUserPicker(question, options,
+				func(answer string) {
+					chosen <- answer
+					if ov != nil {
+						host.RemoveOverlay(ov)
+					}
+					host.Focus(loadUIBus().Editor())
+				},
+				func() {
+					chosen <- ""
+					if ov != nil {
+						host.RemoveOverlay(ov)
+					}
+					host.Focus(loadUIBus().Editor())
+				},
+			)
+			ov = agentui.NewAnchoredOverlay(picker, 4, 50, 50, 50, 25)
+			host.PushOverlay(ov)
+			select {
+			case answer := <-chosen:
+				if strings.TrimSpace(answer) == "" {
+					return fallback(fmt.Errorf("ask_user: no answer selected"))
+				}
+				return answer, nil
+			case <-ctx.Done():
+				return fallback(ctx.Err())
+			}
+		}
+
+		loadUIBus().PrintSystem("── " + question + " ──")
+		answer, err := agent.ReadStdinLine(ctx)
+		if err != nil {
+			return fallback(err)
+		}
+		if strings.TrimSpace(answer) == "" {
+			return fallback(fmt.Errorf("ask_user: no answer provided"))
+		}
+		return answer, nil
+	})
+
 	// Display a random feature discovery tip
 	app.PrintSystem(i18n.T("system.tip_prefix", "tip", agentui.RandomTip()))
 

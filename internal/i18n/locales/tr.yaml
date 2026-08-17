@@ -114,6 +114,9 @@ system:
   language_switched: Dil {name} olarak değiştirildi
   language_unknown: 'Bilinmeyen dil: {code}'
   language_usage: 'Kullanım: /language <kod> | /language list'
+ask_user:
+  title: "❓ Soru"
+  navigation: "↑↓ seç  Enter onayla  Esc iptal"
 keybinding:
   help: Kısayol yardımı
   quit: Çıkış

@@ -49,6 +49,9 @@ system:
   new_conversation: nouvelle conversation démarrée
   no_skills: (aucun skill)
   no_session: (aucune session)
+ask_user:
+  title: "❓ Question"
+  navigation: "↑↓ choisir  Enter confirmer  Esc annuler"
 keybinding:
   help: Aide des raccourcis
   quit: Quitter

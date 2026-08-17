@@ -52,6 +52,9 @@ system:
   language_switched: Bahasa diubah ke {name}
   language_unknown: 'Bahasa tidak dikenal: {code}'
   language_usage: 'Penggunaan: /language <kode> | /language list'
+ask_user:
+  title: "❓ Pertanyaan"
+  navigation: "↑↓ pilih  Enter konfirmasi  Esc batal"
 keybinding:
   help: Bantuan pintasan
   quit: Keluar

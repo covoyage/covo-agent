@@ -113,6 +113,9 @@ system:
   language_switched: Lingua cambiata in {name}
   language_unknown: 'Lingua sconosciuta: {code}'
   language_usage: 'Uso: /language <codice> | /language list'
+ask_user:
+  title: "❓ Domanda"
+  navigation: "↑↓ scegli  Enter conferma  Esc annulla"
 keybinding:
   help: Aiuto scorciatoie
   quit: Esci

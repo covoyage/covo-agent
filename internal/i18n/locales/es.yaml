@@ -48,6 +48,9 @@ system:
   new_conversation: nueva conversación iniciada
   no_skills: (sin skills)
   no_session: (sin sesiones guardadas)
+ask_user:
+  title: "❓ Pregunta"
+  navigation: "↑↓ elegir  Enter confirmar  Esc cancelar"
 keybinding:
   help: Ayuda de atajos
   quit: Salir

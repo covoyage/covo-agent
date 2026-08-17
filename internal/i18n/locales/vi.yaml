@@ -53,6 +53,9 @@ system:
   language_switched: Đã đổi ngôn ngữ sang {name}
   language_unknown: 'Ngôn ngữ không xác định: {code}'
   language_usage: 'Cách dùng: /language <mã> | /language list'
+ask_user:
+  title: "❓ Câu hỏi"
+  navigation: "↑↓ chọn  Enter xác nhận  Esc hủy"
 keybinding:
   help: Trợ giúp phím tắt
   quit: Thoát

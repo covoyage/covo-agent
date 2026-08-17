@@ -52,6 +52,9 @@ system:
   language_switched: השפה שונתה ל- {name}
   language_unknown: 'שפה לא ידועה: {code}'
   language_usage: 'שימוש: /language <קוד> | /language list'
+ask_user:
+  title: "❓ שאלה"
+  navigation: "↑↓ לבחור  Enter לאשר  Esc ביטול"
 keybinding:
   help: עזרת קיצורים
   quit: צא

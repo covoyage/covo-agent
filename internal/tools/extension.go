@@ -82,6 +82,7 @@ type Extension struct {
 	spawnRunner     toolssubagent.SpawnRunner
 	subagentRunner  *toolssubagent.SubagentRunner
 	handoffCallback HandoffCallback
+	askUserCallback AskUserFunc
 	sandbox         sandbox.Sandbox
 	logger          *slog.Logger
 	tools           []*agentcore.Tool
@@ -101,6 +102,11 @@ type ExtensionConfig struct {
 	SpawnRunner toolssubagent.SpawnRunner
 	// HandoffCallback is the function used to block on user input for human_handoff.
 	HandoffCallback HandoffCallback
+	// AskUserCallback is the function used to present a structured question to
+	// the user for the ask_user tool. May be nil: when nil, ask_user degrades
+	// to the caller-provided default (or fails when no default is given), which
+	// is the right behaviour for headless/cron/oneshot runs.
+	AskUserCallback AskUserFunc
 	// Sandbox is the sandbox for isolated command execution.
 	Sandbox sandbox.Sandbox
 	// Logger for MCP auto-connect and other operations.
@@ -220,6 +226,7 @@ func NewExtension(cfg ExtensionConfig) *Extension {
 		spawnRunner:     cfg.SpawnRunner,
 		subagentRunner:  subagent,
 		handoffCallback: cfg.HandoffCallback,
+		askUserCallback: cfg.AskUserCallback,
 		sandbox:         cfg.Sandbox,
 		logger:          logger,
 		toolProfile:     cfg.ToolProfile,
@@ -256,6 +263,13 @@ func (e *Extension) Name() string { return "agent-tools" }
 // SetHandoffCallback replaces the handoff callback (used by human_handoff tool).
 func (e *Extension) SetHandoffCallback(cb HandoffCallback) {
 	e.handoffCallback = cb
+}
+
+// SetAskUserCallback replaces the structured question callback (used by the
+// ask_user tool). Nil disables interactive questions, so ask_user falls back
+// to its default answer (or fails without one).
+func (e *Extension) SetAskUserCallback(cb AskUserFunc) {
+	e.askUserCallback = cb
 }
 
 // SetGoalStore sets the SQLite-backed goal store and session ID provider
@@ -329,6 +343,14 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 	agentCfg := agent.Config()
 	provider := agentCfg.Provider
 	model := agentCfg.Model
+
+	// Wire spill → FTS indexer so spills become session_search results.
+	if e.ftsSearcher != nil {
+		SetSpillIndexer(func(sessionID, name, purpose, content, spillPath string) error {
+			const previewLen = 2000
+			return e.ftsSearcher.IndexSpill(sessionID, name, purpose, content, spillPath, previewLen)
+		})
+	}
 
 	e.swarmOrch = toolswarm.NewSwarmOrchestrator(e.spawnRunner, e.subagentRunner, func() []string {
 		return agent.ToolNames()
@@ -420,6 +442,21 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		fileops.BuildApplyPatchTool(),
 		// Batch 9: human_handoff
 		buildHumanHandoffTool(e.handoffCallback),
+		// Batch 9b: ask_user (structured questions with options + default)
+		buildAskUserTool(e.askUserCallback),
+		// Batch 9c: spill (explicit result offload with lineage) + spill_list
+		BuildSpillTool(e.homeDir, func() string {
+			if e.sessionIDFn != nil {
+				return e.sessionIDFn()
+			}
+			return ""
+		}),
+		BuildSpillListTool(e.homeDir, func() string {
+			if e.sessionIDFn != nil {
+				return e.sessionIDFn()
+			}
+			return ""
+		}),
 		// Batch 10: llm_task
 		buildLLMTaskTool(provider, model),
 		// Batch 11: kanban

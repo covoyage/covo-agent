@@ -49,6 +49,10 @@ approval:
   delete_multi: "delete {count} files"
   execute_op: "execute: {command}"
 
+ask_user:
+  title: "❓ Question"
+  navigation: "↑↓ choose  Enter confirm  Esc cancel"
+
 pairing:
   access_denied: "Access pending. Pairing code: {code}. Ask an administrator to approve it."
   approved_label: "Approved:"

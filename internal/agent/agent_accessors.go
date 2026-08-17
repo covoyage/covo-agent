@@ -38,6 +38,13 @@ func (ca *CovoAgent) SetHandoffCallback(cb agenttools.HandoffCallback) {
 	ca.agentTools.SetHandoffCallback(cb)
 }
 
+// SetAskUserCallback replaces the ask_user callback (e.g. for TUI mode).
+// When nil, ask_user falls back to its default answer, or fails if the model
+// did not provide one — the right behaviour for headless/cron/oneshot runs.
+func (ca *CovoAgent) SetAskUserCallback(cb agenttools.AskUserFunc) {
+	ca.agentTools.SetAskUserCallback(cb)
+}
+
 func (ca *CovoAgent) Config() agentcore.Config {
 	return ca.cfg
 }

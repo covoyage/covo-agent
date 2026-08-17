@@ -113,6 +113,9 @@ system:
   language_switched: Idioma alterado para {name}
   language_unknown: 'Idioma desconhecido: {code}'
   language_usage: 'Uso: /language <código> | /language list'
+ask_user:
+  title: "❓ Pergunta"
+  navigation: "↑↓ escolher  Enter confirmar  Esc cancelar"
 keybinding:
   help: Ajuda de atalhos
   quit: Sair

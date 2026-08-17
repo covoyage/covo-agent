@@ -51,10 +51,11 @@ func BuildSessionSearchTool(sessionsDir string, fts *FTSSearcher) *agentcore.Too
 		Description: strings.Join([]string{
 			"Search and browse past conversation sessions. Use this to recall previous work,",
 			"find code changes discussed earlier, or check what was done in past sessions.",
+			"Also searches spill artifacts (text offloaded via the spill tool) and their metadata.",
 			"",
 			"Without a query: lists recent sessions with metadata (most recent first).",
-			"With a keyword query: full-text search across session transcripts, returning",
-			"matching snippets grouped by session.",
+			"With a keyword query: full-text search across session transcripts and spill contents,",
+			"returning matching snippets grouped by session.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",

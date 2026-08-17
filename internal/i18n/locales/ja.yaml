@@ -51,6 +51,9 @@ system:
   new_conversation: 新しい会話を開始しました
   no_skills: （登録スキルなし）
   no_session: （保存セッションなし）
+ask_user:
+  title: "❓ 質問"
+  navigation: "↑↓ 選択  Enter 決定  Esc キャンセル"
 keybinding:
   help: キーバインドヘルプを切替
   quit: アプリケーションを終了

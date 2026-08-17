@@ -22,10 +22,13 @@ func (*blockingProvider) Complete(ctx context.Context, _ *agentcore.ProviderRequ
 }
 
 func (*blockingProvider) Stream(ctx context.Context, _ *agentcore.ProviderRequest) (<-chan agentcore.StreamDelta, error) {
-	ch := make(chan agentcore.StreamDelta)
+	ch := make(chan agentcore.StreamDelta, 1)
 	go func() {
 		<-ctx.Done()
-		ch <- agentcore.StreamDelta{Err: ctx.Err()}
+		select {
+		case ch <- agentcore.StreamDelta{Err: ctx.Err()}:
+		default:
+		}
 		close(ch)
 	}()
 	return ch, nil

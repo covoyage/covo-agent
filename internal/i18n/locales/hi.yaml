@@ -53,6 +53,9 @@ system:
   language_switched: भाषा बदली गई {name}
   language_unknown: 'अज्ञात भाषा: {code}'
   language_usage: 'उपयोग: /language <कोड> | /language list'
+ask_user:
+  title: "❓ प्रश्न"
+  navigation: "↑↓ चुनें  Enter पुष्टि करें  Esc रद्द करें"
 keybinding:
   help: शॉर्टकट सहायता
   quit: बाहर निकलें
