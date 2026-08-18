@@ -51,6 +51,9 @@ system:
   language_switched: تم تغيير اللغة إلى {name}
   language_unknown: 'لغة غير معروفة: {code}'
   language_usage: 'الاستخدام: /language <كود> | /language list'
+ask_user:
+  title: "❓ سؤال"
+  navigation: "↑↓ اختيار  Enter تأكيد  Esc إلغاء"
 keybinding:
   help: مساعدة الاختصارات
   quit: خروج

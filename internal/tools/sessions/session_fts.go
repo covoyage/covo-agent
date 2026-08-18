@@ -243,6 +243,38 @@ func (s *FTSSearcher) Rebuild() error {
 	return tx.Commit()
 }
 
+// IndexSpill inserts a spill artifact into the FTS5 index so it is
+// searchable via session_search. The content is stored under role="spill"
+// with a synthetic prefix that makes snippets self-describing. Only the
+// first previewLen characters of content are indexed to keep the index
+// lightweight; the full text remains on disk at spillPath for the read tool.
+func (s *FTSSearcher) IndexSpill(sessionID, name, purpose, content, spillPath string, previewLen int) error {
+	if previewLen <= 0 {
+		previewLen = 2000
+	}
+	preview := content
+	if len(preview) > previewLen {
+		preview = preview[:previewLen] + "..."
+	}
+
+	// Build a searchable composite string: "[spill] name=X purpose=Y <content preview>"
+	var b strings.Builder
+	fmt.Fprintf(&b, "[spill] %s", name)
+	if purpose != "" {
+		fmt.Fprintf(&b, " purpose=%s", purpose)
+	}
+	fmt.Fprintf(&b, " path=%s\n%s", spillPath, preview)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(
+		"INSERT INTO messages_fts (session_id, role, content) VALUES (?, ?, ?)",
+		sessionID, "spill", b.String(),
+	)
+	return err
+}
+
 func (s *FTSSearcher) Search(ctx context.Context, query string, limit int) ([]sessionResult, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

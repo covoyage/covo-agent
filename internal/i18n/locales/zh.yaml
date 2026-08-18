@@ -48,6 +48,10 @@ approval:
   delete_multi: "删除 {count} 个文件"
   execute_op: "执行: {command}"
 
+ask_user:
+  title: "❓ 提问"
+  navigation: "↑↓ 选择  Enter 确认  Esc 取消"
+
 pairing:
   access_denied: "访问待批准。配对码：{code}。请联系管理员批准。"
   approved_label: "已批准："

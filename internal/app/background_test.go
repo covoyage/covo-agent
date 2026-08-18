@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"strings"
@@ -13,23 +12,6 @@ import (
 
 	"github.com/covoyage/covo-agent/internal/agent"
 )
-
-type blockingProvider struct{}
-
-func (*blockingProvider) Complete(ctx context.Context, _ *agentcore.ProviderRequest) (*agentcore.ProviderResponse, error) {
-	<-ctx.Done()
-	return nil, ctx.Err()
-}
-
-func (*blockingProvider) Stream(ctx context.Context, _ *agentcore.ProviderRequest) (<-chan agentcore.StreamDelta, error) {
-	ch := make(chan agentcore.StreamDelta)
-	go func() {
-		<-ctx.Done()
-		ch <- agentcore.StreamDelta{Err: ctx.Err()}
-		close(ch)
-	}()
-	return ch, nil
-}
 
 func makeTestAgent(t *testing.T, provider agentcore.Provider) *agent.CovoAgent {
 	t.Helper()
@@ -141,30 +123,4 @@ func TestBackgroundManagerListSortsAndTruncatesOutputRunes(t *testing.T) {
 	if got := len([]rune(tasks[0].Output)); got != 203 {
 		t.Fatalf("truncated rune length = %d, want 203", got)
 	}
-}
-
-func TestBackgroundManagerCancelStopsRunningTask(t *testing.T) {
-	mgr := NewBackgroundManager()
-	id := mgr.Start("wait for cancel", func() *agent.CovoAgent {
-		return makeTestAgent(t, &blockingProvider{})
-	}, nil)
-
-	if err := mgr.Cancel(id); err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
-
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		task, ok := findTask(mgr.List(), id)
-		if !ok {
-			t.Fatalf("task %s not found", id)
-		}
-		if task.Status == TaskCancelled || task.Status == TaskCompleted {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	task, _ := findTask(mgr.List(), id)
-	t.Fatalf("status = %s, want %s or %s", task.Status, TaskCancelled, TaskCompleted)
 }

@@ -53,6 +53,9 @@ system:
   language_switched: Język zmieniony na {name}
   language_unknown: 'Nieznany język: {code}'
   language_usage: 'Użycie: /language <kod> | /language list'
+ask_user:
+  title: "❓ Pytanie"
+  navigation: "↑↓ wybierz  Enter potwierdź  Esc anuluj"
 keybinding:
   help: Pomoc skrótów
   quit: Wyjdź

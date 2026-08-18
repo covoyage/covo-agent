@@ -53,6 +53,9 @@ system:
   language_switched: Taal gewijzigd naar {name}
   language_unknown: 'Onbekende taal: {code}'
   language_usage: 'Gebruik: /language <code> | /language list'
+ask_user:
+  title: "❓ Vraag"
+  navigation: "↑↓ kiezen  Enter bevestigen  Esc annuleren"
 keybinding:
   help: Sneltoetshulp
   quit: Afsluiten

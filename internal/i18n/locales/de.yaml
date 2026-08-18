@@ -48,6 +48,9 @@ system:
   new_conversation: Neue Konversation gestartet
   no_skills: (keine Skills registriert)
   no_session: (keine gespeicherten Sitzungen)
+ask_user:
+  title: "❓ Frage"
+  navigation: "↑↓ wählen  Enter bestätigen  Esc abbrechen"
 keybinding:
   help: Tastenkürzel-Hilfe umschalten
   quit: Anwendung beenden

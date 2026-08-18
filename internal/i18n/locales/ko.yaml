@@ -47,6 +47,9 @@ system:
   new_conversation: 새 대화 시작됨
   no_skills: (등록된 스킬 없음)
   no_session: (저장된 세션 없음)
+ask_user:
+  title: "❓ 질문"
+  navigation: "↑↓ 선택  Enter 확인  Esc 취소"
 keybinding:
   help: 키바인딩 도움말 전환
   quit: 애플리케이션 종료
