@@ -36,6 +36,7 @@ type GroupSpan struct {
 	Hidden   int   // Truncation: 隐藏数
 	Expanded bool  // 用户是否手动展开
 	Verb     string // VerbRun: 聚合动词（如 "Read"）
+	EntryID  EntryID // 触发此 span 的 entry ID（用于查找展开状态）
 }
 
 // GroupModel 管理折叠状态。
@@ -92,7 +93,10 @@ func (gm *GroupModel) Rebuild(p *ScrollbackPipeline, maxVisible int) []GroupSpan
 		}
 		if count >= 2 {
 			entryID := entries[start].ID
-			expanded := gm.expandedGroups[entryID]
+			expanded, ok := gm.expandedGroups[entryID]
+			if !ok {
+				expanded = true // 默认展开
+			}
 			gm.spans = append(gm.spans, GroupSpan{
 				StartIdx: start,
 				EndIdx:   end + 1,
@@ -100,6 +104,7 @@ func (gm *GroupModel) Rebuild(p *ScrollbackPipeline, maxVisible int) []GroupSpan
 				Members:  count,
 				Expanded: expanded,
 				Verb:     verb,
+				EntryID:  entryID,
 			})
 		}
 		// 跳过已处理的 run（end+1 是下一个未检查的 entry）
@@ -128,7 +133,10 @@ func (gm *GroupModel) Rebuild(p *ScrollbackPipeline, maxVisible int) []GroupSpan
 		if participants > maxVisible {
 			hidden := participants - maxVisible
 			entryID := entries[start].ID
-			expanded := gm.expandedGroups[entryID]
+			expanded, ok := gm.expandedGroups[entryID]
+			if !ok {
+				expanded = true // 默认展开
+			}
 			gm.spans = append(gm.spans, GroupSpan{
 				StartIdx: start,
 				EndIdx:   end + 1,
@@ -136,6 +144,7 @@ func (gm *GroupModel) Rebuild(p *ScrollbackPipeline, maxVisible int) []GroupSpan
 				Members:  participants,
 				Hidden:   hidden,
 				Expanded: expanded,
+				EntryID:  entryID,
 			})
 		}
 		i = end + 1
@@ -158,10 +167,17 @@ func (gm *GroupModel) SpanContaining(idx int) *GroupSpan {
 }
 
 // ToggleExpand 切换某个 group 的展开/折叠状态。
+// 未显式设置的 group 默认展开，首次 toggle 折叠。
 func (gm *GroupModel) ToggleExpand(entryID EntryID) {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
-	if gm.expandedGroups[entryID] {
+	expanded, ok := gm.expandedGroups[entryID]
+	if !ok {
+		// 默认展开 → 首次 toggle 折叠
+		gm.expandedGroups[entryID] = false
+		return
+	}
+	if expanded {
 		delete(gm.expandedGroups, entryID)
 	} else {
 		gm.expandedGroups[entryID] = true
@@ -169,10 +185,15 @@ func (gm *GroupModel) ToggleExpand(entryID EntryID) {
 }
 
 // IsExpanded 检查某个 group 是否被手动展开。
+// 未显式设置的 group 默认展开（让用户看到完整内容，需要时手动折叠）。
 func (gm *GroupModel) IsExpanded(entryID EntryID) bool {
 	gm.mu.RLock()
 	defer gm.mu.RUnlock()
-	return gm.expandedGroups[entryID]
+	expanded, ok := gm.expandedGroups[entryID]
+	if !ok {
+		return true // 默认展开
+	}
+	return expanded
 }
 
 // Spans 返回所有折叠 span。
@@ -187,7 +208,17 @@ func (gm *GroupModel) Spans() []GroupSpan {
 // IsEntryHidden 检查给定 entry 索引是否被折叠隐藏。
 func (gm *GroupModel) IsEntryHidden(idx int) bool {
 	span := gm.SpanContaining(idx)
-	if span == nil || span.Expanded {
+	if span == nil {
+		return false
+	}
+	// 检查实时展开状态（span.Expanded 是快照，可能已过时）
+	gm.mu.RLock()
+	expanded, ok := gm.expandedGroups[span.EntryID]
+	if !ok {
+		expanded = true // 默认展开
+	}
+	gm.mu.RUnlock()
+	if expanded {
 		return false
 	}
 	switch span.Kind {

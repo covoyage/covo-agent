@@ -192,18 +192,27 @@ func TestVerbGroup(t *testing.T) {
 		t.Errorf("expected EndIdx=3, got %d (skip entry bug)", spans[0].EndIdx)
 	}
 
-	// Check hidden entries
-	if !gm.IsEntryHidden(2) {
-		t.Error("entry 2 should be hidden (folded)")
+	// Default: expanded (all entries visible)
+	if gm.IsEntryHidden(2) {
+		t.Error("entry 2 should be visible (default expanded)")
 	}
 	if gm.IsEntryHidden(0) {
 		t.Error("entry 0 should be visible (group header)")
 	}
 
-	// Toggle expand
+	// Toggle collapse
+	gm.ToggleExpand(p.Entries()[0].ID)
+	if gm.IsExpanded(p.Entries()[0].ID) {
+		t.Error("expected collapsed after toggle")
+	}
+	if !gm.IsEntryHidden(2) {
+		t.Error("entry 2 should be hidden after collapse")
+	}
+
+	// Toggle expand again
 	gm.ToggleExpand(p.Entries()[0].ID)
 	if !gm.IsExpanded(p.Entries()[0].ID) {
-		t.Error("expected expanded after toggle")
+		t.Error("expected expanded after second toggle")
 	}
 }
 
