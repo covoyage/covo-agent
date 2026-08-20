@@ -391,3 +391,12 @@ func (b *approvalBridge) FirePreApproval(command, patternKey, description string
 func (b *approvalBridge) FirePostApproval(command, patternKey, description, choice string) {
 	b.system.FirePostApproval(command, patternKey, description, choice)
 }
+
+// ghostModelFromConfig returns the model to use for inline ghost completions.
+// It checks the user config first, then falls back to a fast default per provider.
+func ghostModelFromConfig(cfg *cli.Config, providerType string) string {
+	if cfg.ModelConfig != nil && cfg.ModelConfig.GhostModel != "" {
+		return cfg.ModelConfig.GhostModel
+	}
+	return cli.DefaultGhostModel(providerType)
+}

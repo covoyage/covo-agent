@@ -115,6 +115,27 @@ func DefaultModel(providerType string) string {
 	return reg.DefaultModel
 }
 
+// DefaultGhostModel returns the fastest available model for inline ghost
+// completions based on the active provider.
+func DefaultGhostModel(providerType string) string {
+	switch providerType {
+	case "openai":
+		return "gpt-4o-mini"
+	case "anthropic":
+		return "claude-3-5-haiku-20241022"
+	case "gemini":
+		return "gemini-2.5-flash"
+	case "deepseek":
+		return "deepseek-chat"
+	case "openrouter":
+		return "google/gemini-2.5-flash"
+	default:
+		// For custom/OpenAI-compatible providers, fall back to the
+		// provider's default model — likely the best option available.
+		return DefaultModel(providerType)
+	}
+}
+
 func ProviderName(providerType string) string {
 	reg := getProviderRegOrFallback(providerType)
 	if reg == nil {

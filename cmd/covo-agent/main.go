@@ -807,6 +807,7 @@ func runInteractive(opts *rootOptions, runtime *commandRuntime) {
 				pendingImages.Store(filepath.Base(path), path)
 			}
 		},
+		OnGhostRequest: agentui.NewAIGhostProvider(llm, ghostModelFromConfig(cfg, providerType)).Handle,
 	})
 	appPtr = app
 	appPtr.SuppressAutoRetry = true

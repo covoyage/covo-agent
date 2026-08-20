@@ -86,6 +86,10 @@ type DisplayConfig struct {
 type ModelConfig struct {
 	Thinking *ThinkingConfig `yaml:"thinking,omitempty"`
 
+	// GhostModel overrides the model used for inline ghost completions.
+	// Defaults to a fast model based on the active provider.
+	GhostModel string `yaml:"ghost_model,omitempty"`
+
 	// FrequencyPenalty / PresencePenalty reduce the model's tendency to
 	// stream the same text over and over (degeneration/repetition loops).
 	// 0 = provider default (unset). Only honored by OpenAI-compatible
