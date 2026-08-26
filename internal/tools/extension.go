@@ -559,6 +559,13 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 
 		// Batch 27: code graph (Go package dependency analysis)
 		toolscodegraph.BuildCodeGraphTool(),
+
+		// Batch 29: run_code (Code Mode — execute Go programs with tool SDK)
+		BuildRunCodeToolWithRegistry(func(name string) (*agentcore.Tool, bool) {
+			return agent.GetTool(name)
+		}, func() []string {
+			return agent.ToolNames()
+		}),
 	}
 
 	// Batch 28: external coding agents (Claude Code, Codex, opencode).

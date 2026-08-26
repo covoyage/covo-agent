@@ -128,6 +128,9 @@ var profileCategories = map[string][]string{
 
 	// --- unified search ---
 	"search_files": {"coding"},
+
+	// --- code mode ---
+	"run_code": {"coding"},
 }
 
 func filterToolsByProfile(tools []*agentcore.Tool, profile string) []*agentcore.Tool {

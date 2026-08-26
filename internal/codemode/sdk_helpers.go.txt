@@ -1,0 +1,59 @@
+var _scanner *bufio.Scanner
+
+func ToolCall(name string, args any) (any, error) {
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		return nil, fmt.Errorf("marshal args: %w", err)
+	}
+	req, _ := json.Marshal(map[string]any{"tool": name, "args": json.RawMessage(argsJSON)})
+	// Tool requests go to stderr (IPC channel)
+	fmt.Fprintln(os.Stderr, string(req))
+	if !_scanner.Scan() {
+		return nil, fmt.Errorf("parent closed stdin")
+	}
+	var resp struct {
+		Result any    `json:"result"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(_scanner.Bytes(), &resp); err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+	if resp.Error != "" {
+		return nil, fmt.Errorf(resp.Error)
+	}
+	return resp.Result, nil
+}
+
+func ToolCallMap(name string, args any) (map[string]any, error) {
+	result, err := ToolCall(name, args)
+	if err != nil {
+		return nil, err
+	}
+	if m, ok := result.(map[string]any); ok {
+		return m, nil
+	}
+	return map[string]any{"value": result}, nil
+}
+
+func ToolCallStr(name string, args any) (string, error) {
+	result, err := ToolCall(name, args)
+	if err != nil {
+		return "", err
+	}
+	if s, ok := result.(string); ok {
+		return s, nil
+	}
+	b, _ := json.Marshal(result)
+	return string(b), nil
+}
+
+func ToolCallBytes(name string, args any) ([]byte, error) {
+	result, err := ToolCall(name, args)
+	if err != nil {
+		return nil, err
+	}
+	if s, ok := result.(string); ok {
+		return []byte(s), nil
+	}
+	return json.Marshal(result)
+}

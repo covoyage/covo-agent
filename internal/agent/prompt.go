@@ -65,7 +65,14 @@ For Chinese local-government or construction-project questions, search in Chines
 
 	toolsGuidance = `## Tool Guidance
 
-You have tool descriptions available in your tool definitions. If a TOOLS.md file exists in the workspace, its contents are injected below as project context — it contains user-provided tool usage guidance, not tool availability. Prefer the guidance in TOOLS.md over general assumptions when choosing how to use specific tools.`
+You have tool descriptions available in your tool definitions. If a TOOLS.md file exists in the workspace, its contents are injected below as project context — it contains user-provided tool usage guidance, not tool availability. Prefer the guidance in TOOLS.md over general assumptions when choosing how to use specific tools.
+
+### Code Mode (run_code)
+Use run_code when a task requires multiple tool calls with logic, loops, or intermediate processing between them. Instead of making 5+ sequential tool calls, write a single Go program that calls tools via the SDK functions (ToolCall, ToolCallMap, ToolCallStr, ToolCallBytes). This is faster and reduces context usage.
+
+Example: instead of calling search_files 10 times with different patterns, write one program that loops and aggregates results.
+
+Do NOT use run_code for simple single tool calls — call the tool directly.`
 
 	// memoryBudgetTokens caps the memory suffix (MEMORY.md + USER.md)
 	// injected into the system prompt. Section-aware budgeting keeps headers,
