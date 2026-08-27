@@ -28,6 +28,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/lsp"
 	"github.com/covoyage/covo-agent/internal/repomap"
+	"github.com/covoyage/covo-agent/internal/rollout"
 	"github.com/covoyage/covo-agent/internal/safego"
 	"github.com/covoyage/covo-agent/internal/sandbox"
 	"github.com/covoyage/covo-agent/internal/session"
@@ -136,6 +137,8 @@ type CovoAgent struct {
 	doomloopDetected        bool // whether a doom loop was detected this turn
 	doomloopBudgetExhausted bool // when true, all tool calls are blocked
 	hunkTracker             *hunk.Tracker
+	rolloutRecorder         *rollout.Recorder
+	rolloutStore            *rollout.Store
 
 	// ExecutionPhase (Plan/Act) — orthogonal to AgentMode. In Plan mode,
 	// mutating tools are blocked by planModeGateBeforeHook and filtered
@@ -437,6 +440,19 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 		return nil, fmt.Errorf("init goal store: %w", err)
 	}
 
+	// Initialize rollout store (opt-in via COVO_ROLLOUT=true).
+	var rolloutSt *rollout.Store
+	if envBool("COVO_ROLLOUT", false) {
+		rolloutSt, err = rollout.NewStore(cfg.HomeDir)
+		if err != nil {
+			// Non-fatal: rollout tracing degrades gracefully without persistence.
+			if cfg.Logger != nil {
+				cfg.Logger.Warn("rollout store init failed, tracing will be in-memory only", "error", err)
+			}
+			rolloutSt = nil
+		}
+	}
+
 	sandboxCfg := sandbox.ConfigFromEnv()
 	sb, sbErr := sandbox.New(sandboxCfg)
 	if sbErr != nil {
@@ -570,6 +586,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 		sessionSuspendFn: cfg.SessionSuspendFunc,
 		doomloopDetector: doomloopDetector,
 		hunkTracker:      hunkTracker,
+		rolloutStore:     rolloutSt,
 	}
 
 	// Wire the SQLite goal store to the extension so LLM goal tools
@@ -827,6 +844,21 @@ func (ca *CovoAgent) setupProviderChain(cfg *CovoAgentConfig) {
 	// compression provider when one is configured.
 	ca.compressionSwitch = compression.NewCompressionProviderSwitch(cfg.Provider)
 	cfg.Provider = ca.compressionSwitch
+
+	// Rollout tracing: opt-in via COVO_ROLLOUT=true. Placed OUTSIDE the
+	// compression switch so ALL LLM calls (agent turns, compression, titles,
+	// reviews, auxiliary model calls) are captured regardless of routing.
+	if envBool("COVO_ROLLOUT", false) {
+		ca.rolloutRecorder = rollout.NewRecorder(rollout.RecorderConfig{
+			Provider:  cfg.ProviderName,
+			Model:     cfg.Model,
+			SessionID: ca.sessionMgr.CurrentID(),
+			CWD:       cfg.WorkingDir,
+			Logger:    cfg.Logger,
+		})
+		ca.rolloutRecorder.SetInner(cfg.Provider)
+		cfg.Provider = ca.rolloutRecorder
+	}
 }
 
 // wrapContextEngine wraps the agentcore core's context engine in the
@@ -989,6 +1021,11 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 	}
 	// Auto-persist session state after each turn
 	lifecycleHooks = append(lifecycleHooks, ca.newAutoSaveHook())
+	// Rollout tracing: capture turn boundaries and tool results when enabled.
+	if ca.rolloutRecorder != nil {
+		rolloutHook := rollout.NewHook(ca.rolloutRecorder, ca.rolloutStore, cfg.Logger)
+		lifecycleHooks = append(lifecycleHooks, rolloutHook)
+	}
 	for _, pluginHook := range cfg.LifecycleHooks {
 		lifecycleHooks = append(lifecycleHooks, pluginHook)
 	}
@@ -1457,6 +1494,16 @@ func (ca *CovoAgent) runDreamingSweep() {
 
 func (ca *CovoAgent) DreamingEngine() *evolution.DreamingEngine {
 	return ca.dreamingEngine
+}
+
+// RolloutRecorder returns the rollout recorder, or nil if rollout tracing is disabled.
+func (ca *CovoAgent) RolloutRecorder() *rollout.Recorder {
+	return ca.rolloutRecorder
+}
+
+// RolloutStore returns the rollout store, or nil if rollout tracing is disabled.
+func (ca *CovoAgent) RolloutStore() *rollout.Store {
+	return ca.rolloutStore
 }
 
 func (ca *CovoAgent) LifecycleHooks() []agentcore.LifecycleHook {
