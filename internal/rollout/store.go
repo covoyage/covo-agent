@@ -43,7 +43,7 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(`
+	if _, err := s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS rollouts (
 			id          TEXT PRIMARY KEY,
 			session_id  TEXT NOT NULL,
@@ -56,14 +56,28 @@ func (s *Store) migrate() error {
 			config_json TEXT DEFAULT '{}',
 			metadata    TEXT DEFAULT '{}',
 			turns_json  TEXT DEFAULT '[]',
+			parent_id   TEXT DEFAULT '',
+			edges_json  TEXT DEFAULT '[]',
 			created_at  INTEGER DEFAULT (unixepoch())
 		);
+	`); err != nil {
+		return err
+	}
 
+	// Idempotently add columns to databases created before they existed.
+	// Missing table/column errors are ignored on purpose.
+	_, _ = s.db.Exec(`ALTER TABLE rollouts ADD COLUMN parent_id TEXT DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE rollouts ADD COLUMN edges_json TEXT DEFAULT '[]'`)
+
+	if _, err := s.db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_rollouts_session ON rollouts(session_id);
 		CREATE INDEX IF NOT EXISTS idx_rollouts_model ON rollouts(model);
 		CREATE INDEX IF NOT EXISTS idx_rollouts_started ON rollouts(started_at);
-	`)
-	return err
+		CREATE INDEX IF NOT EXISTS idx_rollouts_parent ON rollouts(parent_id);
+	`); err != nil {
+		return err
+	}
+	return nil
 }
 
 // Save persists a complete rollout to the database.
@@ -83,16 +97,20 @@ func (s *Store) Save(ctx context.Context, r *Rollout) error {
 	if err != nil {
 		return fmt.Errorf("marshal metadata: %w", err)
 	}
+	edgesJSON, err := json.Marshal(r.Edges)
+	if err != nil {
+		return fmt.Errorf("marshal edges: %w", err)
+	}
 
 	_, err = s.db.ExecContext(ctx, `
 		INSERT OR REPLACE INTO rollouts
 			(id, session_id, provider, model, cwd, started_at, ended_at,
-			 turn_count, config_json, metadata, turns_json, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 turn_count, config_json, metadata, turns_json, parent_id, edges_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.SessionID, r.Provider, r.Model, r.CWD,
 		r.StartedAt.Unix(), r.EndedAt.Unix(),
 		len(r.Turns), string(configJSON), string(metaJSON), string(turnsJSON),
-		time.Now().Unix(),
+		r.ParentID, string(edgesJSON), time.Now().Unix(),
 	)
 	return err
 }
@@ -104,7 +122,7 @@ func (s *Store) Get(ctx context.Context, id string) (*Rollout, error) {
 
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, session_id, provider, model, cwd, started_at, ended_at,
-		       turn_count, config_json, metadata, turns_json
+		       turn_count, config_json, metadata, turns_json, parent_id, edges_json
 		FROM rollouts WHERE id = ?`, id)
 
 	return s.scanRollout(row)
@@ -115,7 +133,7 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]RolloutSummary, 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, session_id, provider, model, started_at, ended_at, turn_count FROM rollouts WHERE 1=1`
+	query := `SELECT id, session_id, provider, model, started_at, ended_at, turn_count, parent_id FROM rollouts WHERE 1=1`
 	args := []any{}
 
 	if filter.SessionID != "" {
@@ -156,7 +174,7 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]RolloutSummary, 
 		var r RolloutSummary
 		var startedAt, endedAt int64
 		if err := rows.Scan(&r.ID, &r.SessionID, &r.Provider, &r.Model,
-			&startedAt, &endedAt, &r.TurnCount); err != nil {
+			&startedAt, &endedAt, &r.TurnCount, &r.ParentID); err != nil {
 			return nil, err
 		}
 		r.StartedAt = time.Unix(startedAt, 0)
@@ -164,6 +182,46 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]RolloutSummary, 
 		results = append(results, r)
 	}
 	return results, rows.Err()
+}
+
+// Descendants returns all rollouts that were spawned (directly or transitively)
+// by the given rollout, via parent_id links. The result is unordered.
+func (s *Store) Descendants(ctx context.Context, parentID string) ([]*Rollout, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM rollouts WHERE parent_id = ?`, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var out []*Rollout
+	for _, id := range ids {
+		r, err := s.Get(ctx, id)
+		if err != nil {
+			continue
+		}
+		out = append(out, r)
+		grand, err := s.Descendants(ctx, id)
+		if err != nil {
+			continue
+		}
+		out = append(out, grand...)
+	}
+	return out, nil
 }
 
 // Delete removes a rollout by ID.
@@ -197,6 +255,7 @@ type ListFilter struct {
 type RolloutSummary struct {
 	ID        string    `json:"id"`
 	SessionID string    `json:"session_id"`
+	ParentID  string    `json:"parent_id,omitempty"`
 	Provider  string    `json:"provider"`
 	Model     string    `json:"model"`
 	StartedAt time.Time `json:"started_at"`
@@ -206,12 +265,12 @@ type RolloutSummary struct {
 
 func (s *Store) scanRollout(row *sql.Row) (*Rollout, error) {
 	var r Rollout
-	var configJSON, metaJSON, turnsJSON string
+	var configJSON, metaJSON, turnsJSON, edgesJSON string
 	var startedAt, endedAt int64
 	var turnCount int // DB column only, actual count derived from turns slice
 
 	err := row.Scan(&r.ID, &r.SessionID, &r.Provider, &r.Model, &r.CWD,
-		&startedAt, &endedAt, &turnCount, &configJSON, &metaJSON, &turnsJSON)
+		&startedAt, &endedAt, &turnCount, &configJSON, &metaJSON, &turnsJSON, &r.ParentID, &edgesJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("rollout not found")
@@ -230,6 +289,9 @@ func (s *Store) scanRollout(row *sql.Row) (*Rollout, error) {
 	}
 	if err := json.Unmarshal([]byte(metaJSON), &r.Metadata); err != nil {
 		return nil, fmt.Errorf("unmarshal metadata: %w", err)
+	}
+	if err := json.Unmarshal([]byte(edgesJSON), &r.Edges); err != nil {
+		return nil, fmt.Errorf("unmarshal edges: %w", err)
 	}
 
 	return &r, nil

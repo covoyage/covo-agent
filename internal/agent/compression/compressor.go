@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/covoyage/covo-agent/internal/rollout"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -182,6 +183,9 @@ func (e *EnhancedContextEngine) Compress(ctx context.Context, msgs []agentcore.M
 		e.compressionSwitch.SetActive(true)
 		defer e.compressionSwitch.SetActive(false)
 	}
+	// Annotate the context so the rollout recorder can name the summarization
+	// LLM call as "compression" rather than generic "aux".
+	ctx = rollout.WithInteractionKind(ctx, "compression")
 	result, cut, err := e.inner.Compress(ctx, microResult, focusTopic)
 	if err != nil {
 		return result, cut, err

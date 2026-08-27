@@ -19,15 +19,42 @@ import (
 type Rollout struct {
 	ID        string            `json:"id"`
 	SessionID string            `json:"session_id"`
+	// ParentID references the rollout of the agent that spawned this one (a
+	// subagent's parent), linking a subagent run to its caller's trace.
+	ParentID  string            `json:"parent_id,omitempty"`
 	Provider  string            `json:"provider"`
 	Model     string            `json:"model"`
 	CWD       string            `json:"cwd,omitempty"`
 	StartedAt time.Time         `json:"started_at"`
 	EndedAt   time.Time         `json:"ended_at,omitempty"`
 	Turns     []Turn            `json:"turns"`
-	Config    RolloutConfig     `json:"config,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	Exported  bool              `json:"exported,omitempty"`
+	// Edges records subagent lifecycle interactions (send_message, result,
+	// close) anchored to the turn that emitted them, linking this parent
+	// rollout to spawned child rollouts at per-turn granularity.
+	Edges    []InteractionEdge  `json:"edges,omitempty"`
+	Config   RolloutConfig      `json:"config,omitempty"`
+	Metadata map[string]string  `json:"metadata,omitempty"`
+	Exported bool               `json:"exported,omitempty"`
+}
+
+// SubagentEdgeKind enumerates the lifecycle stages of a spawned subagent.
+const (
+	SubagentEdgeSpawn   = "spawn"
+	SubagentEdgeSend    = "send_message"
+	SubagentEdgeResult  = "result"
+	SubagentEdgeClose   = "close"
+	SubagentEdgeTimeout = "timeout"
+)
+
+// InteractionEdge records a subagent lifecycle event in the parent's rollout.
+// It links the parent trace to a child rollout/session at a specific turn.
+type InteractionEdge struct {
+	Kind      string    `json:"kind"`
+	ChildID   string    `json:"child_id,omitempty"`   // child session or rollout id
+	ChildSession string  `json:"child_session,omitempty"`
+	ParentTurn int       `json:"parent_turn,omitempty"`
+	Message   string    `json:"message,omitempty"`
+	Timestamp time.Time `json:"timestamp,omitempty"`
 }
 
 // Turn is a logical agent turn: one loop of "prompt the model -> run tools".

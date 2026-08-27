@@ -165,6 +165,7 @@ func newRootCommand() *cobra.Command {
 	root.AddCommand(newTestgenCommand())
 	root.AddCommand(newDreamingCommand())
 	root.AddCommand(newRolloutCommand())
+	root.AddCommand(newDebugCommand())
 	root.AddCommand(newBackupCommand())
 	root.AddCommand(newRestoreCommand())
 	root.AddCommand(newMigrateCommand())

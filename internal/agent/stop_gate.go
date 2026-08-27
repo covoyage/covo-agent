@@ -9,6 +9,7 @@ import (
 
 	"github.com/covoyage/covo-agent/internal/goal"
 	"github.com/covoyage/covo-agent/internal/kanban"
+	"github.com/covoyage/covo-agent/internal/rollout"
 	toolsplanning "github.com/covoyage/covo-agent/internal/tools/planning"
 	"github.com/covoyage/covonaut/agentcore"
 )
@@ -288,6 +289,7 @@ func (h *stopGateHook) tryGoalGate(ctx context.Context, arc *agentcore.AgentRunC
 
 	judgeCtx, cancel := context.WithTimeout(ctx, goalJudgeTimeout)
 	defer cancel()
+	judgeCtx = rollout.WithInteractionKind(judgeCtx, string(TaskReview))
 	satisfied, reason, err := judgeGoalSatisfied(judgeCtx, provider, model, g.Objective, transcript)
 	if err != nil || satisfied {
 		return // fail open, or genuinely done

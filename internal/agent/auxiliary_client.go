@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/covoyage/covo-agent/internal/rollout"
 	"github.com/covoyage/covo-agent/internal/telemetry"
 	"github.com/covoyage/covonaut/agentcore"
 	"github.com/covoyage/covonaut/provider/chatcompat"
@@ -78,8 +79,13 @@ type AuxiliaryClient struct {
 	// model name).
 	providerBuilder AuxiliaryProviderBuilder
 
-	// Per-task resolved models. nil = fallback to main.
+	// per-task resolved models. nil = fallback to main.
 	resolved map[AuxiliaryTask]*resolvedModel
+
+	// rolloutRecorder, when set, records every auxiliary LLM call (including
+	// those routed to dedicated auxiliary providers) into the agent's rollout.
+	// Wired by the agent when COVO_ROLLOUT=true.
+	rolloutRecorder *rollout.Recorder
 }
 
 // NewAuxiliaryClient creates an AuxiliaryClient. If auxCfg is nil or a
@@ -236,7 +242,12 @@ func (ac *AuxiliaryClient) Complete(ctx context.Context, task AuxiliaryTask, sys
 		Temperature: temperature,
 	}
 
-	resp, err := rm.provider.Complete(ctx, req)
+	// Annotate the context so the rollout recorder can name this auxiliary
+	// call by its task kind (compression/title/review/...) instead of a
+	// generic "aux".
+	ctx = rollout.WithInteractionKind(ctx, string(task))
+
+	resp, err := ac.record(ctx, rm.provider, req)
 	if err != nil {
 		return "", fmt.Errorf("auxiliary %s call: %w", task, err)
 	}
@@ -258,7 +269,11 @@ func (ac *AuxiliaryClient) CompleteWithMessages(ctx context.Context, task Auxili
 		Temperature: temperature,
 	}
 
-	resp, err := rm.provider.Complete(ctx, req)
+	// Annotate the context so the rollout recorder can name this auxiliary
+	// call by its task kind.
+	ctx = rollout.WithInteractionKind(ctx, string(task))
+
+	resp, err := ac.record(ctx, rm.provider, req)
 	if err != nil {
 		return "", fmt.Errorf("auxiliary %s call: %w", task, err)
 	}
@@ -299,6 +314,27 @@ func (ac *AuxiliaryClient) SetMainProvider(provider agentcore.Provider, model st
 			delete(ac.resolved, task)
 		}
 	}
+}
+
+// SetRolloutRecorder registers a rollout recorder so every auxiliary LLM call
+// is captured, including calls routed to dedicated auxiliary providers that
+// would otherwise bypass the recorder. Pass nil to disable.
+func (ac *AuxiliaryClient) SetRolloutRecorder(r *rollout.Recorder) {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	ac.rolloutRecorder = r
+}
+
+// record routes an auxiliary call through the rollout recorder (when enabled)
+// so it is traced even if it uses a dedicated auxiliary provider.
+func (ac *AuxiliaryClient) record(ctx context.Context, provider agentcore.Provider, req *agentcore.ProviderRequest) (*agentcore.ProviderResponse, error) {
+	ac.mu.RLock()
+	r := ac.rolloutRecorder
+	ac.mu.RUnlock()
+	if r == nil {
+		return provider.Complete(ctx, req)
+	}
+	return r.RecordComplete(ctx, provider, req)
 }
 
 // buildMinimalProvider builds a basic OpenAI-compatible chat provider from

@@ -196,6 +196,10 @@ type CovoAgentConfig struct {
 	// SessionSuspendFunc is called when a session should be suspended
 	// (e.g. after a rate limit). The gateway provides this callback.
 	SessionSuspendFunc func(key, reason string, ttl time.Duration)
+
+	// ParentRolloutID links this agent's rollout to the rollout of the agent
+	// that spawned it. Only meaningful for subagents when COVO_ROLLOUT=true.
+	ParentRolloutID string
 }
 
 // repetitionRecoveryConfig builds the localized soft repetition-loop
@@ -462,6 +466,12 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	doomloopDetector := doomloop.New(doomloop.DefaultConfig())
 	hunkTracker := hunk.NewTracker(cfg.WorkingDir)
 
+	// Late-bound to this agent's rollout recorder ID after the provider chain
+	// is built. Spawned children capture this to link their rollouts to the
+	// parent's (only meaningful when COVO_ROLLOUT=true).
+	var parentRolloutID string
+	var parentRecorder *rollout.Recorder
+
 	// Default SpawnRunner: creates a child agentcore.Agent with restricted toolsets
 	spawnRunner := cfg.SpawnRunner
 	if spawnRunner == nil {
@@ -505,12 +515,42 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 				// use the same auxiliary models for title/review/judge tasks.
 				Auxiliary:                cfg.Auxiliary,
 				AuxiliaryProviderBuilder: cfg.AuxiliaryProviderBuilder,
+				// Link the child's rollout to the parent agent's rollout when
+				// rollout tracing is enabled.
+				ParentRolloutID: parentRolloutID,
 			}
 			child, err := NewCovoAgent(childCfg)
 			if err != nil {
 				return "", fmt.Errorf("spawn: create child agent: %w", err)
 			}
 			defer child.Close()
+
+			// Record the subagent lifecycle into the parent's rollout so the
+			// parent trace links to the child at per-turn granularity.
+			var subagentResult string
+			if parentRecorder != nil {
+				childSession := child.SessionManager().CurrentID()
+				childRolloutID := ""
+				if cr := child.RolloutRecorder(); cr != nil {
+					childRolloutID = cr.ID()
+				}
+				parentRecorder.RecordSubagentEvent(rollout.SubagentEdgeSpawn, childRolloutID, childSession, task)
+			}
+			defer func() {
+				if parentRecorder != nil {
+					childRolloutID := ""
+					if cr := child.RolloutRecorder(); cr != nil {
+						childRolloutID = cr.ID()
+					}
+					kind := rollout.SubagentEdgeResult
+					msg := subagentResult
+					if err != nil {
+						kind = rollout.SubagentEdgeTimeout
+						msg = err.Error()
+					}
+					parentRecorder.RecordSubagentEvent(kind, childRolloutID, child.SessionManager().CurrentID(), msg)
+				}
+			}()
 
 			// Subagents run without a user present to approve dangerous commands.
 			// Mark as non-interactive so the manual-approval fallback auto-denies
@@ -535,11 +575,11 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 			}
 
 			_ = child.Core().Config()
-			result, err := child.core.Run(childCtx, task)
+			subagentResult, err = child.core.Run(childCtx, task)
 			if err != nil {
 				return "", fmt.Errorf("spawn: child run: %w", err)
 			}
-			return result, nil
+			return subagentResult, nil
 		}
 	}
 
@@ -746,6 +786,10 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 
 	// Build and apply provider middleware chain (outermost first)
 	ca.setupProviderChain(&cfg)
+	if ca.rolloutRecorder != nil {
+		parentRolloutID = ca.rolloutRecorder.ID()
+		parentRecorder = ca.rolloutRecorder
+	}
 
 	agentCfg := ca.buildAgentConfig(cfg)
 	ca.cfg = agentCfg
@@ -855,9 +899,16 @@ func (ca *CovoAgent) setupProviderChain(cfg *CovoAgentConfig) {
 			SessionID: ca.sessionMgr.CurrentID(),
 			CWD:       cfg.WorkingDir,
 			Logger:    cfg.Logger,
+			ParentID:  cfg.ParentRolloutID,
 		})
 		ca.rolloutRecorder.SetInner(cfg.Provider)
 		cfg.Provider = ca.rolloutRecorder
+
+		// Also route auxiliary LLM calls (title/review/judge and dedicated
+		// auxiliary providers) through the recorder so they are traced.
+		if ca.auxClient != nil {
+			ca.auxClient.SetRolloutRecorder(ca.rolloutRecorder)
+		}
 	}
 }
 

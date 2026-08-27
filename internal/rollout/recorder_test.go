@@ -148,6 +148,142 @@ func TestTurnOutsideWindow(t *testing.T) {
 	}
 }
 
+// TestAuxKindAnnotation verifies that an explicit interaction-kind annotation
+// names auxiliary calls (e.g. "compression"/"title"/"review") instead of the
+// generic "aux", while plain calls without the annotation still classify via
+// the model-run-info heuristic.
+func TestAuxKindAnnotation(t *testing.T) {
+	inner := &mockProvider{}
+	r := NewRecorder(RecorderConfig{Provider: "openai", Model: "gpt-5"})
+	r.SetInner(inner)
+
+	r.BeginTurn()
+
+	// Compression call annotated explicitly.
+	ctxComp := WithInteractionKind(context.Background(), "compression")
+	if _, err := r.Complete(ctxComp, &agentcore.ProviderRequest{Model: "gpt-5", Messages: []agentcore.Message{{Role: agentcore.RoleUser, Content: "c"}}}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+
+	// Title call annotated explicitly.
+	ctxTitle := WithInteractionKind(context.Background(), "title")
+	if _, err := r.Complete(ctxTitle, &agentcore.ProviderRequest{Model: "gpt-5", Messages: []agentcore.Message{{Role: agentcore.RoleUser, Content: "t"}}}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+
+	// Unannotated aux call => generic "aux".
+	if _, err := r.Complete(context.Background(), &agentcore.ProviderRequest{Model: "gpt-5", Messages: []agentcore.Message{{Role: agentcore.RoleUser, Content: "a"}}}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+
+	// Main call still "main".
+	if _, err := r.Complete(modelCtx(), &agentcore.ProviderRequest{Model: "gpt-5", Messages: []agentcore.Message{{Role: agentcore.RoleUser, Content: "m"}}}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+
+	r.CompleteTurn()
+
+	ro := r.Rollout()
+	if len(ro.Turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(ro.Turns))
+	}
+	inter := ro.Turns[0].Interactions
+	if len(inter) != 4 {
+		t.Fatalf("expected 4 interactions, got %d", len(inter))
+	}
+	want := []string{"compression", "title", "aux", "main"}
+	for i, w := range want {
+		if inter[i].Kind != w {
+			t.Errorf("interaction %d kind = %q, want %q", i, inter[i].Kind, w)
+		}
+	}
+}
+
+// TestParentIDLinkage verifies a recorder created with a ParentID links its
+// rollout to that parent trace, and that the store round-trips the linkage.
+func TestParentIDLinkage(t *testing.T) {
+	r := NewRecorder(RecorderConfig{Provider: "openai", Model: "gpt-5", ParentID: "parent_abc"})
+	r.SetInner(&mockProvider{})
+	if r.ID() == "" {
+		t.Fatal("expected a recorder ID")
+	}
+	ro := r.Rollout()
+	if ro.ParentID != "parent_abc" {
+		t.Fatalf("parent_id = %q, want %q", ro.ParentID, "parent_abc")
+	}
+
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer store.Close()
+	if err := store.Save(context.Background(), ro); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := store.Get(context.Background(), ro.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.ParentID != "parent_abc" {
+		t.Errorf("retrieved parent_id = %q, want %q", got.ParentID, "parent_abc")
+	}
+	list, err := store.List(context.Background(), ListFilter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 1 || list[0].ParentID != "parent_abc" {
+		t.Errorf("list parent_id mismatch: %+v", list)
+	}
+}
+
+// TestRecordCompleteViaArbitraryProvider verifies the recorder can capture a
+// call routed to an arbitrary (dedicated auxiliary) provider, tagging the kind
+// from the context — the mechanism used so aux calls never bypass tracing.
+func TestRecordCompleteViaArbitraryProvider(t *testing.T) {
+	dedicated := &mockProvider{
+		complete: func(ctx context.Context, req *agentcore.ProviderRequest) (*agentcore.ProviderResponse, error) {
+			return &agentcore.ProviderResponse{
+				Content:      "title result",
+				FinishReason: "stop",
+				Usage:        agentcore.TokenUsage{PromptTokens: 10, CompletionTokens: 5},
+			}, nil
+		},
+	}
+
+	r := NewRecorder(RecorderConfig{Provider: "openai", Model: "gpt-5"})
+	r.SetInner(&mockProvider{})
+
+	r.BeginTurn()
+	// Main call.
+	if _, err := r.Complete(modelCtx(), &agentcore.ProviderRequest{Model: "gpt-5", Messages: []agentcore.Message{{Role: agentcore.RoleUser, Content: "m"}}}); err != nil {
+		t.Fatalf("main complete: %v", err)
+	}
+	// Aux title call routed to a dedicated provider.
+	ctxTitle := WithInteractionKind(context.Background(), "title")
+	if _, err := r.RecordComplete(ctxTitle, dedicated, &agentcore.ProviderRequest{Model: "title-model", Messages: []agentcore.Message{{Role: agentcore.RoleUser, Content: "t"}}}); err != nil {
+		t.Fatalf("aux complete: %v", err)
+	}
+	r.CompleteTurn()
+
+	ro := r.Rollout()
+	if len(ro.Turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(ro.Turns))
+	}
+	inter := ro.Turns[0].Interactions
+	if len(inter) != 2 {
+		t.Fatalf("expected 2 interactions, got %d", len(inter))
+	}
+	if inter[0].Kind != "main" {
+		t.Errorf("interaction 0 kind = %q, want main", inter[0].Kind)
+	}
+	if inter[1].Kind != "title" {
+		t.Errorf("interaction 1 kind = %q, want title", inter[1].Kind)
+	}
+	if inter[1].Response.Content != "title result" {
+		t.Errorf("interaction 1 content = %q, want %q", inter[1].Response.Content, "title result")
+	}
+}
+
 // TestReplayUsesMainInteraction verifies replay drives the main interaction.
 func TestReplayUsesMainInteraction(t *testing.T) {
 	inner := &mockProvider{
@@ -192,5 +328,47 @@ func TestReplayUsesMainInteraction(t *testing.T) {
 	}
 	if res.Rollout.Turns[0].ToolCalls[0].Result != "matched" {
 		t.Errorf("mock replay did not inject recorded result, got %q", res.Rollout.Turns[0].ToolCalls[0].Result)
+	}
+}
+
+// TestRecordSubagentEvent verifies subagent lifecycle edges are recorded on the
+// parent rollout, anchored to the current turn, and round-trip through the store.
+func TestRecordSubagentEvent(t *testing.T) {
+	r := NewRecorder(RecorderConfig{Provider: "openai", Model: "gpt-5"})
+	r.SetInner(&mockProvider{})
+
+	r.BeginTurn()
+	if _, err := r.Complete(modelCtx(), &agentcore.ProviderRequest{Model: "gpt-5", Messages: []agentcore.Message{{Role: agentcore.RoleUser, Content: "m"}}}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	r.RecordSubagentEvent(SubagentEdgeSpawn, "R_child", "sess_child", "do task")
+	r.RecordSubagentEvent(SubagentEdgeResult, "R_child", "sess_child", "done")
+	r.CompleteTurn()
+
+	ro := r.Rollout()
+	if len(ro.Edges) != 2 {
+		t.Fatalf("expected 2 edges, got %d", len(ro.Edges))
+	}
+	if ro.Edges[0].Kind != SubagentEdgeSpawn || ro.Edges[0].ParentTurn != 1 {
+		t.Errorf("edge 0 = %+v, want spawn at turn 1", ro.Edges[0])
+	}
+	if ro.Edges[1].Kind != SubagentEdgeResult || ro.Edges[1].ChildID != "R_child" {
+		t.Errorf("edge 1 = %+v, want result for R_child", ro.Edges[1])
+	}
+
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer store.Close()
+	if err := store.Save(context.Background(), ro); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := store.Get(context.Background(), ro.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(got.Edges) != 2 {
+		t.Errorf("retrieved edges = %d, want 2", len(got.Edges))
 	}
 }

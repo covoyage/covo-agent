@@ -43,6 +43,8 @@ type RecorderConfig struct {
 	SessionID string
 	CWD       string
 	Logger    *slog.Logger
+	// ParentID links this rollout to the rollout of the agent that spawned it.
+	ParentID string
 }
 
 // NewRecorder creates a new Recorder that wraps the given provider.
@@ -51,6 +53,7 @@ func NewRecorder(cfg RecorderConfig) *Recorder {
 		rollout: &Rollout{
 			ID:        generateID(),
 			SessionID: cfg.SessionID,
+			ParentID:  cfg.ParentID,
 			Provider:  cfg.Provider,
 			Model:     cfg.Model,
 			CWD:       cfg.CWD,
@@ -67,6 +70,13 @@ func NewRecorder(cfg RecorderConfig) *Recorder {
 // Complete/Stream calls.
 func (r *Recorder) SetInner(p agentcore.Provider) {
 	r.inner = p
+}
+
+// ID returns the rollout's unique identifier. Safe to call concurrently.
+func (r *Recorder) ID() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.rollout.ID
 }
 
 // Rollout returns a deep copy of the recorded rollout. Safe to call concurrently.
@@ -114,6 +124,10 @@ func deepCopyRollout(src *Rollout) *Rollout {
 			cp.Metadata[k] = v
 		}
 	}
+	if src.Edges != nil {
+		cp.Edges = make([]InteractionEdge, len(src.Edges))
+		copy(cp.Edges, src.Edges)
+	}
 	return &cp
 }
 
@@ -132,6 +146,22 @@ func (r *Recorder) SetMetadata(key, value string) {
 		r.rollout.Metadata = make(map[string]string)
 	}
 	r.rollout.Metadata[key] = value
+}
+
+// RecordSubagentEvent records a subagent lifecycle event (spawn, send_message,
+// result, close, timeout) on this rollout, anchored to the current turn. This
+// links the parent trace to a spawned child's session/rollout.
+func (r *Recorder) RecordSubagentEvent(kind, childID, childSession, message string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rollout.Edges = append(r.rollout.Edges, InteractionEdge{
+		Kind:        kind,
+		ChildID:     childID,
+		ChildSession: childSession,
+		ParentTurn:  r.currentTurn,
+		Message:     message,
+		Timestamp:   time.Now(),
+	})
 }
 
 // BeginTurn signals the start of a new logical turn and returns its number.
@@ -218,8 +248,22 @@ func (r *Recorder) SetError(err error) {
 }
 
 func (r *Recorder) Complete(ctx context.Context, req *agentcore.ProviderRequest) (*agentcore.ProviderResponse, error) {
+	return r.recordComplete(ctx, r.inner, req)
+}
+
+// RecordComplete records a single LLM call against an arbitrary provider
+// rather than the recorder's inner (main) provider. This is used to capture
+// auxiliary calls that route to a dedicated auxiliary provider which would
+// otherwise bypass the recorder entirely. The interaction's kind and turn are
+// derived from the call context, so callers should annotate it with
+// WithInteractionKind.
+func (r *Recorder) RecordComplete(ctx context.Context, provider agentcore.Provider, req *agentcore.ProviderRequest) (*agentcore.ProviderResponse, error) {
+	return r.recordComplete(ctx, provider, req)
+}
+
+func (r *Recorder) recordComplete(ctx context.Context, provider agentcore.Provider, req *agentcore.ProviderRequest) (*agentcore.ProviderResponse, error) {
 	started := time.Now()
-	resp, err := r.inner.Complete(ctx, req)
+	resp, err := provider.Complete(ctx, req)
 	r.recordInteraction(ctx, req, resp, err, started)
 	return resp, err
 }
@@ -282,10 +326,15 @@ func (a *streamAccumulator) buildResponse() *agentcore.ProviderResponse {
 }
 
 // classifyKind determines whether a call is the main agent model call or an
-// auxiliary call by inspecting the model-run info in the context. When a
-// "model" component RunInfo is present, the call is the main path (or a
-// nested main call); otherwise it is auxiliary.
+// auxiliary call. It prefers an explicit interaction-kind annotation set by
+// the calling subsystem (e.g. AuxiliaryClient naming a task like
+// "compression"/"title"/"review"); otherwise it inspects the model-run info in
+// the context — when a "model" component RunInfo is present, the call is the
+// main path (or a nested main call), otherwise "aux".
 func classifyKind(ctx context.Context) string {
+	if kind, ok := interactionKindFromContext(ctx); ok {
+		return kind
+	}
 	info, ok := agentcore.RunInfoFromContext(ctx)
 	if ok && info.Component == "model" {
 		return "main"
