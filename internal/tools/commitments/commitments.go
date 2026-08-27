@@ -154,9 +154,24 @@ func (s *CommitmentStore) List() []Commitment {
 		out = append(out, *c)
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			// Same instant (possible on Windows, where time.Now() has coarse
+			// resolution) — break the tie by the monotonically increasing
+			// sequence number so newest-first stays deterministic.
+			return commitmentSeq(out[i].ID) > commitmentSeq(out[j].ID)
+		}
 		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
 	return out
+}
+
+// commitmentSeq extracts the monotonically increasing sequence number from a
+// commitment ID ("cmt_<n>"). Used as a stable tiebreaker when two commitments
+// share the same CreatedAt.
+func commitmentSeq(id string) int {
+	var n int
+	fmt.Sscanf(id, "cmt_%d", &n)
+	return n
 }
 
 // ListPending returns only pending commitments.
