@@ -259,20 +259,6 @@ func (h *stopGateHook) tryGoalGate(ctx context.Context, arc *agentcore.AgentRunC
 		return
 	}
 
-	// Use auxiliary client for the goal judge LLM call when available,
-	// falling back to the main provider otherwise.
-	var provider agentcore.Provider
-	var model string
-	if ac := h.ca.auxClient; ac != nil && ac.HasProvider(TaskReview) {
-		provider = ac.Provider(TaskReview)
-		model = ac.Model(TaskReview)
-	} else {
-		provider = h.ca.cfg.Provider
-		model = h.ca.model
-	}
-	if provider == nil {
-		return
-	}
 	sessionID := h.ca.SessionManager().CurrentID()
 	if sessionID == "" {
 		return
@@ -287,12 +273,16 @@ func (h *stopGateHook) tryGoalGate(ctx context.Context, arc *agentcore.AgentRunC
 		return
 	}
 
-	judgeCtx, cancel := context.WithTimeout(ctx, goalJudgeTimeout)
-	defer cancel()
-	judgeCtx = rollout.WithInteractionKind(judgeCtx, string(TaskReview))
-	satisfied, reason, err := judgeGoalSatisfied(judgeCtx, provider, model, g.Objective, transcript)
-	if err != nil || satisfied {
-		return // fail open, or genuinely done
+	// Ask an auxiliary judge model whether the goal is satisfied. Route
+	// through the auxiliary client when available so the judge call is
+	// recorded as a "review" interaction even when a dedicated auxiliary
+	// provider is configured; otherwise fall back to the main provider.
+	satisfied, reason, judgeErr := h.runJudge(ctx, h.ca.auxClient, g.Objective, transcript)
+	if judgeErr != nil {
+		return // fail open
+	}
+	if satisfied {
+		return // genuinely done
 	}
 
 	h.goalReentryCount++
@@ -300,6 +290,32 @@ func (h *stopGateHook) tryGoalGate(ctx context.Context, arc *agentcore.AgentRunC
 		Role:    agentcore.RoleSystem,
 		Content: buildGoalGateReentry(g.Objective, reason, h.goalReentryCount, h.maxGoalReentry),
 	})
+}
+
+// runJudge asks the goal judge whether the objective is satisfied, routing the
+// call through the auxiliary client (recorded as a "review" interaction) when
+// available, and falling back to the main provider otherwise. It returns the
+// parsed verdict and any error; failures fail open.
+func (h *stopGateHook) runJudge(ctx context.Context, ac *AuxiliaryClient, objective, transcript string) (bool, string, error) {
+	if ac != nil && ac.HasProvider(TaskReview) {
+		judgeCtx, cancel := context.WithTimeout(ctx, goalJudgeTimeout)
+		defer cancel()
+		resp, err := ac.CompleteRequest(judgeCtx, TaskReview, buildJudgeRequest("", objective, transcript))
+		if err != nil {
+			return false, "", err
+		}
+		satisfied, reason := parseJudgeVerdict(resp.Content)
+		return satisfied, reason, nil
+	}
+
+	provider := h.ca.cfg.Provider
+	if provider == nil {
+		return false, "", nil
+	}
+	judgeCtx, cancel := context.WithTimeout(ctx, goalJudgeTimeout)
+	defer cancel()
+	judgeCtx = rollout.WithInteractionKind(judgeCtx, string(TaskReview))
+	return judgeGoalSatisfied(judgeCtx, provider, h.ca.model, objective, transcript)
 }
 
 // stopGateDecision is the pure decision core of the stop gate. Given the current
@@ -345,7 +361,20 @@ VERDICT: SATISFIED|NOT_SATISFIED — <one short sentence reason>`
 
 // judgeGoalSatisfied asks an auxiliary model whether the goal is fully met.
 func judgeGoalSatisfied(ctx context.Context, provider agentcore.Provider, model, objective, transcript string) (bool, string, error) {
-	req := &agentcore.ProviderRequest{
+	req := buildJudgeRequest(model, objective, transcript)
+	resp, err := provider.Complete(ctx, req)
+	if err != nil {
+		return false, "", err
+	}
+	satisfied, reason := parseJudgeVerdict(resp.Content)
+	return satisfied, reason, nil
+}
+
+// buildJudgeRequest constructs the goal-judge provider request. An empty model
+// is accepted (the routing layer may override it); objective/transcript are
+// embedded into the judge prompt.
+func buildJudgeRequest(model, objective, transcript string) *agentcore.ProviderRequest {
+	return &agentcore.ProviderRequest{
 		Model: model,
 		Messages: []agentcore.Message{
 			{Role: agentcore.RoleSystem, Content: goalJudgeSystemPrompt},
@@ -354,12 +383,6 @@ func judgeGoalSatisfied(ctx context.Context, provider agentcore.Provider, model,
 		MaxTokens:   200,
 		Temperature: 0,
 	}
-	resp, err := provider.Complete(ctx, req)
-	if err != nil {
-		return false, "", err
-	}
-	satisfied, reason := parseJudgeVerdict(resp.Content)
-	return satisfied, reason, nil
 }
 
 // parseJudgeVerdict extracts the SATISFIED/NOT_SATISFIED verdict and reason from

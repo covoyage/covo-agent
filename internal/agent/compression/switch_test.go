@@ -143,6 +143,38 @@ func TestCompressionSwitch_HasAux(t *testing.T) {
 	}
 }
 
+// TestCompressionSwitch_SelfReferenceGuard verifies that when the switch is
+// given itself as the aux provider (which happens in the agent wiring for a
+// model-only/absent auxiliary.compression override, where the resolved
+// provider falls back to the switch) it routes to its main provider with the
+// override model instead of recursing into itself forever.
+func TestCompressionSwitch_SelfReferenceGuard(t *testing.T) {
+	main := &mockSwitchProvider{content: "main-response"}
+	s := NewCompressionProviderSwitch(main)
+
+	// Simulate the agent wiring: SetAux with the switch itself + a model.
+	s.SetAux(s, "gpt-5.6")
+	s.SetActive(true)
+
+	resp, err := s.Complete(context.Background(), &agentcore.ProviderRequest{
+		Model:    "gpt-4",
+		Messages: []agentcore.Message{{Role: agentcore.RoleUser, Content: "test"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Content != "main-response" {
+		t.Fatalf("expected main-response (no self-recursion), got %s", resp.Content)
+	}
+	// The override model should still be applied to the main call.
+	if main.callsCount() != 1 {
+		t.Fatalf("expected 1 call on main (no infinite recursion), got %d", main.callsCount())
+	}
+	if main.lastModel() != "gpt-5.6" {
+		t.Fatalf("expected override model gpt-5.6 on main, got %s", main.lastModel())
+	}
+}
+
 func TestCompressionSwitch_StreamAlwaysGoesToMain(t *testing.T) {
 	main := &mockSwitchProvider{content: "main"}
 	aux := &mockSwitchProvider{content: "aux"}

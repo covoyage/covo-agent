@@ -280,6 +280,21 @@ func (ac *AuxiliaryClient) CompleteWithMessages(ctx context.Context, task Auxili
 	return resp.Content, nil
 }
 
+// CompleteRequest routes a fully-formed provider request through the task's
+// resolved provider, recording it via the rollout recorder when enabled
+// (which captures dedicated auxiliary providers that would otherwise bypass
+// it). The request's model is overridden with the task's resolved model and
+// the context is annotated with the task kind. Returns the full response.
+func (ac *AuxiliaryClient) CompleteRequest(ctx context.Context, task AuxiliaryTask, req *agentcore.ProviderRequest) (*agentcore.ProviderResponse, error) {
+	rm, ok := ac.getResolved(task)
+	if !ok {
+		return nil, fmt.Errorf("no provider available for auxiliary task %q", task)
+	}
+	ctx = rollout.WithInteractionKind(ctx, string(task))
+	req.Model = rm.model
+	return ac.record(ctx, rm.provider, req)
+}
+
 // HasProvider returns true if the client has any provider (main or auxiliary)
 // available for the given task.
 func (ac *AuxiliaryClient) HasProvider(task AuxiliaryTask) bool {

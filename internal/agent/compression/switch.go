@@ -69,11 +69,17 @@ func (s *CompressionProviderSwitch) Complete(ctx context.Context, req *agentcore
 	active := s.active
 	s.mu.Unlock()
 
-	if active && aux != nil && aux != s.main {
-		// Route to auxiliary provider with the auxiliary model.
+	if active && aux != nil {
 		reqCopy := *req
 		if auxModel != "" {
 			reqCopy.Model = auxModel
+		}
+		// Guard against a self-referential aux. When only a model override is
+		// configured (no separate provider), the resolved provider reuses this
+		// switch; routing to it would recurse forever. Instead route to the
+		// main provider with the override model.
+		if aux == s {
+			return s.main.Complete(ctx, &reqCopy)
 		}
 		return aux.Complete(ctx, &reqCopy)
 	}

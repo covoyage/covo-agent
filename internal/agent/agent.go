@@ -803,8 +803,20 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	// provider otherwise.
 	ca.auxClient = NewAuxiliaryClient(ca.compressionSwitch, cfg.Model, cfg.Auxiliary, cfg.AuxiliaryProviderBuilder, cfg.Logger)
 
-	// Wire the auxiliary compression provider to the switch so context
-	// compression routes through it when auxiliary.compression is configured.
+	// Route auxiliary LLM calls (title/review/judge and calls to dedicated
+	// auxiliary providers) through the rollout recorder when tracing is
+	// enabled, so they are captured even though their provider is not the
+	// recorder-wrapped main chain.
+	if ca.rolloutRecorder != nil {
+		ca.auxClient.SetRolloutRecorder(ca.rolloutRecorder)
+	}
+
+	// Wire the auxiliary compression provider to the switch. The switch routes
+	// full-compaction LLM calls to a separate provider when auxiliary.compression
+	// configures one; a model-only (or absent) override reuses the main chain and
+	// the switch guards that self-reference (see CompressionProviderSwitch.Complete).
+	// The recorder sits above the switch and captures these calls atomically, so
+	// no additional wrapping is needed here.
 	ca.compressionSwitch.SetAux(ca.auxClient.Provider(TaskCompression), ca.auxClient.Model(TaskCompression))
 
 	ca.core = agentcore.New(agentCfg)
@@ -892,6 +904,11 @@ func (ca *CovoAgent) setupProviderChain(cfg *CovoAgentConfig) {
 	// Rollout tracing: opt-in via COVO_ROLLOUT=true. Placed OUTSIDE the
 	// compression switch so ALL LLM calls (agent turns, compression, titles,
 	// reviews, auxiliary model calls) are captured regardless of routing.
+	//
+	// NOTE: auxiliary calls routed to dedicated auxiliary providers are wired
+	// to the recorder by the caller once the AuxiliaryClient exists (see
+	// NewCovoAgent/Rebuild) — setupProviderChain runs before that client is
+	// built, so its recorder cannot be set here.
 	if envBool("COVO_ROLLOUT", false) {
 		ca.rolloutRecorder = rollout.NewRecorder(rollout.RecorderConfig{
 			Provider:  cfg.ProviderName,
@@ -903,12 +920,6 @@ func (ca *CovoAgent) setupProviderChain(cfg *CovoAgentConfig) {
 		})
 		ca.rolloutRecorder.SetInner(cfg.Provider)
 		cfg.Provider = ca.rolloutRecorder
-
-		// Also route auxiliary LLM calls (title/review/judge and dedicated
-		// auxiliary providers) through the recorder so they are traced.
-		if ca.auxClient != nil {
-			ca.auxClient.SetRolloutRecorder(ca.rolloutRecorder)
-		}
 	}
 }
 
@@ -1499,10 +1510,16 @@ func (ca *CovoAgent) Rebuild(mode AgentMode, provider agentcore.Provider, provid
 	// provider overrides are preserved.
 	if ca.auxClient != nil {
 		ca.auxClient.SetMainProvider(ca.compressionSwitch, cfg.Model)
-		// Re-wire the auxiliary compression provider to the new switch so
-		// context compression routes through it when auxiliary.compression
-		// is configured.
+		// Re-wire the auxiliary compression provider to the new switch (the
+		// switch guards the fallback self-reference; the recorder above it
+		// captures compaction calls atomically).
 		ca.compressionSwitch.SetAux(ca.auxClient.Provider(TaskCompression), ca.auxClient.Model(TaskCompression))
+		// Re-wire the rollout recorder (create a fresh recorder for the
+		// rebuilt provider chain; as with construction, this must happen
+		// after the auxiliary client exists).
+		if ca.rolloutRecorder != nil {
+			ca.auxClient.SetRolloutRecorder(ca.rolloutRecorder)
+		}
 	}
 	return nil
 }
