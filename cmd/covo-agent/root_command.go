@@ -7,6 +7,16 @@ import (
 	"time"
 
 	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/cli/commands"
+	"github.com/covoyage/covo-agent/internal/cli/commands/automation"
+	"github.com/covoyage/covo-agent/internal/cli/commands/code"
+	"github.com/covoyage/covo-agent/internal/cli/commands/config"
+	"github.com/covoyage/covo-agent/internal/cli/commands/health"
+	"github.com/covoyage/covo-agent/internal/cli/commands/integrations"
+	"github.com/covoyage/covo-agent/internal/cli/commands/model"
+	"github.com/covoyage/covo-agent/internal/cli/commands/prefs"
+	"github.com/covoyage/covo-agent/internal/cli/commands/session"
+	"github.com/covoyage/covo-agent/internal/cli/commands/setup"
 	"github.com/covoyage/covo-agent/internal/headless"
 	"github.com/covoyage/covo-agent/internal/i18n"
 	"github.com/covoyage/covo-agent/internal/logutil"
@@ -41,14 +51,9 @@ type rootOptions struct {
 	headlessTimeout time.Duration
 }
 
-type commandRuntime struct {
-	cfg     *cli.Config
-	homeDir string
-}
-
 func newRootCommand() *cobra.Command {
 	opts := &rootOptions{}
-	runtime := &commandRuntime{}
+	runtime := &cli.CommandRuntime{}
 
 	root := &cobra.Command{
 		Use:          "covo-agent",
@@ -78,13 +83,13 @@ func newRootCommand() *cobra.Command {
 			// Apply OS-level sandbox early, before any file operations.
 			// Only apply for the root command (interactive/oneshot), not subcommands.
 			if cmd.Name() == "covo-agent" {
-				applySandboxIfRequested(opts, runtime)
+				commands.ApplySandboxIfRequested(opts.sandbox, runtime)
 			}
 			return nil
 		},
 		Run: func(_ *cobra.Command, _ []string) {
 			if opts.headless {
-				runHeadless(&headless.Options{
+				commands.RunHeadless(&headless.Options{
 					Prompt:             opts.oneshot,
 					Tools:              opts.tools,
 					DisallowedTools:    opts.disallowedTools,
@@ -98,7 +103,18 @@ func newRootCommand() *cobra.Command {
 				})
 				return
 			}
-			runInteractive(opts, runtime)
+			commands.RunInteractive(&commands.RunOptions{
+				Mode:               opts.mode,
+				Provider:           opts.provider,
+				Model:              opts.model,
+				Yolo:               opts.yolo,
+				Oneshot:            opts.oneshot,
+				Pipe:               opts.pipe,
+				JSON:               opts.json,
+				SystemPrompt:       opts.systemPrompt,
+				AppendSystemPrompt: opts.appendSystemPrompt,
+				SessionID:          opts.sessionID,
+			}, runtime)
 		},
 	}
 
@@ -132,46 +148,46 @@ func newRootCommand() *cobra.Command {
 		return []string{"DEBUG", "INFO", "WARN", "ERROR"}, cobra.ShellCompDirectiveNoFileComp
 	})
 
-	root.AddCommand(newModelCommand(runtime))
-	root.AddCommand(newVersionCommand())
-	root.AddCommand(newStatusCommand())
-	root.AddCommand(newConfigCommand(runtime))
-	root.AddCommand(newSessionCommand(runtime))
-	root.AddCommand(newDoctorCommand())
-	root.AddCommand(newMCPCommand())
-	root.AddCommand(newCronCommand())
-	root.AddCommand(newSkillCommand())
-	root.AddCommand(newMemoryCommand())
-	root.AddCommand(newUpdateCommand())
-	root.AddCommand(newSetupCommand())
-	root.AddCommand(newAnalyzeCommand())
-	root.AddCommand(newPRCommand())
-	root.AddCommand(newAuthCommand())
-	root.AddCommand(newGatewayCommand(runtime))
-	root.AddCommand(newPairingCommand())
-	root.AddCommand(newPluginCommand(runtime))
-	root.AddCommand(newLSPCommand())
-	root.AddCommand(newLanguageCommand())
-	root.AddCommand(newProfileCommand())
-	root.AddCommand(newThemeCommand())
-	root.AddCommand(newACPCommand())
-	root.AddCommand(newExtCommand())
-	root.AddCommand(newTemplateCommand())
-	root.AddCommand(newPackageCommand())
-	root.AddCommand(newFeaturesCommand())
-	root.AddCommand(newReviewCommand())
-	root.AddCommand(newCommitmentsCommand())
-	root.AddCommand(newWorktreeCommand())
-	root.AddCommand(newTestgenCommand())
-	root.AddCommand(newDreamingCommand())
-	root.AddCommand(newRolloutCommand())
-	root.AddCommand(newDebugCommand())
-	root.AddCommand(newBackupCommand())
-	root.AddCommand(newRestoreCommand())
-	root.AddCommand(newMigrateCommand())
-	root.AddCommand(newHeartbeatCommand())
+	root.AddCommand(model.NewModelCommand(runtime))
+	root.AddCommand(health.NewVersionCommand())
+	root.AddCommand(health.NewStatusCommand())
+	root.AddCommand(config.NewConfigCommand(runtime))
+	root.AddCommand(session.NewSessionCommand(runtime))
+	root.AddCommand(health.NewDoctorCommand())
+	root.AddCommand(integrations.NewMCPCommand())
+	root.AddCommand(automation.NewCronCommand())
+	root.AddCommand(automation.NewSkillCommand())
+	root.AddCommand(session.NewMemoryCommand())
+	root.AddCommand(health.NewUpdateCommand())
+	root.AddCommand(setup.NewSetupCommand())
+	root.AddCommand(code.NewAnalyzeCommand())
+	root.AddCommand(code.NewPRCommand())
+	root.AddCommand(config.NewAuthCommand())
+	root.AddCommand(integrations.NewGatewayCommand(runtime))
+	root.AddCommand(integrations.NewPairingCommand())
+	root.AddCommand(integrations.NewPluginCommand(runtime))
+	root.AddCommand(integrations.NewLSPCommand())
+	root.AddCommand(prefs.NewLanguageCommand())
+	root.AddCommand(prefs.NewProfileCommand())
+	root.AddCommand(prefs.NewThemeCommand())
+	root.AddCommand(integrations.NewACPCommand())
+	root.AddCommand(integrations.NewExtCommand())
+	root.AddCommand(commands.NewTemplateCommand())
+	root.AddCommand(integrations.NewPackageCommand())
+	root.AddCommand(config.NewFeaturesCommand())
+	root.AddCommand(code.NewReviewCommand())
+	root.AddCommand(session.NewCommitmentsCommand())
+	root.AddCommand(code.NewWorktreeCommand())
+	root.AddCommand(code.NewTestgenCommand())
+	root.AddCommand(session.NewDreamingCommand())
+	root.AddCommand(automation.NewRolloutCommand())
+	root.AddCommand(automation.NewDebugCommand())
+	root.AddCommand(session.NewBackupCommand())
+	root.AddCommand(session.NewRestoreCommand())
+	root.AddCommand(session.NewMigrateCommand())
+	root.AddCommand(automation.NewHeartbeatCommand())
 	root.AddCommand(newCompletionCommand(root))
-	root.AddCommand(newCrashReportCommand())
+	root.AddCommand(health.NewCrashReportCommand())
 
 	for _, registered := range plugin.GlobalCLICommands() {
 		registered := registered
@@ -200,8 +216,8 @@ func applyLogLevelFlag(opts *rootOptions) error {
 	return nil
 }
 
-func initializeCommandRuntime(runtime *commandRuntime) error {
-	if runtime.cfg != nil {
+func initializeCommandRuntime(runtime *cli.CommandRuntime) error {
+	if runtime.Cfg != nil {
 		return nil
 	}
 
@@ -221,20 +237,9 @@ func initializeCommandRuntime(runtime *commandRuntime) error {
 		i18n.InitFromConfig(cfg.Display.Language)
 	}
 
-	runtime.cfg = cfg
-	runtime.homeDir = homeDir
+	runtime.Cfg = cfg
+	runtime.HomeDir = homeDir
 	return nil
-}
-
-func newModelCommand(runtime *commandRuntime) *cobra.Command {
-	return &cobra.Command{
-		Use:   "model",
-		Short: "Select the inference provider and default model",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return runModelCommand(runtime.cfg, runtime.homeDir)
-		},
-	}
 }
 
 func newCompletionCommand(root *cobra.Command) *cobra.Command {
