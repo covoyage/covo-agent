@@ -10,7 +10,7 @@ import (
 
 const (
 	DefaultReasoningEffort = "medium"
-	DefaultBusyInputMode   = "block"
+	DefaultBusyInputMode   = "queue"
 	DefaultToolProfile     = "full"
 )
 

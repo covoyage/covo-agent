@@ -29,13 +29,13 @@ const (
 
 // GroupSpan 描述一个折叠区域。
 type GroupSpan struct {
-	StartIdx int       // 起始 entry 索引（含）
-	EndIdx   int       // 结束 entry 索引（不含）
+	StartIdx int // 起始 entry 索引（含）
+	EndIdx   int // 结束 entry 索引（不含）
 	Kind     GroupKind
-	Members  int   // VerbRun: 成员数; Truncation: 参与者数
-	Hidden   int   // Truncation: 隐藏数
-	Expanded bool  // 用户是否手动展开
-	Verb     string // VerbRun: 聚合动词（如 "Read"）
+	Members  int     // VerbRun: 成员数; Truncation: 参与者数
+	Hidden   int     // Truncation: 隐藏数
+	Expanded bool    // 用户是否手动展开
+	Verb     string  // VerbRun: 聚合动词（如 "Read"）
 	EntryID  EntryID // 触发此 span 的 entry ID（用于查找展开状态）
 }
 

@@ -14,14 +14,14 @@ import (
 type ToolsetFilter struct {
 	agentcore.BaseLifecycleHook
 
-	platform         *PlatformToolsets
-	availability     *ToolAvailability
-	filter           *CachedFilter
-	toolNames        func() []string // returns all registered tool names from the registry
-	platforms        func() string   // returns current platform name
-	planModeChecker  func() bool     // returns true when agent is in Plan mode
-	planModeAllowed  map[string]bool // tools allowed in Plan mode
-	logger           *slog.Logger
+	platform        *PlatformToolsets
+	availability    *ToolAvailability
+	filter          *CachedFilter
+	toolNames       func() []string // returns all registered tool names from the registry
+	platforms       func() string   // returns current platform name
+	planModeChecker func() bool     // returns true when agent is in Plan mode
+	planModeAllowed map[string]bool // tools allowed in Plan mode
+	logger          *slog.Logger
 }
 
 // ToolsetFilterConfig configures a ToolsetFilter.
@@ -31,8 +31,8 @@ type ToolsetFilterConfig struct {
 	Filter          *CachedFilter
 	ToolNames       func() []string
 	PlatformName    func() string
-	PlanModeChecker func() bool       // returns true when agent is in Plan mode
-	PlanModeAllowed map[string]bool   // tools allowed in Plan mode (overrides filtering)
+	PlanModeChecker func() bool     // returns true when agent is in Plan mode
+	PlanModeAllowed map[string]bool // tools allowed in Plan mode (overrides filtering)
 	Logger          *slog.Logger
 }
 

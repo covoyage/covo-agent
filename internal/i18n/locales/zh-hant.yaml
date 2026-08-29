@@ -24,6 +24,18 @@ statusline:
   git_desc: "当前 Git 分支"
   tokens_desc: "Token 用量"
   shortcuts_desc: "键盘快捷键提示"
+  cost_desc: "本會話累計花費（美元）"
+  queued_desc: "排隊中的提示數量"
+  queued_label: "queued: {count} 條"
+  verbose_on: "詳細輸出:開(ctrl+r 切換)"
+  verbose_off: "詳細輸出:關"
+
+tool:
+  more_lines: "  … 還有 {count} 行"
+  lines_omitted: "  … 省略 {count} 行"
+
+skill:
+  loaded: "◆ skill {name} — 已載入編輯器({lines} 行)。確認後提交即可執行。"
 
 approval:
   required: "⚠ 需要審批"

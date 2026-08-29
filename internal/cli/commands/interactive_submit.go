@@ -237,16 +237,27 @@ func (s *interactiveSession) submitPrompt(ctx context.Context, trimmed string) {
 	s.cancelRun.Store(&cancel)
 	s.busy.Store(true)
 	safego.SafeGo(func() {
-		defer s.busy.Store(false)
-		defer func() { s.cancelRun.Store(nil) }()
 		ag.Run(ctx, trimmed)
+		cancel()
+		// Clear the interrupt handle before closing the busy window and
+		// handing over to queued prompts, so the fresh turn below can
+		// install its own cancel without this goroutine nil-ing it later.
+		s.cancelRun.Store(nil)
 
-		// Process queued input if any
+		// Close the busy window BEFORE handing over to queued prompts. If
+		// submitPrompt ran while busy was still set, the queued message
+		// would hit the busy branch and be re-queued forever instead of
+		// executing.
+		s.busy.Store(false)
+
 		if queued := shared.RuntimeState.TakePendingInput(); queued != "" {
 			if s.app != nil {
 				loadUIBus().PrintSystem(i18n.T("system.processing_queued", "text", shared.Truncate(queued, 60)))
 			}
-			s.handleSubmit(ctx, queued)
+			// Submit as a fresh turn. WithoutCancel drops this run's
+			// cancellation (user interrupt) while keeping context values, so
+			// a prompt queued before an interrupt still runs afterwards.
+			s.submitPrompt(context.WithoutCancel(ctx), queued)
 		}
 	}, nil)
 }

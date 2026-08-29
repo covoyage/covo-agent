@@ -184,8 +184,8 @@ func TestFinishFlashRenderAccent(t *testing.T) {
 	pal := theme.CurrentPalette()
 	tracker := NewFinishFlashTracker()
 	entry := &ScrollbackEntry{
-		ID:   42,
-		Kind: BlockKindUserPrompt,
+		ID:    42,
+		Kind:  BlockKindUserPrompt,
 		Block: &UserPromptBlock{Text: "test"},
 	}
 	tracker.OnFinish(42)

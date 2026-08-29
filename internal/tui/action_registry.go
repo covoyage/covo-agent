@@ -32,32 +32,32 @@ type ActionId string
 
 const (
 	// Essentials
-	ActionQuit          ActionId = "quit"
-	ActionHelp          ActionId = "help"
-	ActionInterrupt     ActionId = "interrupt"
+	ActionQuit      ActionId = "quit"
+	ActionHelp      ActionId = "help"
+	ActionInterrupt ActionId = "interrupt"
 
 	// Panels
-	ActionOpenSessions   ActionId = "open_sessions"
-	ActionOpenTodos      ActionId = "open_todos"
-	ActionOpenSkillCenter ActionId = "open_skill_center"
-	ActionOpenModelPicker ActionId = "open_model_picker"
-	ActionOpenEditor     ActionId = "open_editor"
-	ActionOpenSessionTree ActionId = "open_session_tree"
+	ActionOpenSessions     ActionId = "open_sessions"
+	ActionOpenTodos        ActionId = "open_todos"
+	ActionOpenSkillCenter  ActionId = "open_skill_center"
+	ActionOpenModelPicker  ActionId = "open_model_picker"
+	ActionOpenEditor       ActionId = "open_editor"
+	ActionOpenSessionTree  ActionId = "open_session_tree"
 	ActionOpenChangedFiles ActionId = "open_changed_files"
 
 	// Input
-	ActionSubmitPrompt    ActionId = "submit_prompt"
-	ActionNewLine         ActionId = "new_line"
-	ActionTabComplete     ActionId = "tab_complete"
+	ActionSubmitPrompt ActionId = "submit_prompt"
+	ActionNewLine      ActionId = "new_line"
+	ActionTabComplete  ActionId = "tab_complete"
 )
 
 // Category 分组快捷键用于帮助面板展示。
 type Category int
 
 const (
-	CatEssentials  Category = iota // Essentials
-	CatPanels                      // Panels
-	CatInput                       // Input
+	CatEssentials Category = iota // Essentials
+	CatPanels                     // Panels
+	CatInput                      // Input
 )
 
 func (c Category) String() string {
@@ -77,10 +77,10 @@ func (c Category) String() string {
 type When int
 
 const (
-	WhenAlways           When = iota // 全局生效
-	WhenAgentScreen                  // Agent 屏幕（非弹窗、非搜索模式）
-	WhenPromptFocused                // Prompt 聚焦时
-	WhenScrollbackFocused            // Scrollback 聚焦时
+	WhenAlways            When = iota // 全局生效
+	WhenAgentScreen                   // Agent 屏幕（非弹窗、非搜索模式）
+	WhenPromptFocused                 // Prompt 聚焦时
+	WhenScrollbackFocused             // Scrollback 聚焦时
 )
 
 func (w When) String() string {
@@ -101,8 +101,8 @@ func (w When) String() string {
 // ActionDef 描述一个快捷键动作。
 type ActionDef struct {
 	ID          ActionId
-	Label       string   // 短标签（如 "quit"）
-	Description string   // 描述（如 "Quit application"）
+	Label       string           // 短标签（如 "quit"）
+	Description string           // 描述（如 "Quit application"）
 	DefaultKeys []terminal.KeyID // 默认键（如 ["ctrl+q", "ctrl+d"]）
 	AltKeys     []terminal.KeyID // 备选键
 	Category    Category
@@ -112,10 +112,10 @@ type ActionDef struct {
 
 // ActionRegistry 是所有快捷键的集中注册表。
 type ActionRegistry struct {
-	mu       sync.RWMutex
-	defs     map[ActionId]ActionDef
-	order    []ActionId // 注册顺序
-	km       *terminal.KeybindingsManager
+	mu    sync.RWMutex
+	defs  map[ActionId]ActionDef
+	order []ActionId // 注册顺序
+	km    *terminal.KeybindingsManager
 }
 
 // NewActionRegistry 创建空注册表。
@@ -138,7 +138,7 @@ func (r *ActionRegistry) Register(def ActionDef) {
 	if r.km != nil {
 		r.km.Register(string(def.ID), terminal.KeybindingDef{
 			DefaultKeys: def.DefaultKeys,
-			Description:  def.Description,
+			Description: def.Description,
 		})
 	}
 }
@@ -153,7 +153,7 @@ func (r *ActionRegistry) AttachKeybindingsManager(km *terminal.KeybindingsManage
 		def := r.defs[id]
 		km.Register(string(def.ID), terminal.KeybindingDef{
 			DefaultKeys: def.DefaultKeys,
-			Description:  def.Description,
+			Description: def.Description,
 		})
 	}
 }

@@ -76,10 +76,26 @@ type ThinkingConfig struct {
 
 // DisplayConfig controls visual presentation of model output.
 type DisplayConfig struct {
-	Language      string `yaml:"language,omitempty"`       // UI language: en, zh, zh-hant, ja, ko, etc.
-	ShowReasoning bool   `yaml:"show_reasoning,omitempty"` // show thinking blocks (default: false)
-	ThinkingMode  string `yaml:"thinking_mode,omitempty"`  // collapsed / truncated / full (default: collapsed)
-	Theme         string `yaml:"theme,omitempty"`          // color theme preset name (e.g. "dracula", "nord")
+	Language       string `yaml:"language,omitempty"`        // UI language: en, zh, zh-hant, ja, ko, etc.
+	ShowReasoning  bool   `yaml:"show_reasoning,omitempty"`  // show thinking blocks (default: false)
+	ThinkingMode   string `yaml:"thinking_mode,omitempty"`   // collapsed / truncated / full (default: collapsed)
+	Theme          string `yaml:"theme,omitempty"`           // color theme preset name (e.g. "dracula", "nord")
+	AmbiguousWidth string `yaml:"ambiguous_width,omitempty"` // East-Asian ambiguous char width: auto (default), narrow, wide
+}
+
+// AmbiguousWidthMode returns the configured East-Asian ambiguous-character
+// width mode: "auto" (default — follows the locale), "narrow", or "wide".
+func (c *Config) AmbiguousWidthMode() string {
+	value := "auto"
+	if c.Display != nil && c.Display.AmbiguousWidth != "" {
+		value = strings.ToLower(strings.TrimSpace(c.Display.AmbiguousWidth))
+	}
+	switch value {
+	case "narrow", "wide":
+		return value
+	default:
+		return "auto"
+	}
 }
 
 // ModelConfig contains model-level generation controls.

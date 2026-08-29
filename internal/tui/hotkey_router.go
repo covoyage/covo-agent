@@ -25,6 +25,7 @@ type HotkeyRouterConfig struct {
 	OpenChangedFiles func()
 	OpenSettings     func()
 	OpenPromptQueue  func()
+	ToggleVerbose    func()
 	Suggestions      *SuggestionsManager
 	QuitWindow       time.Duration
 }
@@ -73,6 +74,8 @@ func (router *HotkeyRouter) HandleInput(data string) {
 		invoke(router.config.OpenEditor)
 	case terminal.MatchesKey(data, "ctrl+g"):
 		invoke(router.config.OpenChangedFiles)
+	case terminal.MatchesKey(data, "ctrl+r"):
+		invoke(router.config.ToggleVerbose)
 	case terminal.MatchesKey(data, "f2"):
 		invoke(router.config.OpenSettings)
 	case terminal.MatchesKey(data, "ctrl+shift+p"):

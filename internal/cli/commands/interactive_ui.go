@@ -166,6 +166,14 @@ func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core
 		MouseMode:          shared.DefaultMouseMode(),
 		KittyKeyboardMode:  shared.DefaultKeyboardMode(),
 		KittyKeyboardFlags: shared.DefaultKeyboardFlags(),
+		// Transcript display caps. Tune here (or surface in config) without
+		// touching covonaut internals; zero values fall back to defaults.
+		Limits: chat.DisplayLimits{
+			ToolArgMaxRunes:    2000,
+			ToolResultMaxLines: 400,
+			ToolResultMaxBytes: 32 << 10,
+			ToolStatusMaxWidth: 120,
+		},
 		Providers: []core.AutocompleteProvider{
 			&component.StaticProvider{
 				TriggerStr:  "/",
@@ -191,6 +199,7 @@ func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core
 				loadUIBus().PrintSystem(i18n.T("system.interrupted"))
 			}
 		},
+		OnHistoryJump: s.handleHistoryJump,
 		OnImagePaste: func() {
 			s.handleImagePaste()
 		},
@@ -296,6 +305,24 @@ func (s *interactiveSession) wireFooter() {
 			return ""
 		}
 		return pal.Dim.Render(c)
+	})
+	s.statusLineMgr.SetRenderFn("cost", func(pal *theme.Palette) string {
+		ca := s.agentRuntime.Current()
+		if ca == nil {
+			return ""
+		}
+		cost := ca.CostTracker().CurrentCost()
+		if cost <= 0 {
+			return ""
+		}
+		return pal.Dim.Render(fmt.Sprintf("$%.4f", cost))
+	})
+	s.statusLineMgr.SetRenderFn("queued", func(pal *theme.Palette) string {
+		queue := shared.RuntimeState.PromptQueue()
+		if queue == nil || queue.IsEmpty() {
+			return ""
+		}
+		return pal.Accent.Render(i18n.T("statusline.queued_label", "count", strconv.Itoa(queue.Len())))
 	})
 	s.statusLineMgr.SetRenderFn("shortcuts", func(pal *theme.Palette) string {
 		txt := s.stickyFooter.Snapshot().Shortcuts

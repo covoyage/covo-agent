@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/covoyage/covonaut/agentcore"
 	"github.com/covoyage/covonaut/tui/chat"
 
 	"github.com/covoyage/covo-agent/internal/agent"
@@ -88,6 +89,35 @@ func (s *interactiveSession) wireApprovalOverlay() {
 		ov = agentui.NewAnchoredOverlay(picker, 4, 50, 50, 50, 25)
 		host.PushOverlay(ov)
 	}
+}
+
+// handleHistoryJump opens the rewind dialog so the user can jump back to an
+// earlier conversation turn (double-ESC on an empty, idle editor).
+func (s *interactiveSession) handleHistoryJump() {
+	ag := s.agentRuntime.Core()
+	if ag == nil {
+		return
+	}
+	ca := s.agentRuntime.Current()
+	showRewindDialog(s.app,
+		func() agentcore.StateSnapshot { return ag.State().Snapshot() },
+		func(snap agentcore.StateSnapshot) {
+			ag.State().Restore(snap)
+			if ca == nil {
+				return
+			}
+			sm := ca.SnapshotManager()
+			if sm == nil || !sm.Enabled() {
+				return
+			}
+			entry, ok := sm.FindClosest(len(snap.Messages))
+			if !ok {
+				return
+			}
+			if err := sm.Restore(entry.Hash); err == nil {
+				s.app.PrintSystem("✅ Workspace restored to snapshot: " + entry.ToolName)
+			}
+		})
 }
 
 // wireHandoff routes human-handoff requests through the TUI instead of

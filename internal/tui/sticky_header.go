@@ -32,8 +32,8 @@ type RenderedPrompt struct {
 
 // StickyHeaderLayout 是粘性标题区域的计算结果。
 type StickyHeaderLayout struct {
-	Pinned  *RenderedPrompt // 当前粘住的 prompt（nil=无）
-	Next    *RenderedPrompt // 即将进入视口的下一个 prompt（nil=无）
+	Pinned *RenderedPrompt // 当前粘住的 prompt（nil=无）
+	Next   *RenderedPrompt // 即将进入视口的下一个 prompt（nil=无）
 }
 
 // ComputeStickyLayout 根据 prompt 描述符列表和当前滚动位置计算粘性布局。
@@ -111,8 +111,8 @@ func (p *ScrollbackPipeline) CollectPromptDescriptors() []PromptDescriptor {
 				EntryIdx:   i,
 				YVirtual:   yVirtual,
 				FullHeight: fullHeight,
-				MinHeight:   MinPinnedHeight,
-				Sticky:      true,
+				MinHeight:  MinPinnedHeight,
+				Sticky:     true,
 			})
 		}
 		// 估算每个 entry 的高度

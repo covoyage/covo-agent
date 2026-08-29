@@ -46,14 +46,14 @@ func NewThemeManager() *ThemeManager {
 		Name:        "dark",
 		Description: "Default dark theme",
 		Dark:        true,
-		Semantic:   covotheme.DefaultSemanticDark,
+		Semantic:    covotheme.DefaultSemanticDark,
 		Mode:        func() covotheme.ColorMode { return covotheme.DetectColorMode() },
 	})
 	tm.Register(ThemePreset{
 		Name:        "light",
 		Description: "Light theme",
 		Dark:        false,
-		Semantic:   covotheme.DefaultSemanticLight,
+		Semantic:    covotheme.DefaultSemanticLight,
 		Mode:        func() covotheme.ColorMode { return covotheme.DetectColorMode() },
 	})
 	return tm

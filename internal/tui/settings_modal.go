@@ -105,7 +105,7 @@ func (sm *SettingsModal) Update(msg core.Msg) core.Cmd {
 
 		// Browse 模式：/ 进入过滤
 		if data == "/" {
-				sm.mode = SettingsModeFilter
+			sm.mode = SettingsModeFilter
 			sm.filterQuery = ""
 			return nil
 		}
@@ -200,7 +200,7 @@ func ShowSettingsModal(bus *UIBus, entries []component.SettingEntry, onChange fu
 	}
 	// 使用 ModalWindow chrome 包装
 	return ShowModalWindow(bus, modal, ModalWindowConfig{
-		Title:     i18n.T("settings.title"),
+		Title: i18n.T("settings.title"),
 		Shortcuts: []ModalShortcut{
 			{Keys: "↑/↓", Label: i18n.T("settings.shortcut_select")},
 			{Keys: "←/→", Label: i18n.T("settings.shortcut_change")},

@@ -426,6 +426,9 @@ func (sm *SkillManager) Delete(name string) error {
 	}
 
 	archiveDir := filepath.Join(sm.skillsDir, ".archive")
+	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+		return fmt.Errorf("create archive dir: %w", err)
+	}
 	archiveName := strings.ReplaceAll(id, "/", "__")
 	target := filepath.Join(archiveDir, archiveName)
 

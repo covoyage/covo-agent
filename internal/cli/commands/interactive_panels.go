@@ -236,7 +236,7 @@ func (s *interactiveSession) openKeyHelp() {
 	agentui.NewUIBus(s.app).ShowPanel(help, 70, 70)
 }
 
-// installHotkeyRouter wires the global hotkeys (Ctrl+O/T/K/Y/G/P/E…) to the
+// installHotkeyRouter wires the global hotkeys (Ctrl+O/T/K/Y/G/R/P/E…) to the
 // corresponding panel openers.
 func (s *interactiveSession) installHotkeyRouter() {
 	s.app.Host().AddChild(agentui.NewHotkeyRouter(agentui.HotkeyRouterConfig{
@@ -252,6 +252,15 @@ func (s *interactiveSession) installHotkeyRouter() {
 		OpenChangedFiles: func() { openChangedFilesPanel(s.changedFiles, s.workingDir) },
 		OpenSettings:     s.openSettings,
 		OpenPromptQueue:  s.showPromptQueue,
-		Suggestions:      s.suggestionsMgr,
+		ToggleVerbose: func() {
+			on := s.app.History().ToggleVerbose()
+			if on {
+				s.app.PrintSystem(i18n.T("system.verbose_on"))
+			} else {
+				s.app.PrintSystem(i18n.T("system.verbose_off"))
+			}
+			loadUIBus().Host().RequestRender()
+		},
+		Suggestions: s.suggestionsMgr,
 	}))
 }

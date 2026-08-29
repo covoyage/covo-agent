@@ -62,9 +62,9 @@ func TestRenderMermaid_NodeShapes(t *testing.T) {
 
 func TestParseNodeDef(t *testing.T) {
 	tests := []struct {
-		input    string
-		wantID   string
-		wantText string
+		input     string
+		wantID    string
+		wantText  string
 		wantShape string
 	}{
 		{"A[Hello]", "A", "Hello", "rect"},

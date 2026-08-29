@@ -17,8 +17,8 @@ type MermaidRenderer struct {
 }
 
 type mermaidNode struct {
-	id   string
-	text string
+	id    string
+	text  string
 	shape string // "rect", "round", "diamond", "stadium", "cyl"
 }
 

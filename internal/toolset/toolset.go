@@ -65,8 +65,8 @@ var Toolsets = map[string]ToolsetDef{
 	},
 	"skills": {
 		Name:        "skills",
-		Description: "Skill listing, viewing, and management",
-		Tools:       []string{"skills_list", "skill_view", "skill_manage"},
+		Description: "Skill loading, bundles, config, scripts, proposals, and management",
+		Tools:       []string{"skill", "skill_manage", "skill_bundle", "skill_config", "skill_script", "skill_workshop"},
 	},
 	"productivity": {
 		Name:        "productivity",

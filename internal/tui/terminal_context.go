@@ -61,13 +61,13 @@ const (
 
 // TerminalContext 是终端能力的快照，在启动时一次性探测。
 type TerminalContext struct {
-	Brand          TerminalBrand
-	Multiplexer    MultiplexerKind
-	Color          ColorLevel
-	OverSSH        bool
-	OS             string // runtime.GOOS
-	TERMProgram    string
-	TERM           string
+	Brand       TerminalBrand
+	Multiplexer MultiplexerKind
+	Color       ColorLevel
+	OverSSH     bool
+	OS          string // runtime.GOOS
+	TERMProgram string
+	TERM        string
 
 	// Kitty keyboard protocol support hints (from env, not probed).
 	// We conservatively assume KKP is NOT available unless we detect a

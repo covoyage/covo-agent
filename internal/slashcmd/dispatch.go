@@ -156,6 +156,7 @@ func handleSkillInvoke(sctx *SlashContext, parts []string) bool {
 	} else {
 		covoAgent.SkillUsage().RecordView(skillName)
 	}
+	sctx.UI.App.PrintSystem(i18n.T("skill.loaded", "name", skillName, "lines", fmt.Sprint(strings.Count(content, "\n")+1)))
 	return true
 }
 

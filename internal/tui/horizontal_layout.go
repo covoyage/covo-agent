@@ -50,7 +50,7 @@ func NewHorizontalLayout(totalWidth int, config LayoutConfig) HorizontalLayout {
 	return HorizontalLayout{
 		Accent:       AccentWidth,
 		LeftPadding:  config.BlockPadLeft,
-		Content:       content,
+		Content:      content,
 		RightPadding: config.BlockPadRight,
 	}
 }

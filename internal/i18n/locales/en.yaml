@@ -25,6 +25,18 @@ statusline:
   git_desc: "Current Git branch"
   tokens_desc: "Token usage"
   shortcuts_desc: "Keyboard shortcut hints"
+  cost_desc: "Session cost in USD"
+  queued_desc: "Queued prompt count"
+  queued_label: "queued: {count}"
+  verbose_on: "Verbose output: on (ctrl+r to toggle)"
+  verbose_off: "Verbose output: off"
+
+tool:
+  more_lines: "  … +{count} lines"
+  lines_omitted: "  … {count} lines omitted"
+
+skill:
+  loaded: "◆ skill {name} — loaded into editor ({lines} lines). Review and submit when ready."
 
 approval:
   required: "⚠ Approval Required"

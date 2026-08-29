@@ -28,9 +28,9 @@ import (
 
 // ScrollbackMatch 描述一次搜索匹配的位置。
 type ScrollbackMatch struct {
-	EntryID    EntryID
-	LineIndex  int    // 在 entry 的 searchable_text 中的行索引
-	ByteRange  [2]int // 匹配在 searchable_text 中的字节范围 [start, end)
+	EntryID   EntryID
+	LineIndex int    // 在 entry 的 searchable_text 中的行索引
+	ByteRange [2]int // 匹配在 searchable_text 中的字节范围 [start, end)
 }
 
 // indexedEntry 缓存单个 entry 的纯文本。
@@ -41,8 +41,8 @@ type indexedEntry struct {
 
 // ScrollbackSearchIndex 缓存 scrollback 文本的搜索索引。
 type ScrollbackSearchIndex struct {
-	mu             sync.RWMutex
-	entries        []indexedEntry
+	mu              sync.RWMutex
+	entries         []indexedEntry
 	builtGeneration uint64 // 上次同步时的 content_generation
 
 	// 异步搜索模式

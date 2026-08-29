@@ -19,9 +19,9 @@ import (
 
 // TimelineEntry 是对话时间线中的一轮。
 type TimelineEntry struct {
-	TurnIdx        int      // turn 序号
-	PromptEntryID  EntryID // 对应 UserPrompt entry 的 ID
-	Preview        string   // prompt 首行截断
+	TurnIdx       int     // turn 序号
+	PromptEntryID EntryID // 对应 UserPrompt entry 的 ID
+	Preview       string  // prompt 首行截断
 }
 
 // PreviewMaxChars 时间线预览最大字符数。
@@ -37,8 +37,8 @@ const (
 
 // Turn 描述一个完整的对话轮次。
 type Turn struct {
-	PromptIndex int        // prompt entry 在 entries 列表中的索引
-	EndIndex    int        // turn 结束位置（下一个 turn 的 prompt 索引）
+	PromptIndex int // prompt entry 在 entries 列表中的索引
+	EndIndex    int // turn 结束位置（下一个 turn 的 prompt 索引）
 	Status      TurnStatus
 }
 
@@ -46,7 +46,7 @@ type Turn struct {
 type TurnModel struct {
 	mu           sync.RWMutex
 	turns        []Turn
-	stickyActive int  // 当前粘性标题对应的 turn 索引（-1=无）
+	stickyActive int // 当前粘性标题对应的 turn 索引（-1=无）
 }
 
 // NewTurnModel 创建空模型。

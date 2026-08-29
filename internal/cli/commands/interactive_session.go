@@ -14,6 +14,7 @@ import (
 
 	"github.com/covoyage/covonaut/agentcore"
 	"github.com/covoyage/covonaut/tui/chat"
+	"github.com/covoyage/covonaut/tui/core"
 	"github.com/covoyage/covonaut/tui/theme"
 
 	"github.com/covoyage/covo-agent/internal/agent"
@@ -121,6 +122,17 @@ func (s *interactiveSession) run() {
 	// Flag descriptions already updated during early init; skip duplicate i18n/config loading.
 	if !cli.HasProviderConfigured() {
 		setup.RunFirstTimeSetup(s.cfg, s.homeDir)
+	}
+
+	// East-Asian ambiguous characters must be measured the way the terminal
+	// renders them, or every row containing one loses/gains a cell.
+	switch s.cfg.AmbiguousWidthMode() {
+	case "wide":
+		core.SetAmbiguousWide(true)
+	case "narrow":
+		core.SetAmbiguousWide(false)
+	default:
+		core.SetAmbiguousWide(core.DetectAmbiguousWideFromEnv())
 	}
 
 	if err := theme.InitThemeFromEnv(); err != nil {
@@ -305,9 +317,6 @@ func (s *interactiveSession) run() {
 	s.wireApprovalOverlay()
 	s.wireHandoff()
 	s.wireAskUser()
-
-	// Display a random feature discovery tip
-	s.app.PrintSystem(i18n.T("system.tip_prefix", "tip", agentui.RandomTip()))
 
 	s.suggestionsMgr = agentui.NewSuggestionsManager(func(text string) {
 		if s.app == nil {

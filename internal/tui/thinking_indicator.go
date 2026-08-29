@@ -75,9 +75,8 @@ func BindThinkingIndicator(app *chat.ChatApp, agent *agentcore.Agent) {
 		toolCall := event.(*agentcore.ToolCallStartEvent)
 		indicator.mu.Lock()
 		indicator.activeCount++
-		toolName := toolCall.ToolCall.Name
 		indicator.mu.Unlock()
-		indicator.set(app, toolStatus(toolName))
+		indicator.set(app, toolStatus(toolCall.ToolCall.Name, toolCall.ToolCall.Arguments))
 	})
 
 	agent.On(agentcore.EventToolCallEnd, func(agentcore.Event) {
@@ -121,9 +120,13 @@ func (indicator *thinkingIndicator) clear(app *chat.ChatApp) {
 	app.PrintStatus("")
 }
 
-func toolStatus(name string) string {
-	if message, ok := toolStatusMessages[name]; ok {
-		return message
+func toolStatus(name, arguments string) string {
+	message, ok := toolStatusMessages[name]
+	if !ok {
+		message = i18n.T("thinking.running_tool", "name", name)
 	}
-	return i18n.T("thinking.running_tool", "name", name)
+	if preview := chat.ToolArgPreview(arguments, 40); preview != "" {
+		return message + " (" + preview + ")"
+	}
+	return message
 }

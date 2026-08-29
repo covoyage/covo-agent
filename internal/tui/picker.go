@@ -49,7 +49,7 @@ type PickerItem struct {
 
 // PickerConfig 配置选择器行为。
 type PickerConfig struct {
-	Title     string
+	Title    string
 	PageSize int
 	// Searchable 为 true 时支持 / 进入搜索模式
 	Searchable bool
@@ -65,10 +65,10 @@ type PickerConfig struct {
 type PickerOutcome int
 
 const (
-	PickerOutcomeNone     PickerOutcome = iota
-	PickerOutcomeSelect   // 选中某项（Enter）
-	PickerOutcomeCancel   // 取消（Esc）
-	PickerOutcomeSearch   // 切换搜索模式（/）
+	PickerOutcomeNone   PickerOutcome = iota
+	PickerOutcomeSelect               // 选中某项（Enter）
+	PickerOutcomeCancel               // 取消（Esc）
+	PickerOutcomeSearch               // 切换搜索模式（/）
 )
 
 // Picker 是通用列表选择器。
@@ -88,9 +88,9 @@ type Picker struct {
 	search    string
 
 	// 回调
-	onSelect  func(PickerItem)
-	onCancel  func()
-	onToggle  func(PickerItem) // MultiSelect 模式下空格切换
+	onSelect func(PickerItem)
+	onCancel func()
+	onToggle func(PickerItem) // MultiSelect 模式下空格切换
 
 	// 光标闪烁
 	cursorVisible    bool
@@ -105,14 +105,14 @@ func NewPicker(config PickerConfig) *Picker {
 	return &Picker{
 		config: config,
 		km: terminal.NewKeybindingsManager(map[string]terminal.KeybindingDef{
-			"picker.up":      {DefaultKeys: []terminal.KeyID{"up", "ctrl+p"}},
-			"picker.down":    {DefaultKeys: []terminal.KeyID{"down", "ctrl+n"}},
-			"picker.confirm": {DefaultKeys: []terminal.KeyID{"enter"}},
-			"picker.cancel":  {DefaultKeys: []terminal.KeyID{"escape"}},
-			"picker.pageUp":  {DefaultKeys: []terminal.KeyID{"pageUp"}},
-			"picker.pageDn":  {DefaultKeys: []terminal.KeyID{"pageDown"}},
-			"picker.toggle":  {DefaultKeys: []terminal.KeyID{" "}},
-			"picker.search":  {DefaultKeys: []terminal.KeyID{"/"}},
+			"picker.up":        {DefaultKeys: []terminal.KeyID{"up", "ctrl+p"}},
+			"picker.down":      {DefaultKeys: []terminal.KeyID{"down", "ctrl+n"}},
+			"picker.confirm":   {DefaultKeys: []terminal.KeyID{"enter"}},
+			"picker.cancel":    {DefaultKeys: []terminal.KeyID{"escape"}},
+			"picker.pageUp":    {DefaultKeys: []terminal.KeyID{"pageUp"}},
+			"picker.pageDn":    {DefaultKeys: []terminal.KeyID{"pageDown"}},
+			"picker.toggle":    {DefaultKeys: []terminal.KeyID{" "}},
+			"picker.search":    {DefaultKeys: []terminal.KeyID{"/"}},
 			"picker.backspace": {DefaultKeys: []terminal.KeyID{"backspace", "ctrl+h"}},
 		}),
 	}

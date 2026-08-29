@@ -84,14 +84,14 @@ var nextEntryID uint64
 
 // ScrollbackEntry 包装一个 Block 并携带显示状态。
 type ScrollbackEntry struct {
-	ID        EntryID
-	Kind      BlockKind
-	Block     Block
-	Running   bool // 是否正在执行（如正在运行的工具调用）
-	Finished  bool // 是否已完成
-	StartedAt time.Time
+	ID         EntryID
+	Kind       BlockKind
+	Block      Block
+	Running    bool // 是否正在执行（如正在运行的工具调用）
+	Finished   bool // 是否已完成
+	StartedAt  time.Time
 	FinishedAt time.Time
-	Display   DisplayMode
+	Display    DisplayMode
 }
 
 // Block 是任何可渲染的 scrollback 块的接口。
@@ -258,9 +258,9 @@ func (b *SessionEventBlock) RenderLines(width int, pal *theme.Palette) []string 
 
 // ScrollbackPipeline 是 scrollback entry 的管理器。
 type ScrollbackPipeline struct {
-	mu               sync.RWMutex
-	entries          []*ScrollbackEntry
-	running          map[EntryID]bool
+	mu                sync.RWMutex
+	entries           []*ScrollbackEntry
+	running           map[EntryID]bool
 	contentGeneration uint64 // 每次 Append/Clear 递增——搜索索引用它检测变更
 }
 

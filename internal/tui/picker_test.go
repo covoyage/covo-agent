@@ -44,8 +44,8 @@ func TestPicker_BasicNavigation(t *testing.T) {
 
 func TestPicker_Search(t *testing.T) {
 	p := NewPicker(PickerConfig{
-		Title:     "Test",
-		PageSize:  10,
+		Title:      "Test",
+		PageSize:   10,
 		Searchable: true,
 	})
 	p.SetItems([]PickerItem{

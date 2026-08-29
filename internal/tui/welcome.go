@@ -22,8 +22,6 @@ type WelcomeInfo struct {
 // BuildWelcomeMessage renders the initial assistant welcome message.
 func BuildWelcomeMessage(info WelcomeInfo) string {
 	lines := []string{
-		i18n.T("app.welcome_intro"),
-		"",
 		"```",
 		"   ______ ____ _    _ ____        _    ____ _____ _   _ _____",
 		"  / ____/ __ \\ |  / / __ \\      / \\  / ___| ____| \\ | |_   _|",

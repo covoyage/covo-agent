@@ -1033,7 +1033,7 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 
 	skillExt := agentcore.NewSkillExtension(loadedSkills, nil)
 
-	evolutionExt := evolution.NewEvolutionExtension(ca.memory, ca.skillMgr, ca.bundleMgr, ca.skillUsage)
+	evolutionExt := evolution.NewEvolutionExtension(ca.memory, ca.skillMgr, ca.bundleMgr, ca.skillUsage, func() string { return ca.sessionMgr.CurrentID() })
 
 	systemPrompt := ca.promptBuilder.Build(cfg.Mode)
 

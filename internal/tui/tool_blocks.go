@@ -4,8 +4,17 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/covoyage/covo-agent/internal/i18n"
 	"github.com/covoyage/covonaut/tui/theme"
 )
+
+// toolBlockMaxLines caps the inline preview rendered per scrollback tool
+// block; the pipeline stores the full output regardless.
+const toolBlockMaxLines = 12
+
+// toolBlockTailLines keeps the last lines of oversized command output —
+// errors usually live at the end.
+const toolBlockTailLines = 4
 
 // ---------------------------------------------------------------------------
 // 工具特化 Block — 为常用工具提供定制化渲染。
@@ -50,11 +59,11 @@ func (b *EditToolBlock) RenderLines(width int, pal *theme.Palette) []string {
 	// diff 渲染
 	if b.DiffText != "" {
 		diffLines := strings.Split(b.DiffText, "\n")
-		maxLines := 15
+		maxLines := toolBlockMaxLines
 		for i, dl := range diffLines {
 			if i >= maxLines {
 				remaining := len(diffLines) - maxLines
-				lines = append(lines, pal.Dim.Render(fmt.Sprintf("  ... %d more diff lines", remaining)))
+				lines = append(lines, pal.Dim.Render(i18n.TF("tool.more_lines", "count", remaining)))
 				break
 			}
 			lines = append(lines, renderDiffLine(dl, pal))
@@ -98,17 +107,23 @@ func (b *ExecuteToolBlock) RenderLines(width int, pal *theme.Palette) []string {
 	}
 	lines = append(lines, style.Render(fmt.Sprintf("%s %s", prefix, b.Command)))
 
-	// 输出预览（最多 8 行）
+	// 输出预览:头部 + 省略标记 + 尾部(错误通常在末尾)。
 	if b.Output != "" {
 		outLines := strings.Split(b.Output, "\n")
-		maxLines := 8
-		for i, ol := range outLines {
-			if i >= maxLines {
-				remaining := len(outLines) - maxLines
-				lines = append(lines, pal.Dim.Render(fmt.Sprintf("  ... %d more lines", remaining)))
-				break
+		if len(outLines) > toolBlockMaxLines {
+			head := toolBlockMaxLines - toolBlockTailLines
+			for _, ol := range outLines[:head] {
+				lines = append(lines, pal.Dim.Render("  "+truncateText(ol, int(width)-4)))
 			}
-			lines = append(lines, pal.Dim.Render("  "+truncateText(ol, int(width)-4)))
+			omitted := len(outLines) - toolBlockMaxLines
+			lines = append(lines, pal.Dim.Render(i18n.TF("tool.lines_omitted", "count", omitted)))
+			for _, ol := range outLines[len(outLines)-toolBlockTailLines:] {
+				lines = append(lines, pal.Dim.Render("  "+truncateText(ol, int(width)-4)))
+			}
+		} else {
+			for _, ol := range outLines {
+				lines = append(lines, pal.Dim.Render("  "+truncateText(ol, int(width)-4)))
+			}
 		}
 	}
 	if b.Error != "" {

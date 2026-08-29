@@ -16,14 +16,18 @@ type EvolutionExtension struct {
 	bundleMgr *BundleManager
 	usage     *SkillUsageTracker
 	tools     []*agentcore.Tool
+	// sessionID lazily resolves the current session id so skill preprocessing
+	// can substitute ${COVO_SESSION_ID}. May be nil.
+	sessionID func() string
 }
 
-func NewEvolutionExtension(memory *MemorySystem, skillMgr *SkillManager, bundleMgr *BundleManager, usage *SkillUsageTracker) *EvolutionExtension {
+func NewEvolutionExtension(memory *MemorySystem, skillMgr *SkillManager, bundleMgr *BundleManager, usage *SkillUsageTracker, sessionID func() string) *EvolutionExtension {
 	return &EvolutionExtension{
 		memory:    memory,
 		skillMgr:  skillMgr,
 		bundleMgr: bundleMgr,
 		usage:     usage,
+		sessionID: sessionID,
 	}
 }
 
@@ -32,6 +36,7 @@ func (e *EvolutionExtension) Name() string { return "evolution" }
 func (e *EvolutionExtension) Init(_ context.Context, agent *agentcore.Agent) error {
 	e.tools = []*agentcore.Tool{
 		e.buildMemoryTool(),
+		e.buildSkillTool(),
 		e.buildSkillManageTool(),
 		e.buildSkillBundleTool(),
 		e.buildSkillConfigTool(),
@@ -161,6 +166,62 @@ func (e *EvolutionExtension) handleMemory(ctx context.Context, args json.RawMess
 	}
 }
 
+// buildSkillTool builds the `skill` tool: loads a skill's preprocessed
+// content into context so the model can follow it. This is the real
+// implementation behind the <available_skills> index protocol.
+func (e *EvolutionExtension) buildSkillTool() *agentcore.Tool {
+	return &agentcore.Tool{
+		Name: "skill",
+		Description: strings.Join([]string{
+			"Load a skill's full instructions into context. Skills are reusable",
+			"procedural knowledge listed in <available_skills> of the system prompt.",
+			"Call this when a task matches a skill's description, then follow the",
+			"returned instructions.",
+		}, "\n"),
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "Skill name (max 64 chars, see available_skills)",
+				},
+			},
+			"required": []string{"name"},
+		},
+		Func: e.handleSkillLoad,
+	}
+}
+
+func (e *EvolutionExtension) handleSkillLoad(_ context.Context, args json.RawMessage) (any, error) {
+	var params struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, fmt.Errorf("parse skill arguments: %w", err)
+	}
+	name := strings.TrimSpace(params.Name)
+	if name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	cfg := PreprocessConfig{}
+	if e.sessionID != nil {
+		cfg.SessionID = e.sessionID()
+	}
+	content, err := e.skillMgr.ReadPreprocessed(name, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("load skill %q: %w", name, err)
+	}
+	if skill, ok := e.skillMgr.Find(name); ok {
+		e.usage.RecordView(skill.ID)
+	} else {
+		e.usage.RecordView(name)
+	}
+	return map[string]any{
+		"name":    name,
+		"content": content,
+	}, nil
+}
+
 func (e *EvolutionExtension) buildSkillManageTool() *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "skill_manage",
@@ -182,6 +243,10 @@ func (e *EvolutionExtension) buildSkillManageTool() *agentcore.Tool {
 			"Skill body format: Markdown with YAML frontmatter is auto-generated.",
 			"Write clear, actionable instructions. Include examples where helpful.",
 			"Skills are stored in ~/.covo-agent/skills/<name>/SKILL.md.",
+			"",
+			"For sensitive or large changes, prefer the skill_workshop proposal flow:",
+			"create a proposal there and let the user apply it after review; use",
+			"this tool for routine edits and improvements.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type":       "object",
