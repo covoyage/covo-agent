@@ -519,8 +519,14 @@ func (b *boundedBuffer) String() string {
 }
 
 // optsAutoAllow builds the permission override used by RunOptions when the
-// tool sets allowed tools.
+// tool sets allowed tools. DisallowedTools always wins: a tool listed there
+// is denied even if it also appears in AllowedTools or would be auto-allowed.
 func (opts RunOptions) autoAllowSet(tool string, input json.RawMessage) bool {
+	for _, t := range opts.DisallowedTools {
+		if t == tool {
+			return false
+		}
+	}
 	for _, t := range opts.AllowedTools {
 		if t == tool {
 			return true

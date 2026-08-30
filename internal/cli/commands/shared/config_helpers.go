@@ -14,6 +14,7 @@ import (
 
 	"github.com/covoyage/covo-agent/internal/agent/approval"
 	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/diffrender"
 	agenttheme "github.com/covoyage/covo-agent/internal/theme"
 )
 
@@ -63,6 +64,7 @@ func ApplySkinOverrides(homeDir string, configTheme ...string) {
 
 	if preset := agenttheme.Get(themeName); preset != nil {
 		sem = preset.ToSemantic()
+		diffrender.SetThemeStyle(themeName)
 	} else if themeName == "light" {
 		sem = theme.DefaultSemanticLight()
 	} else {
@@ -95,6 +97,7 @@ func ApplyNamedTheme(name string) {
 		sem := preset.ToSemantic()
 		mode := theme.DetectColorMode()
 		theme.SetSemanticTheme(sem, mode)
+		diffrender.SetThemeStyle(name)
 	}
 }
 

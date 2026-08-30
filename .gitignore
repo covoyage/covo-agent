@@ -20,6 +20,7 @@ go.work
 .idea/
 .vscode/
 .qwen/
+.zcode/
 *.swp
 *.swo
 *~

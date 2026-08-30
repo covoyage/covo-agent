@@ -24,6 +24,7 @@ func TestRenderer_Heading(t *testing.T) {
 }
 
 func TestRenderer_CodeFence(t *testing.T) {
+	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "false")
 	r := NewRenderer()
 	r.SetColors("", "", "", "", "")
 	out := r.Feed("```go\npackage main\n```\n")
@@ -36,6 +37,7 @@ func TestRenderer_CodeFence(t *testing.T) {
 }
 
 func TestRenderer_CodeFence_Incomplete(t *testing.T) {
+	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "false")
 	r := NewRenderer()
 	r.SetColors("", "", "", "", "")
 	// Feed incomplete code block
@@ -49,6 +51,70 @@ func TestRenderer_CodeFence_Incomplete(t *testing.T) {
 	if !strings.Contains(out, "package main") {
 		t.Errorf("should render after completion, got %q", out)
 	}
+}
+
+func TestRenderer_SetSyntaxHighlighting_False(t *testing.T) {
+	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "true")
+	r := NewRenderer()
+	r.SetSyntaxHighlighting(false)
+	r.SetColors("", "", "", "", "")
+	out := r.Feed("```go\npackage main\n```\n")
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("SetSyntaxHighlighting(false) should skip token colors, got %q", out)
+	}
+	if !strings.Contains(out, "package main") {
+		t.Errorf("expected code content, got %q", out)
+	}
+}
+
+func TestRenderer_CodeFence_SyntaxHighlight(t *testing.T) {
+	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "true")
+	r := NewRenderer()
+	r.SetColors("", "", "", "", "")
+	out := r.Feed("```go\npackage main\n```\n")
+	if !strings.Contains(out, "\x1b[") {
+		t.Errorf("expected ANSI-highlighted code fence, got %q", out)
+	}
+	// The plain-text content survives highlighting (tokens concatenated).
+	if !strings.Contains(stripANSIHelper(out), "package main") {
+		t.Errorf("expected code content after stripping ANSI, got %q", out)
+	}
+
+	r2 := NewRenderer()
+	r2.SetColors("", "", "", "", "")
+	out2 := r2.Feed("```go\npackage main\n```\n")
+	plain := r3Plain(t)
+	if stripANSIHelper(out2) != stripANSIHelper(plain) {
+		t.Errorf("highlighted and plain renderings should carry identical content:\n%q vs %q", stripANSIHelper(out2), stripANSIHelper(plain))
+	}
+}
+
+// r3Plain renders the same fence with highlighting globally disabled.
+func r3Plain(t *testing.T) string {
+	t.Helper()
+	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "false")
+	r := NewRenderer()
+	r.SetColors("", "", "", "", "")
+	return r.Feed("```go\npackage main\n```\n")
+}
+
+func stripANSIHelper(s string) string {
+	var b strings.Builder
+	inEscape := false
+	for _, r := range s {
+		if inEscape {
+			if r == 'm' {
+				inEscape = false
+			}
+			continue
+		}
+		if r == '\x1b' {
+			inEscape = true
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func TestRenderer_MathBlock(t *testing.T) {
@@ -111,6 +177,7 @@ func TestRenderer_InlineMath_NotCurrency(t *testing.T) {
 }
 
 func TestRenderer_Flush(t *testing.T) {
+	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "false")
 	r := NewRenderer()
 	r.SetColors("", "", "", "", "")
 	r.Feed("```go\npackage main\n") // incomplete

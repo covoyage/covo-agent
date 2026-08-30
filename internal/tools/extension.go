@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -61,7 +62,6 @@ type Extension struct {
 	fileState     *FileStateRegistry
 	eventBus      *hook.EventBus
 	permDeferred  *PermissionDeferred
-	checkpointW   *CheckpointWriter
 	sessionFork   *toolssessions.SessionFork
 	runnerMutex   *toolssessions.RunnerMutex
 	worktreeMgr   *toolsworktree.WorktreeManager
@@ -70,26 +70,27 @@ type Extension struct {
 	subagentStore *toolssubagent.SubagentStore
 
 	// Expose for embedding into agent loop
-	Hooks           *hook.HookRegistry
-	swarmBoard      *toolswarm.SwarmBoard
-	swarmOrch       *toolswarm.SwarmOrchestrator
-	secretsStore    *SecretsStore
-	kanbanManager   *kanban.KanbanManager
-	commitmentStore *toolscommitments.CommitmentStore
-	standingOrders  *toolsstandingorders.StandingOrdersStore
-	workshopStore   *evolution.WorkshopStore
-	skillMgr        *evolution.SkillManager
-	spawnRunner     toolssubagent.SpawnRunner
-	subagentRunner  *toolssubagent.SubagentRunner
-	handoffCallback HandoffCallback
-	askUserCallback AskUserFunc
-	sandbox         sandbox.Sandbox
-	logger          *slog.Logger
-	tools           []*agentcore.Tool
-	toolProfile     string
-	parentMessages  func() []agentcore.Message
-	phaseTransition toolsplanning.PhaseTransitioner
-	externalAgents  *externalagent.Registry
+	Hooks             *hook.HookRegistry
+	swarmBoard        *toolswarm.SwarmBoard
+	swarmOrch         *toolswarm.SwarmOrchestrator
+	secretsStore      *SecretsStore
+	kanbanManager     *kanban.KanbanManager
+	commitmentStore   *toolscommitments.CommitmentStore
+	standingOrders    *toolsstandingorders.StandingOrdersStore
+	workshopStore     *evolution.WorkshopStore
+	skillMgr          *evolution.SkillManager
+	spawnRunner       toolssubagent.SpawnRunner
+	subagentRunner    *toolssubagent.SubagentRunner
+	handoffCallback   HandoffCallback
+	askUserCallback   AskUserFunc
+	sandbox           sandbox.Sandbox
+	logger            *slog.Logger
+	webFetchTransport http.RoundTripper
+	tools             []*agentcore.Tool
+	toolProfile       string
+	parentMessages    func() []agentcore.Message
+	phaseTransition   toolsplanning.PhaseTransitioner
+	externalAgents    *externalagent.Registry
 }
 
 // ExtensionConfig configures the agent tools extension.
@@ -109,6 +110,11 @@ type ExtensionConfig struct {
 	AskUserCallback AskUserFunc
 	// Sandbox is the sandbox for isolated command execution.
 	Sandbox sandbox.Sandbox
+	// WebFetchTransport is the http.RoundTripper used by the web_fetch tool.
+	// When set, every request (and each redirect hop) is validated through it,
+	// enabling SSRF protection (URL validation + DNS pinning). When nil the
+	// tool falls back to a plain HTTP client.
+	WebFetchTransport http.RoundTripper
 	// Logger for MCP auto-connect and other operations.
 	Logger *slog.Logger
 	// SubagentRunnerConfig configures the subagent safety wrapper (timeout, heartbeat, depth).
@@ -186,53 +192,53 @@ func NewExtension(cfg ExtensionConfig) *Extension {
 	compr.FragmentLimiter = toolscontext.NewFragmentTokenLimiter()
 
 	ext := &Extension{
-		sessionsDir:     cfg.SessionsDir,
-		homeDir:         cfg.HomeDir,
-		todoStore:       toolsplanning.NewTodoStore(),
-		planStore:       toolsplanning.NewPlanStore(),
-		cronStore:       NewCronStore(cfg.HomeDir),
-		spawnStore:      toolssubagent.NewSpawnStore(),
-		mcpStore:        NewMCPStore(),
-		processStore:    toolssandbox.NewProcessStore(),
-		goalStoreSQL:    nil,
-		sessionIDFn:     func() string { return "" },
-		memoryStore:     toolsmemory.NewEnhancedMemoryStore(),
-		vectorMem:       toolsmemory.NewVectorMem(cfg.HomeDir),
-		subagentReg:     toolssubagent.NewSubagentRegistry(),
-		feishuClient:    toolsfeishu.NewFeishuClient(),
-		ftsSearcher:     ftsSearcher,
-		compressor:      compr,
-		hooks:           hook.NewHookRegistry(),
-		dreamCycle:      toolsmemory.NewDreamCycle(),
-		forkGuard:       toolssubagent.NewForkGuard(3),
-		fragLimiter:     toolscontext.NewFragmentTokenLimiter(),
-		metrics:         newToolMetrics(),
-		fileState:       NewFileStateRegistry(),
-		eventBus:        hook.NewEventBus(64),
-		permDeferred:    NewPermissionDeferred(),
-		checkpointW:     NewCheckpointWriter(cfg.HomeDir + "/checkpoints"),
-		sessionFork:     toolssessions.NewSessionFork(),
-		runnerMutex:     toolssessions.NewRunnerMutex(),
-		worktreeMgr:     toolsworktree.NewWorktreeManager(cfg.HomeDir),
-		swarmBoard:      toolswarm.NewSwarmBoard(),
-		swarmOrch:       nil,
-		secretsStore:    NewSecretsStore(cfg.HomeDir),
-		standingOrders:  toolsstandingorders.NewStandingOrdersStore(cfg.HomeDir),
-		kanbanManager:   kanban.NewKanbanManager(cfg.HomeDir),
-		commitmentStore: toolscommitments.NewCommitmentStore(cfg.HomeDir),
-		inboxStore:      inboxStore,
-		auditStore:      auditStore,
-		subagentStore:   subagentStore,
-		spawnRunner:     cfg.SpawnRunner,
-		subagentRunner:  subagent,
-		handoffCallback: cfg.HandoffCallback,
-		askUserCallback: cfg.AskUserCallback,
-		sandbox:         cfg.Sandbox,
-		logger:          logger,
-		toolProfile:     cfg.ToolProfile,
-		parentMessages:  cfg.ParentMessages,
-		phaseTransition: cfg.PhaseTransitioner,
-		externalAgents:  externalagent.NewRegistry(cfg.WorkDir, os.Getenv("COVO_EXTERNAL_AGENTS")),
+		sessionsDir:       cfg.SessionsDir,
+		homeDir:           cfg.HomeDir,
+		todoStore:         toolsplanning.NewTodoStore(),
+		planStore:         toolsplanning.NewPlanStore(),
+		cronStore:         NewCronStore(cfg.HomeDir),
+		spawnStore:        toolssubagent.NewSpawnStore(),
+		mcpStore:          NewMCPStore(),
+		processStore:      toolssandbox.NewProcessStore(),
+		goalStoreSQL:      nil,
+		sessionIDFn:       func() string { return "" },
+		memoryStore:       toolsmemory.NewEnhancedMemoryStore(),
+		vectorMem:         toolsmemory.NewVectorMem(cfg.HomeDir),
+		subagentReg:       toolssubagent.NewSubagentRegistry(),
+		feishuClient:      toolsfeishu.NewFeishuClient(),
+		ftsSearcher:       ftsSearcher,
+		compressor:        compr,
+		hooks:             hook.NewHookRegistry(),
+		dreamCycle:        toolsmemory.NewDreamCycle(),
+		forkGuard:         toolssubagent.NewForkGuard(3),
+		fragLimiter:       toolscontext.NewFragmentTokenLimiter(),
+		metrics:           newToolMetrics(),
+		fileState:         NewFileStateRegistry(),
+		eventBus:          hook.NewEventBus(64),
+		permDeferred:      NewPermissionDeferred(),
+		sessionFork:       toolssessions.NewSessionFork(),
+		runnerMutex:       toolssessions.NewRunnerMutex(),
+		worktreeMgr:       toolsworktree.NewWorktreeManager(cfg.HomeDir),
+		swarmBoard:        toolswarm.NewSwarmBoard(),
+		swarmOrch:         nil,
+		secretsStore:      NewSecretsStore(cfg.HomeDir),
+		standingOrders:    toolsstandingorders.NewStandingOrdersStore(cfg.HomeDir),
+		kanbanManager:     kanban.NewKanbanManager(cfg.HomeDir),
+		commitmentStore:   toolscommitments.NewCommitmentStore(cfg.HomeDir),
+		inboxStore:        inboxStore,
+		auditStore:        auditStore,
+		subagentStore:     subagentStore,
+		spawnRunner:       cfg.SpawnRunner,
+		subagentRunner:    subagent,
+		handoffCallback:   cfg.HandoffCallback,
+		askUserCallback:   cfg.AskUserCallback,
+		sandbox:           cfg.Sandbox,
+		logger:            logger,
+		webFetchTransport: cfg.WebFetchTransport,
+		toolProfile:       cfg.ToolProfile,
+		parentMessages:    cfg.ParentMessages,
+		phaseTransition:   cfg.PhaseTransitioner,
+		externalAgents:    externalagent.NewRegistry(cfg.WorkDir, os.Getenv("COVO_EXTERNAL_AGENTS")),
 	}
 	// Wire registry into subagent runner
 	if ext.subagentRunner != nil {
@@ -515,7 +521,7 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		// Batch 19: context compression
 		toolscontext.BuildContextCompressTool(e.compressor),
 		toolscontext.BuildContextCompressConfigTool(e.compressor),
-		buildWebFetchTool(),
+		BuildWebFetchTool(e.webFetchTransport),
 		buildReactionTool(),
 
 		// append_file

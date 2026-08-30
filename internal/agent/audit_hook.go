@@ -60,11 +60,13 @@ func (h *auditHook) before(ctx context.Context, hc *agentcore.HookContext) error
 				ArgsSize: len(hc.Arguments),
 			}
 			// Include a small args preview (first 256 bytes) for debugging.
-			if len(hc.Arguments) <= 256 {
-				data.ArgsPreview = string(hc.Arguments)
-			} else {
-				data.ArgsPreview = string(hc.Arguments[:256]) + "..."
+			// Persisted records are force-redacted so secret-shaped tokens
+			// never land on disk (same policy as the telemetry store).
+			preview := string(hc.Arguments)
+			if len(hc.Arguments) > 256 {
+				preview = string(hc.Arguments[:256]) + "..."
 			}
+			data.ArgsPreview = RedactSensitiveTextForce(preview)
 			_ = store.Log("tool:start", sessionID, hc.ToolName, agentID, data)
 		}
 	}
@@ -95,19 +97,20 @@ func (h *auditHook) after(ctx context.Context, hc *agentcore.HookContext, result
 		})
 	}
 
-	// Persist to audit log.
+	// Persist to audit log. Previews and error strings are force-redacted so
+	// secret-shaped tokens never land on disk.
 	if ext := h.ca.agentTools; ext != nil {
 		if store := ext.AuditStore(); store != nil {
 			data := auditToolData{
 				Status:     status,
 				ResultSize: len(result),
-				Error:      errMsg,
+				Error:      RedactSensitiveTextForce(errMsg),
 			}
-			if len(result) <= 256 {
-				data.ResultPreview = result
-			} else {
-				data.ResultPreview = result[:256] + "..."
+			preview := result
+			if len(result) > 256 {
+				preview = result[:256] + "..."
 			}
+			data.ResultPreview = RedactSensitiveTextForce(preview)
 			_ = store.Log("tool:end", sessionID, hc.ToolName, agentID, data)
 		}
 	}

@@ -190,6 +190,7 @@ type CovoAgentConfig struct {
 	AppendSystemPrompt       string                   // appended to context tier
 	WorkspaceOnly            bool                     // when true, file tools restricted to workspace directory
 	ToolsetOverride          []string                 // restricted toolsets for child/sub agents (replaces COVO_TOOLSETS env var)
+	ToolNameFilter           func(string) bool        // optional per-tool-name predicate (headless --tools/--disallowed-tools); nil = no filtering
 	Auxiliary                *AuxiliaryConfig         // per-task auxiliary model overrides
 	AuxiliaryProviderBuilder AuxiliaryProviderBuilder // builds providers from auxiliary config
 
@@ -584,13 +585,14 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	}
 
 	toolsExt := agenttools.NewExtension(agenttools.ExtensionConfig{
-		SessionsDir:     filepath.Join(cfg.HomeDir, "sessions"),
-		HomeDir:         cfg.HomeDir,
-		HandoffCallback: stdinHandoffCallback,
-		Sandbox:         sb,
-		SpawnRunner:     spawnRunner,
-		ToolProfile:     cfg.ToolProfile,
-		WorkDir:         cfg.WorkingDir,
+		SessionsDir:       filepath.Join(cfg.HomeDir, "sessions"),
+		HomeDir:           cfg.HomeDir,
+		HandoffCallback:   stdinHandoffCallback,
+		Sandbox:           sb,
+		SpawnRunner:       spawnRunner,
+		ToolProfile:       cfg.ToolProfile,
+		WorkDir:           cfg.WorkingDir,
+		WebFetchTransport: NewSafeClient().Transport,
 	})
 
 	// Wire the standing orders store into the extension (same instance used
@@ -1064,6 +1066,7 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		Platform:     platformToolsets,
 		Availability: availability,
 		Filter:       cachedFilter,
+		NameFilter:   cfg.ToolNameFilter,
 		ToolNames: func() []string {
 			if ca.core != nil {
 				return ca.core.ToolNames()
@@ -1187,7 +1190,6 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 				agentcore.LoggingAfterHook(logger),
 				ca.auditAfterHook(),
 				ca.toolGuardrailAfterHook(),
-				ca.redactAfterHook(),
 				ca.classifyAfterHook(),
 				ca.readTracker.PriorReadAfterHook(),
 				ca.trajectoryAfterHook(),
@@ -1355,7 +1357,7 @@ func (ca *CovoAgent) Run(ctx context.Context, input string) (result string, err 
 	}
 
 	if ca.trajectory != nil {
-		ca.trajectory.RecordUser(input)
+		ca.trajectory.RecordUser(RedactSensitiveTextForce(input))
 	}
 
 	// Recover from panics to prevent stack traces from corrupting the TUI.

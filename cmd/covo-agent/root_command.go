@@ -44,7 +44,6 @@ type rootOptions struct {
 	headless        bool
 	tools           []string
 	disallowedTools []string
-	maxTurns        int
 	allowPatterns   []string
 	denyPatterns    []string
 	outputFormat    string
@@ -93,7 +92,6 @@ func newRootCommand() *cobra.Command {
 					Prompt:             opts.oneshot,
 					Tools:              opts.tools,
 					DisallowedTools:    opts.disallowedTools,
-					MaxTurns:           opts.maxTurns,
 					Allow:              opts.allowPatterns,
 					Deny:               opts.denyPatterns,
 					OutputFormat:       opts.outputFormat,
@@ -136,7 +134,6 @@ func newRootCommand() *cobra.Command {
 	flags.BoolVar(&opts.headless, "headless", false, "run in non-interactive headless mode (no TUI)")
 	flags.StringSliceVar(&opts.tools, "tools", nil, "whitelist of tool names to allow in headless mode")
 	flags.StringSliceVar(&opts.disallowedTools, "disallowed-tools", nil, "blacklist of tool names to block in headless mode")
-	flags.IntVar(&opts.maxTurns, "max-turns", 0, "max agent turns in headless mode (0 = unlimited)")
 	flags.StringSliceVar(&opts.allowPatterns, "allow", nil, "permission patterns to auto-approve (e.g. 'edit:*', 'bash:ls *')")
 	flags.StringSliceVar(&opts.denyPatterns, "deny", nil, "permission patterns to auto-deny")
 	flags.StringVar(&opts.outputFormat, "output-format", "text", "output format in headless mode: text or streaming-json")

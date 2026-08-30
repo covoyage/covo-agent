@@ -156,8 +156,8 @@ func TestValidateOptions_InvalidOutputFormat(t *testing.T) {
 
 func TestValidateOptions_InvalidReasoningEffort(t *testing.T) {
 	opts := &Options{
-		Prompt:           "hello",
-		ReasoningEffort:  "ultra",
+		Prompt:          "hello",
+		ReasoningEffort: "ultra",
 	}
 	if err := ValidateOptions(opts); err == nil {
 		t.Error("expected error for invalid reasoning effort")
@@ -172,16 +172,6 @@ func TestValidateOptions_ConflictingTools(t *testing.T) {
 	}
 	if err := ValidateOptions(opts); err == nil {
 		t.Error("expected error for conflicting tools")
-	}
-}
-
-func TestValidateOptions_NegativeMaxTurns(t *testing.T) {
-	opts := &Options{
-		Prompt:   "hello",
-		MaxTurns: -1,
-	}
-	if err := ValidateOptions(opts); err == nil {
-		t.Error("expected error for negative max turns")
 	}
 }
 

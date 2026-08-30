@@ -11,6 +11,7 @@ import (
 
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
+	"github.com/covoyage/covo-agent/internal/diffrender"
 	agentui "github.com/covoyage/covo-agent/internal/tui"
 	agentpanels "github.com/covoyage/covo-agent/internal/tui/panels"
 )
@@ -37,9 +38,11 @@ func (s *interactiveSession) wirePermissionGate() {
 // checkPreEditDiff shows the proposed edit and blocks until the user approves
 // or rejects it.
 func (s *interactiveSession) checkPreEditDiff(ctx context.Context, toolName, filePath, diffText string) bool {
-	// Print the diff to the chat history for context.
+	// Print the diff to the chat history for context, colorized for
+	// readability (diff-semantic colors + token-level syntax highlighting
+	// when COVO_SYNTAX_HIGHLIGHT is on and the language is recognized).
 	loadUIBus().PrintSystem(fmt.Sprintf("── Proposed Edit: %s → %s ──", toolName, filepath.Base(filePath)))
-	loadUIBus().PrintSystem(diffText)
+	loadUIBus().PrintSystem(diffrender.Colorize(diffText, diffrender.SyntaxEnabled()))
 
 	// Show the approval overlay.
 	approved := make(chan bool, 1)

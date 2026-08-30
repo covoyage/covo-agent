@@ -233,7 +233,6 @@ func gatewaySetup(homeDir string) {
 		{"mattermost", "MATTERMOST_SERVER_URL", "Mattermost - open-source messaging"},
 		{"wecom_callback", "WECOM_CALLBACK_CORP_ID", "WeCom Callback Server"},
 		{"api_server", "", "REST API Server - HTTP endpoint"},
-		{"cron", "", "Cron Scheduler - scheduled messages"},
 		{"sms", "SMS_ACCOUNT_SID", "SMS - text messages"},
 		{"homeassistant", "HOMEASSISTANT_SERVER_URL", "Home Assistant - smart home"},
 		{"msgraph", "MSGRAPH_TENANT_ID", "Microsoft Graph - Teams/Outlook"},

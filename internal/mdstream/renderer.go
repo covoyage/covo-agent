@@ -11,59 +11,61 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"github.com/covoyage/covo-agent/internal/diffrender"
 )
 
 // BlockType represents the type of a parsed Markdown block.
 type BlockType int
 
 const (
-	BlockText      BlockType = iota // plain text / inline markdown
-	BlockCodeFence                  // ``` code block
-	BlockCodeInline                 // `inline code`
-	BlockMathBlock                  // $$ block math $$
-	BlockMathInline                 // $ inline math $
-	BlockHeading                    // # heading
-	BlockList                       // - item / 1. item
-	BlockTable                      // | table |
-	BlockQuote                      // > quote
-	BlockBlank                      // empty line
+	BlockText       BlockType = iota // plain text / inline markdown
+	BlockCodeFence                   // ``` code block
+	BlockCodeInline                  // `inline code`
+	BlockMathBlock                   // $$ block math $$
+	BlockMathInline                  // $ inline math $
+	BlockHeading                     // # heading
+	BlockList                        // - item / 1. item
+	BlockTable                       // | table |
+	BlockQuote                       // > quote
+	BlockBlank                       // empty line
 )
 
 // Block represents a parsed Markdown block.
 type Block struct {
-	Type    BlockType
-	Content string
-	Lang    string // for code blocks
+	Type     BlockType
+	Content  string
+	Lang     string // for code blocks
 	Complete bool   // true if the block is fully formed
 }
 
 // Renderer is a streaming Markdown renderer.
 type Renderer struct {
-	mu       sync.Mutex
-	buffer   strings.Builder
-	blocks   []Block
+	mu           sync.Mutex
+	buffer       strings.Builder
+	blocks       []Block
 	renderedText string // full rendered output of all complete blocks so far
 
 	// Configuration
-	enableLaTeX       bool
-	enableSyntaxHL    bool
-	colorCodeFence    string
-	colorInlineCode   string
-	colorMath         string
-	colorHeading      string
-	colorReset        string
+	enableLaTeX     bool
+	enableSyntaxHL  bool
+	colorCodeFence  string
+	colorInlineCode string
+	colorMath       string
+	colorHeading    string
+	colorReset      string
 }
 
 // NewRenderer creates a new streaming Markdown renderer.
 func NewRenderer() *Renderer {
 	return &Renderer{
 		enableLaTeX:    true,
-		enableSyntaxHL: true,
+		enableSyntaxHL: diffrender.SyntaxEnabled(),
 		// ANSI color codes (empty = no color)
-		colorCodeFence:  "\033[36m",  // cyan
-		colorInlineCode: "\033[33m",  // yellow
-		colorMath:       "\033[35m",  // magenta
-		colorHeading:    "\033[1m",   // bold
+		colorCodeFence:  "\033[36m", // cyan
+		colorInlineCode: "\033[33m", // yellow
+		colorMath:       "\033[35m", // magenta
+		colorHeading:    "\033[1m",  // bold
 		colorReset:      "\033[0m",
 	}
 }
@@ -327,7 +329,14 @@ func (r *Renderer) renderCodeFence(b Block) string {
 	if b.Lang != "" {
 		sb.WriteString(fmt.Sprintf("[%s]\n", b.Lang))
 	}
-	sb.WriteString(b.Content)
+	// Token-level syntax highlighting is gated by SetSyntaxHighlighting
+	// (NewRenderer defaults it from COVO_SYNTAX_HIGHLIGHT). Unrecognized
+	// languages pass through unchanged.
+	if content := diffrender.HighlightCode(b.Content, b.Lang, r.enableSyntaxHL); content != b.Content {
+		sb.WriteString(content)
+	} else {
+		sb.WriteString(b.Content)
+	}
 	sb.WriteString("\n")
 	if r.colorReset != "" {
 		sb.WriteString(r.colorReset)

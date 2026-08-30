@@ -1,6 +1,6 @@
 package cli
 
-import "os"
+import "github.com/covoyage/covo-agent/internal/useragent"
 
 // Version is the covo-agent version.
 var Version = "0.1.0-dev"
@@ -9,8 +9,5 @@ var Version = "0.1.0-dev"
 // services (LLM providers, etc.). Override with the COVO_USER_AGENT
 // environment variable.
 func UserAgent() string {
-	if v := os.Getenv("COVO_USER_AGENT"); v != "" {
-		return v
-	}
-	return "covo-agent/" + Version
+	return useragent.UserAgent("covo-agent/" + Version)
 }

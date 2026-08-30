@@ -60,9 +60,11 @@ go install github.com/covoyage/covo-agent/cmd/covo-agent@latest
 
 The binary is installed to `GOBIN`, or to `$(go env GOPATH)/bin` when `GOBIN` is not set. Make sure that directory is on your `PATH`.
 
+> Note: `go.mod` references the local `covoyage/covonaut` module via a `replace` directive, so `go install ...@latest` and source builds both require that module to exist locally (see [Build From Source](#build-from-source)).
+
 ### Build From Source
 
-Source builds use the dependency layout declared in `go.mod`. Prepare the referenced local modules, then clone and build the project:
+Source builds use the dependency layout declared in `go.mod`: the sibling `covoyage/covonaut` repository must be cloned next to `covo-agent` (e.g. `~/projects/go/covonaut`). Prepare the referenced local modules, then clone and build the project:
 
 ```bash
 mkdir covoyage && cd covoyage
@@ -95,6 +97,8 @@ covo-agent auth add OPENAI_API_KEY=your-key
 covo-agent auth list
 ```
 
+`covo-agent auth login github` uses the GitHub OAuth device flow. For `openai`, `anthropic`, and `gemini`, login opens the provider's API key page in your browser and stores the key you paste into the terminal (it is not an OAuth flow).
+
 Start the interactive TUI in a project directory:
 
 ```bash
@@ -115,7 +119,6 @@ Run a constrained headless task:
 covo-agent --headless \
   -z "find the cause of the failing tests" \
   --tools read,grep,glob,bash \
-  --max-turns 8 \
   --allow 'bash:go test *' \
   --deny 'bash:rm *'
 ```
@@ -210,6 +213,8 @@ Set `COVO_PROFILE` or use the `profile` command to select one.
 
 Set `COVO_USER_AGENT` to override the `User-Agent` header sent to LLM providers (defaults to `covo-agent/<version>`).
 
+Terminal diffs and code blocks are syntax-highlighted by default: diff-semantic line coloring plus token-level highlighting (language inferred from the file extension), following the active theme. It covers approval diffs, post-edit diff previews, written-content previews, and code fences in assistant messages. Set `COVO_SYNTAX_HIGHLIGHT=false` to disable globally.
+
 ## Data Locations
 
 | Path | Purpose |
@@ -224,7 +229,7 @@ Set `COVO_USER_AGENT` to override the `User-Agent` header sent to LLM providers 
 
 ## Safety
 
-Tool actions that can mutate files, execute commands, or affect external systems pass through approval and policy layers. For automation, use explicit allow and deny rules and a sandbox profile.
+Tool actions that can mutate files, execute commands, or affect external systems pass through approval and policy layers. For automation, use explicit allow and deny rules and a sandbox profile. The `--allow`/`--deny` patterns only apply to `--headless` runs; interactive sessions use the approval gate instead.
 
 ```bash
 covo-agent --headless -z "run the test suite and fix one failure" \
@@ -269,7 +274,7 @@ covo-agent speaks the [Claude Code hooks protocol](https://docs.anthropic.com/en
 - `~/.claude/hooks.json` (user-level) and `<project>/.claude/hooks.json` (project-level) are loaded at startup; both the `Hooks` array format and the settings.json-style `hooks` map format are supported.
 - `~/.codex/hooks.json` (user-level) and `<project>/.codex/hooks.json` (project-level) are loaded at startup using the Codex `{"hooks": {"Event": [{ "matcher": ..., "hooks": [{ "type": "command", ... }]}]}}` format (only `command` handlers; `timeout`/`timeoutSec` in seconds; matcher `"*"` matches all tools).
 - Codex and Claude Code share the same camelCase event names, so hooks from both sources land in the same buckets and can be mixed freely: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop` (already honored by the stop gate), and `SessionStart`. `Notification`-style hooks can be registered as `Async`.
-- Hooks receive the standard JSON payload on stdin (`hook_event_name`, `session_id`, `cwd`, `tool_name`, `tool_input`, `tool_response`, `prompt`, `hook_input`, plus Codex's `model`, `permission_mode` — `plan`/`bypassPermissions`/`acceptEdits` — and `source`) and return a decision on stdout: `approve`/`allow` allows, `deny`/`block` stops the operation (PreToolUse blocks the tool call, UserPromptSubmit aborts the run), and `ask` is treated as fail-open.
+- Hooks receive the standard JSON payload on stdin (`hook_event_name`, `session_id`, `cwd`, `tool_name`, `tool_input`, `tool_response`, `prompt`, plus Codex's `model`, `permission_mode` — `plan`/`bypassPermissions`/`acceptEdits` — and `source`) and return a decision on stdout: `approve`/`allow` allows, `deny`/`block` stops the operation (PreToolUse blocks the tool call, UserPromptSubmit aborts the run), and `ask` is treated as fail-open.
 - The existing `COVO_ACCEPT_HOOKS` allowlist and per-hook timeout/circuit-breaker protections apply. With the default `COVO_ACCEPT_HOOKS=false`, a hook command runs only after it has been allowlisted (interactive confirmation or `COVO_ACCEPT_HOOKS=true`) — hook registration is skipped until then.
 - `.covo-agent-hooks.json`, the Claude Code `.claude/hooks.json`, and the Codex `.codex/hooks.json` files are all hot-reloaded (500ms poll), so policy changes take effect without a restart.
 

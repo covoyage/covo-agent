@@ -353,11 +353,11 @@ func (ca *CovoAgent) trajectoryBeforeHook() agentcore.BeforeHook {
 		case "system":
 			var content string
 			json.Unmarshal(hc.Arguments, &content)
-			ca.trajectory.RecordSystem(content)
+			ca.trajectory.RecordSystem(RedactSensitiveTextForce(content))
 		case "user":
 			var content string
 			json.Unmarshal(hc.Arguments, &content)
-			ca.trajectory.RecordUser(content)
+			ca.trajectory.RecordUser(RedactSensitiveTextForce(content))
 		}
 		return nil
 	}
@@ -428,20 +428,15 @@ func (ca *CovoAgent) permissionGateBeforeHook() agentcore.BeforeHook {
 	}
 }
 
-func (ca *CovoAgent) redactAfterHook() agentcore.AfterHook {
-	return func(ctx context.Context, hc *agentcore.HookContext, result string, err error) {
-		if result != "" {
-			_ = RedactSensitiveText(result, false, false)
-		}
-	}
-}
-
 func (ca *CovoAgent) trajectoryAfterHook() agentcore.AfterHook {
 	return func(ctx context.Context, hc *agentcore.HookContext, result string, err error) {
 		if ca.trajectory == nil {
 			return
 		}
-		ca.trajectory.RecordToolResult(hc.ToolName, hc.ToolName, result)
+		// Persisted trajectory files are force-redacted so secret-shaped
+		// tokens never land on disk. (Rollout recording intentionally stays
+		// verbatim: exact-match replay depends on byte-identical results.)
+		ca.trajectory.RecordToolResult(hc.ToolName, hc.ToolName, RedactSensitiveTextForce(result))
 	}
 }
 
@@ -687,6 +682,7 @@ func (ca *CovoAgent) chainAfterToolCall() func(
 	ctx context.Context, tc agentcore.ToolCall, result *agentcore.ToolResult,
 ) *agentcore.ToolResult {
 	return chainAfterToolCall(
+		ca.redactToolResultAfterToolCall(),
 		ca.lspAfterToolCall(),
 		ca.autoFormatAfterToolCall(),
 		ca.guardrailWarningAfterToolCall(),
@@ -694,6 +690,29 @@ func (ca *CovoAgent) chainAfterToolCall() func(
 		ca.untrustedWrapAfterToolCall(),
 		ca.claudeHooksPostToolUse(),
 	)
+}
+
+// redactToolResultAfterToolCall masks secret-shaped tokens in tool results
+// before they enter the conversation, session storage, or any downstream
+// consumer (persistence overflow files, hook payloads). Honors
+// COVO_REDACT_SECRETS (enabled by default); it runs first in the chain so
+// every later link sees the redacted text.
+func (ca *CovoAgent) redactToolResultAfterToolCall() func(
+	ctx context.Context, tc agentcore.ToolCall, result *agentcore.ToolResult,
+) *agentcore.ToolResult {
+	return func(_ context.Context, _ agentcore.ToolCall, result *agentcore.ToolResult) *agentcore.ToolResult {
+		if result == nil || !redactEnabled {
+			return result
+		}
+		result.Result = RedactSensitiveText(result.Result, false, false)
+		if result.ForLLM != "" {
+			result.ForLLM = RedactSensitiveText(result.ForLLM, false, false)
+		}
+		if result.ForUser != "" {
+			result.ForUser = RedactSensitiveText(result.ForUser, false, false)
+		}
+		return result
+	}
 }
 
 // hookPermissionMode maps covo-agent's permission posture onto the Codex

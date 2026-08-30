@@ -3,8 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"github.com/covoyage/covo-agent/internal/cli"
-	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
 	"log"
 	"log/slog"
 	"os"
@@ -12,6 +10,9 @@ import (
 	"syscall"
 
 	"github.com/covoyage/covo-agent/internal/agent"
+	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
+	"github.com/covoyage/covo-agent/internal/diffrender"
 	"github.com/covoyage/covo-agent/internal/headless"
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/mdstream"
@@ -54,6 +55,13 @@ func RunHeadless(opts *headless.Options) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelError)}))
 	workingDir, _ := os.Getwd()
 
+	// --tools / --disallowed-tools hide tools from the model and hard-block
+	// hallucinated calls; empty lists mean no filtering.
+	var toolNameFilter func(string) bool
+	if len(opts.Tools) > 0 || len(opts.DisallowedTools) > 0 {
+		toolNameFilter = headless.NewToolFilter(opts).IsAllowed
+	}
+
 	covoAgent, err := agent.NewCovoAgent(agent.CovoAgentConfig{
 		Mode:                     mode,
 		Provider:                 llm,
@@ -64,6 +72,7 @@ func RunHeadless(opts *headless.Options) {
 		Logger:                   logger,
 		ApprovalCfg:              shared.ApprovalConfigFromCLI(cfg, true), // auto-approve in headless
 		ToolProfile:              shared.RuntimeState.ActiveProfile(),
+		ToolNameFilter:           toolNameFilter,
 		ThinkingCfg:              shared.ThinkingConfigFromCLI(cfg),
 		FrequencyPenalty:         shared.FrequencyPenaltyFromCLI(cfg),
 		PresencePenalty:          shared.PresencePenaltyFromCLI(cfg),
@@ -82,13 +91,23 @@ func RunHeadless(opts *headless.Options) {
 	}
 
 	// Apply permission gate patterns for auto-approval/denial
+	var gate *headless.PermissionGate
 	if len(opts.Allow) > 0 || len(opts.Deny) > 0 {
-		gate := headless.NewPermissionGate(opts)
+		gate = headless.NewPermissionGate(opts)
+	}
+	if toolNameFilter != nil || gate != nil {
 		covoAgent.SetPermissionChecker(func(ctx context.Context, toolName string, args []byte) bool {
-			result := gate.Check(toolName, string(args))
+			// Tools hidden by --tools/--disallowed-tools are always denied,
+			// even if an allow pattern would otherwise match.
+			if toolNameFilter != nil && !toolNameFilter(toolName) {
+				return false
+			}
+			if gate == nil {
+				return true
+			}
 			// In headless mode, only explicitly allowed tools pass.
 			// Unmatched tools are denied (safe default for non-interactive).
-			return result == "allow"
+			return gate.Check(toolName, string(args)) == "allow"
 		})
 	}
 
@@ -122,7 +141,7 @@ func RunHeadless(opts *headless.Options) {
 	var renderer *mdstream.Renderer
 	if opts.OutputFormat != "streaming-json" {
 		renderer = mdstream.NewRenderer()
-		renderer.SetSyntaxHighlighting(true)
+		renderer.SetSyntaxHighlighting(diffrender.SyntaxEnabled())
 		unsub := covoAgent.Core().On(agentcore.EventMessageDelta, func(ev agentcore.Event) {
 			if delta, ok := ev.(*agentcore.MessageDeltaEvent); ok && delta.Delta != "" {
 				out := renderer.Feed(delta.Delta)

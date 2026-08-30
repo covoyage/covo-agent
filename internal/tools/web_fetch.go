@@ -9,10 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/useragent"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
-func buildWebFetchTool() *agentcore.Tool {
+// BuildWebFetchTool builds the web_fetch tool. When transport is non-nil it is
+// used for every request (and each redirect hop), enabling SSRF protection via
+// URL validation and DNS pinning; nil keeps the plain HTTP client.
+func BuildWebFetchTool(transport http.RoundTripper) *agentcore.Tool {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -21,6 +25,9 @@ func buildWebFetchTool() *agentcore.Tool {
 			}
 			return nil
 		},
+	}
+	if transport != nil {
+		client.Transport = transport
 	}
 
 	return &agentcore.Tool{
@@ -65,7 +72,7 @@ func buildWebFetchTool() *agentcore.Tool {
 			if err != nil {
 				return nil, fmt.Errorf("create request: %w", err)
 			}
-			req.Header.Set("User-Agent", "Covo-Agent/1.0")
+			req.Header.Set("User-Agent", useragent.UserAgent("covo-agent"))
 			req.Header.Set("Accept", "text/html,text/plain,application/json;q=0.9")
 
 			for k, v := range params.Headers {

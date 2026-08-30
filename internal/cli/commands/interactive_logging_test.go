@@ -30,6 +30,21 @@ func TestConfigureInteractiveLoggingRoutesGlobalLogsToWriter(t *testing.T) {
 	}
 }
 
+func TestChatHistoryTheme_DisableSyntaxFollowsEnv(t *testing.T) {
+	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "")
+	if chatHistoryTheme().MarkdownTheme.DisableSyntax {
+		t.Error("default COVO_SYNTAX_HIGHLIGHT should leave DisableSyntax false (highlighting on)")
+	}
+	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "false")
+	if !chatHistoryTheme().MarkdownTheme.DisableSyntax {
+		t.Error("COVO_SYNTAX_HIGHLIGHT=false should set DisableSyntax true")
+	}
+	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "1")
+	if chatHistoryTheme().MarkdownTheme.DisableSyntax {
+		t.Error("COVO_SYNTAX_HIGHLIGHT=1 should leave DisableSyntax false")
+	}
+}
+
 func TestConfigureInteractiveLoggingAcceptsNilWriter(t *testing.T) {
 	previousSlog := slog.Default()
 	previousLogWriter := log.Writer()

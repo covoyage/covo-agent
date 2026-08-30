@@ -207,3 +207,33 @@ func TestClaudeProviderInterrupt(t *testing.T) {
 		t.Fatalf("expected interrupt result, got %q", out)
 	}
 }
+
+func TestAutoAllowSet_DisallowedToolsWin(t *testing.T) {
+	opts := RunOptions{
+		AllowedTools:    []string{"Bash", "Read"},
+		DisallowedTools: []string{"Bash"},
+	}
+
+	// Disallowed always wins, even when also allowed or under bypass mode.
+	if opts.autoAllowSet("Bash", nil) {
+		t.Error("Bash is disallowed; expected deny despite AllowedTools entry")
+	}
+	opts.PermissionMode = "bypassPermissions"
+	if opts.autoAllowSet("Bash", nil) {
+		t.Error("Bash is disallowed; expected deny despite bypassPermissions")
+	}
+
+	// Allowed tools still pass through.
+	opts.PermissionMode = "default"
+	if !opts.autoAllowSet("Read", nil) {
+		t.Error("Read is allowed; expected allow")
+	}
+	// Read-only tools are auto-allowed when not disallowed.
+	if !opts.autoAllowSet("Glob", nil) {
+		t.Error("Glob is read-only; expected allow")
+	}
+	// Unknown, non-allowed, non-readonly tools are denied.
+	if opts.autoAllowSet("Write", nil) {
+		t.Error("Write is not allowed; expected deny")
+	}
+}

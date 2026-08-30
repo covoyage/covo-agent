@@ -60,9 +60,11 @@ go install github.com/covoyage/covo-agent/cmd/covo-agent@latest
 
 二进制会安装到 `GOBIN`；未设置 `GOBIN` 时，则安装到 `$(go env GOPATH)/bin`。请确保对应目录已加入 `PATH`。
 
+> 注意：`go.mod` 通过 `replace` 指令引用本地 `covoyage/covonaut` 模块，因此 `go install ...@latest` 与源码构建都要求本地存在该模块（见[从源码构建](#从源码构建)）。
+
 ### 从源码构建
 
-源码构建使用 `go.mod` 中声明的依赖目录结构。准备好其中引用的本地模块后，再克隆并构建项目：
+源码构建使用 `go.mod` 中声明的依赖目录结构：需要在 `covo-agent` 旁边先克隆同级的 `covoyage/covonaut` 仓库（例如 `~/projects/go/covonaut`）。准备好其中引用的本地模块后，再克隆并构建项目：
 
 ```bash
 mkdir covoyage && cd covoyage
@@ -95,6 +97,8 @@ covo-agent auth add OPENAI_API_KEY=your-key
 covo-agent auth list
 ```
 
+`covo-agent auth login github` 使用 GitHub OAuth 设备流登录。`openai`、`anthropic`、`gemini` 的登录是在浏览器中打开对应 API key 页面，然后把密钥粘贴到终端保存（并非 OAuth 流程）。
+
 进入项目目录并启动交互式 TUI：
 
 ```bash
@@ -115,7 +119,6 @@ covo-agent -z "审查未提交的修改" --json
 covo-agent --headless \
   -z "找出测试失败的原因" \
   --tools read,grep,glob,bash \
-  --max-turns 8 \
   --allow 'bash:go test *' \
   --deny 'bash:rm *'
 ```
@@ -210,6 +213,8 @@ Profile 使用独立的数据目录：
 
 设置 `COVO_USER_AGENT` 可覆盖发送给 LLM 提供方的 `User-Agent` 请求头（默认值为 `covo-agent/<version>`）。
 
+终端 diff 与代码块默认带语法高亮：diff 行级着色 + token 级语法高亮（语言按文件扩展名识别），高亮配色跟随当前主题，覆盖审批 diff、编辑后 diff 预览、写入内容预览与助手消息中的代码围栏。设置 `COVO_SYNTAX_HIGHLIGHT=false` 可全局关闭。
+
 ## 数据目录
 
 | 路径 | 用途 |
@@ -224,7 +229,7 @@ Profile 使用独立的数据目录：
 
 ## 安全机制
 
-可能修改文件、执行命令或影响外部系统的工具操作，会经过审批和策略层。自动化场景建议使用明确的 allow/deny 规则和沙箱配置。
+可能修改文件、执行命令或影响外部系统的工具操作，会经过审批和策略层。自动化场景建议使用明确的 allow/deny 规则和沙箱配置。`--allow`/`--deny` 模式仅在 `--headless` 运行时生效；交互式会话使用审批门。
 
 ```bash
 covo-agent --headless -z "运行测试并修复一个失败" \
@@ -269,7 +274,7 @@ covo-agent 兼容 [Claude Code hooks 协议](https://docs.anthropic.com/en/docs/
 - 启动时加载 `~/.claude/hooks.json`（用户级）与 `<项目>/.claude/hooks.json`（项目级）；既支持 `Hooks` 数组格式，也支持 settings.json 风格的 `hooks` map 格式。
 - 启动时加载 `~/.codex/hooks.json`（用户级）与 `<项目>/.codex/hooks.json`（项目级），采用 Codex 的 `{"hooks": {"Event": [{ "matcher": ..., "hooks": [{ "type": "command", ... }]}]}}` 格式（仅支持 `command` 处理器；`timeout`/`timeoutSec` 单位为秒；matcher 为 `"*"` 时匹配所有工具）。
 - Codex 与 Claude Code 使用相同的驼峰事件名，两个来源的 hook 会落入同一桶并可自由混用：`PreToolUse`、`PostToolUse`、`UserPromptSubmit`、`Stop`（stop gate 已支持）与 `SessionStart`。通知类 hook 可声明为 `Async`。
-- hook 通过 stdin 收到标准 JSON 载荷（`hook_event_name`、`session_id`、`cwd`、`tool_name`、`tool_input`、`tool_response`、`prompt`、`hook_input`，以及 Codex 的 `model`、`permission_mode`——`plan`/`bypassPermissions`/`acceptEdits`——与 `source`），并在 stdout 返回决策：`approve`/`allow` 放行，`deny`/`block` 阻止操作（PreToolUse 阻止工具调用，UserPromptSubmit 中止本次运行），`ask` 按失败放行处理。
+- hook 通过 stdin 收到标准 JSON 载荷（`hook_event_name`、`session_id`、`cwd`、`tool_name`、`tool_input`、`tool_response`、`prompt`，以及 Codex 的 `model`、`permission_mode`——`plan`/`bypassPermissions`/`acceptEdits`——与 `source`），并在 stdout 返回决策：`approve`/`allow` 放行，`deny`/`block` 阻止操作（PreToolUse 阻止工具调用，UserPromptSubmit 中止本次运行），`ask` 按失败放行处理。
 - 沿用现有的 `COVO_ACCEPT_HOOKS` 白名单与超时/熔断保护。默认 `COVO_ACCEPT_HOOKS=false` 时，hook 命令需先通过交互确认或 `COVO_ACCEPT_HOOKS=true` 加入白名单后才会执行——在此之前注册会被跳过。
 - `.covo-agent-hooks.json`、Claude Code 的 `.claude/hooks.json` 与 Codex 的 `.codex/hooks.json` 均支持热重载（500ms 轮询），策略变更无需重启生效。
 

@@ -117,8 +117,12 @@ func newTraceProvider(ctx context.Context, cfg Config, logger *slog.Logger) (*sd
 	}
 
 	res := buildResource(ctx, cfg, logger)
+	interval := cfg.ExportInterval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
 	return sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
+		sdktrace.WithBatcher(exporter, sdktrace.WithBatchTimeout(interval)),
 		sdktrace.WithResource(res),
 	), nil
 }
@@ -144,8 +148,12 @@ func newMeterProvider(ctx context.Context, cfg Config, logger *slog.Logger) (*sd
 	}
 
 	res := buildResource(ctx, cfg, logger)
+	interval := cfg.ExportInterval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
 	return sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter, sdkmetric.WithInterval(30*time.Second))),
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter, sdkmetric.WithInterval(interval))),
 		sdkmetric.WithResource(res),
 	), nil
 }

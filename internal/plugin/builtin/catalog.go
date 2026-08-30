@@ -6,7 +6,6 @@ import (
 
 	apiserver "github.com/covoyage/covo-agent/internal/plugin/platforms/api_server"
 	"github.com/covoyage/covo-agent/internal/plugin/platforms/bluebubbles"
-	"github.com/covoyage/covo-agent/internal/plugin/platforms/cron"
 	"github.com/covoyage/covo-agent/internal/plugin/platforms/dingtalk"
 	"github.com/covoyage/covo-agent/internal/plugin/platforms/discord"
 	"github.com/covoyage/covo-agent/internal/plugin/platforms/email"
@@ -51,7 +50,6 @@ type Entry struct {
 var catalog = []Entry{
 	{ID: "api_server", Description: "REST API Server - HTTP-based messaging endpoint", New: func() any { return apiserver.New() }},
 	{ID: "bluebubbles", Description: "BlueBubbles - iMessage bridge for Android/PC", New: func() any { return bluebubbles.New() }},
-	{ID: "cron", Description: "Cron Scheduler - scheduled message delivery", New: func() any { return cron.New() }},
 	{ID: "dingtalk", Description: "DingTalk - enterprise communication platform", New: func() any { return dingtalk.New() }},
 	{ID: "discord", Description: "Discord Bot - gaming/community chat platform", New: func() any { return discord.New() }},
 	{ID: "email", Description: "Email - SMTP/IMAP email integration", New: func() any { return email.New() }},

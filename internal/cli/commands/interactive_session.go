@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/covoyage/covo-agent/internal/diffrender"
 	"github.com/covoyage/covonaut/agentcore"
 	"github.com/covoyage/covonaut/tui/chat"
 	"github.com/covoyage/covonaut/tui/core"
@@ -311,6 +312,7 @@ func (s *interactiveSession) run() {
 
 	s.app = s.buildChatApp(slashSuggestions, atSuggestions)
 	s.app.SuppressAutoRetry = true
+	s.app.History().SetTheme(chatHistoryTheme())
 	shared.RuntimeState.SetUI(agentui.NewUIBus(s.app))
 
 	s.wirePermissionGate()
@@ -336,7 +338,7 @@ func (s *interactiveSession) run() {
 	go memoryMonitor.Run(s.app.Done())
 
 	theme.SetOnSemanticThemeChange(func() {
-		s.app.History().SetTheme(chat.DefaultChatHistoryTheme())
+		s.app.History().SetTheme(chatHistoryTheme())
 	})
 
 	s.printWelcome()
@@ -367,6 +369,17 @@ func (s *interactiveSession) run() {
 	defer cronScheduler.Stop()
 
 	<-s.app.Done()
+}
+
+// chatHistoryTheme builds the chat history theme with fenced-code syntax
+// highlighting configured from COVO_SYNTAX_HIGHLIGHT (see
+// diffrender.SyntaxEnabled). Applied at startup and re-applied on theme
+// switches so assistant markdown, diff fences, and content previews all
+// follow the same switch.
+func chatHistoryTheme() chat.ChatHistoryTheme {
+	th := chat.DefaultChatHistoryTheme()
+	th.MarkdownTheme.DisableSyntax = !diffrender.SyntaxEnabled()
+	return th
 }
 
 func configureInteractiveLogging(writer io.Writer) *slog.Logger {

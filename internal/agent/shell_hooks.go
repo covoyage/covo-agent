@@ -24,15 +24,27 @@ const (
 	// Circuit breaker parameters.
 	cbFailureThreshold = 3               // consecutive failures before tripping
 	cbCooldown         = 5 * time.Second // open-state duration before half-open trial
-	cbExecTimeout      = 5 * time.Second // max execution time under circuit breaker
 
 	// Hot reload parameters.
 	hotReloadInterval = 500 * time.Millisecond
 )
 
+// hookExecutionTimeout returns the wall-clock timeout for running a single
+// hook command: the spec's configured timeout (Register already defaults it
+// to 60s and clamps it to maxHookTimeout).
+func hookExecutionTimeout(spec *ShellHookSpec) time.Duration {
+	if spec.Timeout <= 0 {
+		return defaultHookTimeout
+	}
+	if spec.Timeout > maxHookTimeout {
+		return maxHookTimeout
+	}
+	return spec.Timeout
+}
+
 // HookEvent is the JSON payload written to a hook command's stdin. The field
 // names follow the Claude Code hooks protocol (hook_event_name, tool_name,
-// tool_input, tool_response, prompt, hook_input, transcript_path, cwd,
+// tool_input, tool_response, prompt, transcript_path, cwd,
 // session_id) plus the Codex-specific fields (model, permission_mode, source)
 // so that existing Claude Code and Codex hook scripts work unchanged.
 type HookEvent struct {
@@ -41,7 +53,6 @@ type HookEvent struct {
 	ToolInput      map[string]any `json:"tool_input,omitempty"`
 	ToolResponse   string         `json:"tool_response,omitempty"`
 	Prompt         string         `json:"prompt,omitempty"`
-	HookInput      map[string]any `json:"hook_input,omitempty"`
 	TranscriptPath string         `json:"transcript_path,omitempty"`
 	SessionID      string         `json:"session_id"`
 	Cwd            string         `json:"cwd"`
@@ -671,8 +682,9 @@ func parseClaudeHooks(data []byte) ([]map[string]any, error) {
 		return specs, nil
 	}
 
-	// 2. "hooks" key — either the settings.json map format or the legacy
-	// array format. Distinguish by the first non-space byte.
+	// 2. "hooks" key — the settings.json map format (flat entries and/or
+	// entries with a nested "hooks" handler array) or the legacy array
+	// format. Distinguish by the first non-space byte.
 	if hooksRaw, ok := raw["hooks"]; ok {
 		if len(hooksRaw) > 0 && hooksRaw[0] == '[' {
 			var legacy []map[string]any
@@ -681,11 +693,26 @@ func parseClaudeHooks(data []byte) ([]map[string]any, error) {
 			}
 			return legacy, nil
 		}
+		// Real Claude Code settings.json nests command handlers under each
+		// entry's "hooks" array: {"hooks": {"PreToolUse": [{"matcher": "Bash",
+		// "hooks": [{"type": "command", "command": "...", "timeout": 10}]}]}}.
+		// Flat entries ({"PreToolUse": [{"Matcher": ..., "Command": ...}]})
+		// and the legacy array format stay supported for backward compat.
+		// json tag matching is case-insensitive, so capitalized legacy keys
+		// and lowercase settings.json keys both bind.
 		var hooks map[string][]struct {
 			Matcher        string  `json:"Matcher"`
 			Command        string  `json:"Command"`
 			TimeoutSeconds float64 `json:"TimeoutSeconds"`
+			Timeout        float64 `json:"Timeout"`
 			Async          bool    `json:"Async"`
+			Handlers       []struct {
+				Type       string  `json:"Type"`
+				Command    string  `json:"Command"`
+				Timeout    float64 `json:"Timeout"`
+				TimeoutSec float64 `json:"TimeoutSec"`
+				Async      bool    `json:"Async"`
+			} `json:"Hooks"`
 		}
 		if err := json.Unmarshal(hooksRaw, &hooks); err != nil {
 			return nil, err
@@ -693,14 +720,41 @@ func parseClaudeHooks(data []byte) ([]map[string]any, error) {
 		var specs []map[string]any
 		for event, list := range hooks {
 			for _, h := range list {
+				matcher := h.Matcher
+				if len(h.Handlers) > 0 {
+					for _, handler := range h.Handlers {
+						if handler.Type != "" && handler.Type != "command" {
+							continue
+						}
+						if handler.Command == "" {
+							continue
+						}
+						timeout := handler.Timeout
+						if handler.TimeoutSec > 0 {
+							timeout = handler.TimeoutSec
+						}
+						specs = append(specs, map[string]any{
+							"event":   event,
+							"command": handler.Command,
+							"matcher": matcher,
+							"timeout": timeout,
+							"async":   handler.Async,
+						})
+					}
+					continue
+				}
 				if h.Command == "" {
 					continue
+				}
+				timeout := h.TimeoutSeconds
+				if h.Timeout > 0 {
+					timeout = h.Timeout
 				}
 				specs = append(specs, map[string]any{
 					"event":   event,
 					"command": h.Command,
-					"matcher": h.Matcher,
-					"timeout": h.TimeoutSeconds,
+					"matcher": matcher,
+					"timeout": timeout,
 					"async":   h.Async,
 				})
 			}
@@ -926,11 +980,9 @@ func (m *ShellHookManager) executeHook(spec *ShellHookSpec, payload *HookEvent, 
 		return nil
 	}
 
-	// Use the shorter of the spec timeout and the circuit breaker timeout.
-	timeout := spec.Timeout
-	if timeout > cbExecTimeout {
-		timeout = cbExecTimeout
-	}
+	// The configured hook timeout governs execution (clamped in Register);
+	// the circuit breaker only counts failures, including timeouts.
+	timeout := hookExecutionTimeout(spec)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 

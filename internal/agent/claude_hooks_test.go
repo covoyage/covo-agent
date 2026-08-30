@@ -517,3 +517,89 @@ func TestLoadClaudeHooks_HotReload(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// --- real Claude Code settings.json nested shape ---
+
+const claudeSettingsJSONFormat = `{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "echo block-bash", "timeout": 30 },
+          { "type": "command", "command": "echo always", "async": true }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "echo stop-gate" }
+        ]
+      }
+    ]
+  }
+}`
+
+func TestParseClaudeHooks_SettingsJSONNested(t *testing.T) {
+	specs, err := parseClaudeHooks([]byte(claudeSettingsJSONFormat))
+	if err != nil {
+		t.Fatalf("parseClaudeHooks: %v", err)
+	}
+	if len(specs) != 3 {
+		t.Fatalf("expected 3 specs, got %d: %#v", len(specs), specs)
+	}
+	byCommand := map[string]map[string]any{}
+	for _, s := range specs {
+		byCommand[s["command"].(string)] = s
+	}
+	pre, ok := byCommand["echo block-bash"]
+	if !ok {
+		t.Fatalf("missing PreToolUse spec: %#v", specs)
+	}
+	if pre["event"] != "PreToolUse" || pre["matcher"] != "Bash" {
+		t.Errorf("unexpected pre spec: %#v", pre)
+	}
+	if tsec, ok := pre["timeout"].(float64); !ok || tsec != 30 {
+		t.Errorf("expected timeout 30, got %#v", pre["timeout"])
+	}
+	asyncSpec, ok := byCommand["echo always"]
+	if !ok {
+		t.Fatalf("missing async PreToolUse spec: %#v", specs)
+	}
+	if asyncSpec["async"] != true {
+		t.Errorf("expected async handler, got %#v", asyncSpec)
+	}
+	stop, ok := byCommand["echo stop-gate"]
+	if !ok {
+		t.Fatalf("missing Stop spec: %#v", specs)
+	}
+	if stop["event"] != "Stop" || stop["matcher"] != "" {
+		t.Errorf("unexpected stop spec: %#v", stop)
+	}
+}
+
+func TestParseHooksFile_MatchesStartupParsingForSettingsJSON(t *testing.T) {
+	// The hot-reload parser must accept the same shapes the startup parser
+	// does, in particular the nested Claude Code settings.json format.
+	startup, err := parseClaudeHooks([]byte(claudeSettingsJSONFormat))
+	if err != nil {
+		t.Fatalf("parseClaudeHooks: %v", err)
+	}
+	reload, err := parseHooksFile([]byte(claudeSettingsJSONFormat))
+	if err != nil {
+		t.Fatalf("parseHooksFile: %v", err)
+	}
+	if len(startup) != len(reload) {
+		t.Fatalf("startup parsed %d specs, hot reload parsed %d", len(startup), len(reload))
+	}
+	startCmds := map[string]bool{}
+	for _, s := range startup {
+		startCmds[s["command"].(string)] = true
+	}
+	for _, s := range reload {
+		if !startCmds[s["command"].(string)] {
+			t.Errorf("hot reload produced spec %v missing from startup parse", s)
+		}
+	}
+}

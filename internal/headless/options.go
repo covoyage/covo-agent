@@ -1,5 +1,5 @@
 // Package headless provides enhanced headless (non-interactive) mode
-// with tool filtering, max-turns, allow/deny lists, and streaming JSON output.
+// with tool filtering, allow/deny lists, and streaming JSON output.
 package headless
 
 import (
@@ -20,9 +20,6 @@ type Options struct {
 	Tools []string
 	// DisallowedTools is a blacklist of tool names to block.
 	DisallowedTools []string
-
-	// MaxTurns limits the number of agent turns. 0 = unlimited.
-	MaxTurns int
 
 	// Allow is a list of permission patterns to auto-approve (e.g. "edit:*", "bash:ls *").
 	Allow []string
@@ -49,13 +46,13 @@ type Options struct {
 
 // OutputEvent represents a streaming JSON output event.
 type OutputEvent struct {
-	Type      string `json:"type"`       // "text", "tool_call", "tool_result", "error", "done"
-	Content   string `json:"content"`    // text content or tool name
-	ToolInput string `json:"tool_input,omitempty"`
+	Type       string `json:"type"`    // "text", "tool_call", "tool_result", "error", "done"
+	Content    string `json:"content"` // text content or tool name
+	ToolInput  string `json:"tool_input,omitempty"`
 	ToolResult string `json:"tool_result,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Turn      int    `json:"turn,omitempty"`
-	Timestamp int64  `json:"timestamp"`
+	Error      string `json:"error,omitempty"`
+	Turn       int    `json:"turn,omitempty"`
+	Timestamp  int64  `json:"timestamp"`
 }
 
 // ToolFilter filters tools based on the allow/disallow lists.
@@ -187,7 +184,7 @@ func matchGlob(pattern, text string) bool {
 
 // StreamingWriter handles streaming JSON output to a writer.
 type StreamingWriter struct {
-	w  io.Writer
+	w   io.Writer
 	enc *json.Encoder
 }
 
@@ -269,10 +266,6 @@ func ValidateOptions(opts *Options) error {
 		// valid
 	default:
 		return fmt.Errorf("invalid reasoning effort: %s (expected 'low', 'medium', or 'high')", opts.ReasoningEffort)
-	}
-
-	if opts.MaxTurns < 0 {
-		return fmt.Errorf("max-turns must be non-negative")
 	}
 
 	// Check for conflicting tools (same tool in both lists)

@@ -16,6 +16,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/plugin"
 	"github.com/covoyage/covo-agent/internal/safego"
+	"github.com/covoyage/covo-agent/internal/useragent"
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
 )
@@ -181,7 +182,7 @@ func (a *Adapter) apiCall(ctx context.Context, method, path string, body map[str
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bot "+a.botToken)
-		req.Header.Set("User-Agent", "covo-agent/1.0")
+		req.Header.Set("User-Agent", useragent.UserAgent("covo-agent"))
 
 		resp, err := a.httpClient.Do(req)
 		if err != nil {

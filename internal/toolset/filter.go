@@ -17,10 +17,11 @@ type ToolsetFilter struct {
 	platform        *PlatformToolsets
 	availability    *ToolAvailability
 	filter          *CachedFilter
-	toolNames       func() []string // returns all registered tool names from the registry
-	platforms       func() string   // returns current platform name
-	planModeChecker func() bool     // returns true when agent is in Plan mode
-	planModeAllowed map[string]bool // tools allowed in Plan mode
+	toolNames       func() []string   // returns all registered tool names from the registry
+	platforms       func() string     // returns current platform name
+	planModeChecker func() bool       // returns true when agent is in Plan mode
+	planModeAllowed map[string]bool   // tools allowed in Plan mode
+	nameFilter      func(string) bool // optional per-tool-name predicate (e.g. headless --tools)
 	logger          *slog.Logger
 }
 
@@ -31,8 +32,9 @@ type ToolsetFilterConfig struct {
 	Filter          *CachedFilter
 	ToolNames       func() []string
 	PlatformName    func() string
-	PlanModeChecker func() bool     // returns true when agent is in Plan mode
-	PlanModeAllowed map[string]bool // tools allowed in Plan mode (overrides filtering)
+	PlanModeChecker func() bool       // returns true when agent is in Plan mode
+	PlanModeAllowed map[string]bool   // tools allowed in Plan mode (overrides filtering)
+	NameFilter      func(string) bool // optional per-tool-name predicate; nil = no extra filtering
 	Logger          *slog.Logger
 }
 
@@ -61,6 +63,7 @@ func NewToolsetFilter(cfg ToolsetFilterConfig) *ToolsetFilter {
 		platforms:       cfg.PlatformName,
 		planModeChecker: cfg.PlanModeChecker,
 		planModeAllowed: planModeAllowed,
+		nameFilter:      cfg.NameFilter,
 		logger:          cfg.Logger,
 	}
 }
@@ -115,6 +118,9 @@ func (tf *ToolsetFilter) BeforeModelCall(_ context.Context, _ *agentcore.AgentRu
 			continue
 		}
 		if inPlanMode && !tf.planModeAllowed[def.Name] {
+			continue
+		}
+		if tf.nameFilter != nil && !tf.nameFilter(def.Name) {
 			continue
 		}
 		filtered = append(filtered, def)

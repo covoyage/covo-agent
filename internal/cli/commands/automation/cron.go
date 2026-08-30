@@ -1,8 +1,12 @@
 package automation
 
 import (
+	"context"
 	"fmt"
+	"time"
+
 	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/telemetry"
 
 	"github.com/covoyage/covo-agent/internal/tools"
 	"github.com/spf13/cobra"
@@ -120,5 +124,63 @@ func NewCronCommand() *cobra.Command {
 		},
 	})
 
+	cronCmd.AddCommand(&cobra.Command{
+		Use:   "run-due",
+		Short: "Run all due cron jobs once, then exit",
+		Long: "Run every enabled cron job whose next run time has passed, then exit.\n" +
+			"For scheduled execution outside the interactive TUI, invoke this\n" +
+			"command from an OS scheduler (crontab, launchd, systemd timer).",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			homeDir, err := cli.HomeDir()
+			if err != nil {
+				return fmt.Errorf("home dir: %w", err)
+			}
+			store := tools.NewCronStore(homeDir)
+			_ = store.Load()
+			w := cmd.OutOrStdout()
+			due := store.DueJobs()
+			if len(due) == 0 {
+				fmt.Fprintln(w, "No due cron jobs.")
+				return nil
+			}
+
+			// Flush buffered OTel spans before the process exits.
+			defer telemetry.ShutdownOtel(context.Background())
+
+			failed := 0
+			for _, job := range due {
+				fmt.Fprintf(w, "Running %s (%s)...\n", shortID(job.ID), job.Name)
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				result, err := runCronPrompt(ctx, job.ID, job.Prompt)
+				cancel()
+				status := "ok"
+				if err != nil {
+					status = fmt.Sprintf("error: %v", err)
+					failed++
+					fmt.Fprintf(w, "  ✗ %s: %v\n", job.Name, err)
+				} else {
+					if len(result) > 500 {
+						status = result[:500] + "..."
+					}
+					fmt.Fprintf(w, "  ✓ %s\n\n%s\n", job.Name, result)
+				}
+				_ = store.RecordRun(job.ID, status)
+			}
+			if failed > 0 {
+				return fmt.Errorf("%d of %d cron jobs failed", failed, len(due))
+			}
+			return nil
+		},
+	})
+
 	return cronCmd
+}
+
+// shortID truncates a cron job ID for display, matching the other subcommands.
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
 }
