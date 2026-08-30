@@ -7,7 +7,7 @@ app:
   welcome_type: พิมพ์ข้อความหรือใช้ "/help" สำหรับคำสั่ง
   welcome_model: รัน `covo-agent model` เพื่อเปลี่ยนผู้ให้บริการ/โมเดลเริ่มต้น
   welcome_session: เซสชัน
-  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  welcome_shortcuts: /help · /session · /skill · /memory · /curator · /quit
   quit_confirm: กด Ctrl+Q หรือ Ctrl+D อีกครั้งเพื่อออก
 statusline:
   mode_general: ทั่วไป

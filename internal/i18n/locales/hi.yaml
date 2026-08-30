@@ -8,7 +8,7 @@ app:
   welcome_type: अपना संदेश लिखें या कमांड के लिए "/help" उपयोग करें।
   welcome_model: डिफ़ॉल्ट प्रदाता/मॉडल बदलने के लिए `covo-agent model` चलाएँ।
   welcome_session: सत्र
-  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  welcome_shortcuts: /help · /session · /skill · /memory · /curator · /quit
   quit_confirm: Ctrl+Q या Ctrl+D फिर से दबाएँ।
 statusline:
   mode_general: सामान्य

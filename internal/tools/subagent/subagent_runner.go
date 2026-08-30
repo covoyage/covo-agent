@@ -67,6 +67,7 @@ type ctxKeySubagentOrchestrator struct{}
 type ctxKeySubagentGoal struct{}
 type ctxKeyProviderOverride struct{}
 type ctxKeyModelOverride struct{}
+type ctxKeyIsolation struct{}
 type ctxSubagentCredentialPool struct{}
 type ctxKeyParentMessages struct{}
 
@@ -185,6 +186,18 @@ func WithSubagentModel(ctx context.Context, model string) context.Context {
 // SubagentModelFromContext retrieves the model override, if set.
 func SubagentModelFromContext(ctx context.Context) string {
 	s, _ := ctx.Value(ctxKeyModelOverride{}).(string)
+	return s
+}
+
+// WithSubagentIsolation requests workspace isolation for the child agent.
+// "worktree" creates a detached git worktree; anything else is shared.
+func WithSubagentIsolation(ctx context.Context, isolation string) context.Context {
+	return context.WithValue(ctx, ctxKeyIsolation{}, isolation)
+}
+
+// SubagentIsolationFromContext retrieves the isolation mode, if set.
+func SubagentIsolationFromContext(ctx context.Context) string {
+	s, _ := ctx.Value(ctxKeyIsolation{}).(string)
 	return s
 }
 

@@ -8,7 +8,7 @@ app:
   welcome_type: Nhập tin nhắn hoặc dùng "/help" để xem lệnh.
   welcome_model: Chạy `covo-agent model` để đổi nhà cung cấp/mô hình mặc định.
   welcome_session: Phiên
-  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  welcome_shortcuts: /help · /session · /skill · /memory · /curator · /quit
   quit_confirm: Nhấn Ctrl+Q hoặc Ctrl+D lần nữa để thoát.
 statusline:
   mode_general: Chung

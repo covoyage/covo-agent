@@ -7,7 +7,7 @@ app:
   welcome_type: 메시지를 입력하거나 "/help"로 명령어를 확인하세요.
   welcome_model: '`covo-agent model`을 실행하여 기본 provider/model을 변경하세요.'
   welcome_session: 세션
-  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  welcome_shortcuts: /help · /session · /skill · /memory · /curator · /quit
 statusline:
   mode_general: 일반
   mode_code: 코드

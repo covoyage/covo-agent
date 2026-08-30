@@ -292,6 +292,8 @@ func (s *interactiveSession) run() {
 		PrintSystem: func(message string) {
 			loadUIBus().PrintSystem(message)
 		},
+		Mode:  func() string { return string(s.mode) },
+		Model: func() string { return s.model },
 	}
 
 	s.agentRuntime.OnReplace(func(replacement runtimeapp.AgentReplacement) {
@@ -378,7 +380,18 @@ func (s *interactiveSession) run() {
 // follow the same switch.
 func chatHistoryTheme() chat.ChatHistoryTheme {
 	th := chat.DefaultChatHistoryTheme()
-	th.MarkdownTheme.DisableSyntax = !diffrender.SyntaxEnabled()
+	syntax := diffrender.SyntaxEnabled()
+	th.MarkdownTheme.DisableSyntax = !syntax
+	th.MarkdownTheme.HighlightFence = func(source, lang string) string {
+		return diffrender.HighlightCode(source, lang, syntax)
+	}
+	th.MarkdownTheme.FenceRenderer = func(lang, source string, width int64) []string {
+		if lang != "mermaid" {
+			return nil
+		}
+		rendered := agentui.RenderMermaid(source)
+		return strings.Split(rendered, "\n")
+	}
 	return th
 }
 

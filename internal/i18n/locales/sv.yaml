@@ -8,7 +8,7 @@ app:
   welcome_type: Skriv ditt meddelande eller använd "/help" för kommandon.
   welcome_model: Kör `covo-agent model` för att ändra standardleverantör/modell.
   welcome_session: Session
-  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  welcome_shortcuts: /help · /session · /skill · /memory · /curator · /quit
   quit_confirm: Tryck Ctrl+Q eller Ctrl+D igen för att avsluta.
 statusline:
   mode_general: Allmän

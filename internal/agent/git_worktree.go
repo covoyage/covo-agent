@@ -34,6 +34,23 @@ func NewGitWorktree(baseDir string) *GitWorktree {
 	}
 }
 
+// NewIsolatedGitWorktree creates a worktree isolator that is enabled whenever
+// baseDir is a git repository, independent of COVO_WORKTREE.
+func NewIsolatedGitWorktree(baseDir string) *GitWorktree {
+	return &GitWorktree{
+		baseDir: baseDir,
+		enabled: isGitRepo(baseDir),
+	}
+}
+
+// BaseDir returns the original working directory the worktree was created from.
+func (gw *GitWorktree) BaseDir() string {
+	if gw == nil {
+		return ""
+	}
+	return gw.baseDir
+}
+
 // isGitRepo reports whether dir is inside a git working tree.
 func isGitRepo(dir string) bool {
 	cmd := exec.Command("git", "rev-parse", "--git-dir")

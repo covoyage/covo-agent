@@ -13,12 +13,14 @@ func TestBuildSlashSuggestions_HasAllCommands(t *testing.T) {
 		t.Fatalf("expected at least %d suggestions, got %d", expectedMin, len(cmds))
 	}
 
-	required := []string{"help", "clear", "new", "mode general", "mode code",
+	required := []string{"help", "clear", "mode general", "mode code",
 		"provider openai", "model", "memory agent", "memory user",
 		"skill", "session", "resume", "save",
 		"compact", "curator",
 		"retry",
-		"background", "queue", "steer", "cancel", "statusline", "rewind", "plan", "act", "stats", "quit"}
+		"background", "queue", "steer", "cancel", "logs", "respawn", "agents",
+		"statusline", "rewind", "plan", "act", "stats",
+		"usage", "vim", "recap", "focus", "quit"}
 	for _, cmd := range required {
 		found := false
 		for _, s := range cmds {

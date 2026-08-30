@@ -170,32 +170,52 @@ func (m *BackgroundManager) Cancel(id string) error {
 	return nil
 }
 
+func (m *BackgroundManager) Get(id string) (TaskSummary, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	bt, ok := m.tasks[id]
+	if !ok {
+		return TaskSummary{}, false
+	}
+	return m.summaryLocked(bt, false), true
+}
+
+func (m *BackgroundManager) Logs(id string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	bt, ok := m.tasks[id]
+	if !ok {
+		return "", fmt.Errorf("task %q not found", id)
+	}
+	out := bt.Output
+	if bt.Error != "" {
+		if out != "" {
+			out += "\n"
+		}
+		out += "error: " + bt.Error
+	}
+	return out, nil
+}
+
+func (m *BackgroundManager) Respawn(id string, createAgent func() *agent.CovoAgent, notify func(string)) (string, error) {
+	m.mu.Lock()
+	bt, ok := m.tasks[id]
+	if !ok {
+		m.mu.Unlock()
+		return "", fmt.Errorf("task %q not found", id)
+	}
+	input := bt.Input
+	m.mu.Unlock()
+	return m.Start(input, createAgent, notify), nil
+}
+
 func (m *BackgroundManager) List() []TaskSummary {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	result := make([]TaskSummary, 0, len(m.tasks))
-	for id, bt := range m.tasks {
-		runtime := ""
-		if !bt.startedAt.IsZero() {
-			end := bt.completedAt
-			if end.IsZero() {
-				end = time.Now()
-			}
-			runtime = fmtDuration(end.Sub(bt.startedAt))
-		}
-
-		currentTurn := bt.Turns
-		if bt.Status == TaskRunning && bt.agent != nil {
-			currentTurn = bt.agent.State().Turn()
-		}
-
-		result = append(result, TaskSummary{
-			ID: id, Input: bt.Input, Status: bt.Status,
-			Output: truncateRunes(bt.Output, 200),
-			Error:  bt.Error, Turns: bt.Turns,
-			CurrentTurn: currentTurn, Runtime: runtime, StartedAt: bt.startedAt,
-		})
+	for _, bt := range m.tasks {
+		result = append(result, m.summaryLocked(bt, true))
 	}
 
 	sort.Slice(result, func(i, j int) bool {
@@ -203,6 +223,32 @@ func (m *BackgroundManager) List() []TaskSummary {
 	})
 
 	return result
+}
+
+func (m *BackgroundManager) summaryLocked(bt *backgroundTask, truncateOutput bool) TaskSummary {
+	runtime := ""
+	if !bt.startedAt.IsZero() {
+		end := bt.completedAt
+		if end.IsZero() {
+			end = time.Now()
+		}
+		runtime = fmtDuration(end.Sub(bt.startedAt))
+	}
+
+	currentTurn := bt.Turns
+	if bt.Status == TaskRunning && bt.agent != nil {
+		currentTurn = bt.agent.State().Turn()
+	}
+
+	output := bt.Output
+	if truncateOutput {
+		output = truncateRunes(output, 200)
+	}
+	return TaskSummary{
+		ID: bt.ID, Input: bt.Input, Status: bt.Status,
+		Output: output, Error: bt.Error, Turns: bt.Turns,
+		CurrentTurn: currentTurn, Runtime: runtime, StartedAt: bt.startedAt,
+	}
 }
 
 func fmtDuration(d time.Duration) string {

@@ -21,14 +21,13 @@ func handleBackground(sctx *SlashContext, parts []string) bool {
 		sctx.UI.App.PrintSystem("Usage: /background <task description>")
 		return true
 	}
-	covoAgent := sctx.Runtime.Agents.Current()
-	if covoAgent == nil {
+	if sctx.Runtime.CreateAgent == nil {
 		sctx.UI.App.PrintSystem(i18n.T("system.no_active_agent"))
 		return true
 	}
-	agentForBg := covoAgent
+	mode := sctx.Runtime.ActiveMode()
 	id := sctx.Services.BackgroundManager.Start(taskInput, func() *agent.CovoAgent {
-		return agentForBg
+		return sctx.Runtime.CreateAgent(mode)
 	}, func(msg string) {
 		sctx.UI.App.PrintSystem(msg)
 	})
@@ -103,5 +102,98 @@ func handleCancel(sctx *SlashContext, parts []string) bool {
 		return true
 	}
 	sctx.UI.App.PrintSystem(fmt.Sprintf("cancelled task %s", id))
+	return true
+}
+
+func handleStop(sctx *SlashContext, parts []string) bool {
+	return handleCancel(sctx, parts)
+}
+
+func handleLogs(sctx *SlashContext, parts []string) bool {
+	if sctx.Services.BackgroundManager == nil {
+		sctx.UI.App.PrintSystem("(background tasks are not available)")
+		return true
+	}
+	if len(parts) < 2 {
+		sctx.UI.App.PrintSystem("Usage: /logs <bg-id>")
+		return true
+	}
+	out, err := sctx.Services.BackgroundManager.Logs(parts[1])
+	if err != nil {
+		sctx.UI.App.PrintError(err)
+		return true
+	}
+	if strings.TrimSpace(out) == "" {
+		sctx.UI.App.PrintSystem(fmt.Sprintf("(no output yet for %s)", parts[1]))
+		return true
+	}
+	sctx.UI.App.PrintSystem(fmt.Sprintf("── logs %s ──\n%s", parts[1], out))
+	return true
+}
+
+func handleAttach(sctx *SlashContext, parts []string) bool {
+	return handleLogs(sctx, parts)
+}
+
+func handleRespawn(sctx *SlashContext, parts []string) bool {
+	if sctx.Services.BackgroundManager == nil {
+		sctx.UI.App.PrintSystem("(background tasks are not available)")
+		return true
+	}
+	if len(parts) < 2 {
+		sctx.UI.App.PrintSystem("Usage: /respawn <bg-id>")
+		return true
+	}
+	if sctx.Runtime.CreateAgent == nil {
+		sctx.UI.App.PrintSystem(i18n.T("system.no_active_agent"))
+		return true
+	}
+	mode := sctx.Runtime.ActiveMode()
+	newID, err := sctx.Services.BackgroundManager.Respawn(parts[1], func() *agent.CovoAgent {
+		return sctx.Runtime.CreateAgent(mode)
+	}, func(msg string) {
+		sctx.UI.App.PrintSystem(msg)
+	})
+	if err != nil {
+		sctx.UI.App.PrintError(err)
+		return true
+	}
+	sctx.UI.App.PrintSystem(fmt.Sprintf("respawned %s as %s", parts[1], newID))
+	return true
+}
+
+func handleAgents(sctx *SlashContext, parts []string) bool {
+	var b strings.Builder
+	b.WriteString("── Agents ──\n")
+	ca := sctx.Runtime.Agents.Current()
+	if ca == nil {
+		b.WriteString("  foreground: (none)\n")
+	} else {
+		status := "idle"
+		if sctx.Runtime.Busy.Load() {
+			status = "working"
+		}
+		sessionID := ca.SessionManager().CurrentID()
+		if len(sessionID) > 8 {
+			sessionID = sessionID[:8]
+		}
+		b.WriteString(fmt.Sprintf("  foreground [%s] session=%s model=%s\n", status, sessionID, ca.Model()))
+	}
+	if sctx.Services.BackgroundManager == nil {
+		b.WriteString("  background: (unavailable)\n")
+		sctx.UI.App.PrintSystem(b.String())
+		return true
+	}
+	tasks := sctx.Services.BackgroundManager.List()
+	if len(tasks) == 0 {
+		b.WriteString("  background: (none)\n")
+	} else {
+		b.WriteString(fmt.Sprintf("  background: %d task(s)\n", len(tasks)))
+		for _, t := range tasks {
+			b.WriteString(fmt.Sprintf("    %s [%s] turns=%d/%d runtime=%s %s\n",
+				t.ID, t.Status, t.CurrentTurn, t.Turns, t.Runtime, truncate(t.Input, 80)))
+		}
+	}
+	sctx.UI.App.PrintSystem(strings.TrimSpace(b.String()))
 	return true
 }

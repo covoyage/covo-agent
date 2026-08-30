@@ -8,7 +8,7 @@ app:
   welcome_type: Typ je bericht of gebruik "/help" voor opdrachten.
   welcome_model: Voer `covo-agent model` uit om de standaard provider/model te wijzigen.
   welcome_session: Sessie
-  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  welcome_shortcuts: /help · /session · /skill · /memory · /curator · /quit
   quit_confirm: Druk nogmaals op Ctrl+Q of Ctrl+D om af te sluiten.
 statusline:
   mode_general: Algemeen

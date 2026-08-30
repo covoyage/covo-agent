@@ -352,6 +352,17 @@ func TestSubagentGoalContext(t *testing.T) {
 	}
 }
 
+func TestSubagentIsolationContext(t *testing.T) {
+	ctx := context.Background()
+	if got := SubagentIsolationFromContext(ctx); got != "" {
+		t.Errorf("default isolation = %q, want empty", got)
+	}
+	ctx = WithSubagentIsolation(ctx, "worktree")
+	if got := SubagentIsolationFromContext(ctx); got != "worktree" {
+		t.Errorf("isolation = %q, want worktree", got)
+	}
+}
+
 func TestSubagentRunner_ErrorPath(t *testing.T) {
 	runner := NewSubagentRunner(SubagentRunnerConfig{})
 

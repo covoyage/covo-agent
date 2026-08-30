@@ -98,3 +98,124 @@ func TestRenderBox(t *testing.T) {
 		t.Error("expected top-left corner in rect box")
 	}
 }
+
+func TestRenderMermaid_ChainedEdgesAndLabels(t *testing.T) {
+	input := `graph TD
+    A[Start] --> B{Gate} -->|Yes| C[OK]
+    B -->|No| D[End]`
+	result := RenderMermaid(input)
+	for _, want := range []string{"Start", "Gate", "OK", "End", "Yes", "No"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected %q in output:\n%s", want, result)
+		}
+	}
+}
+
+func TestRenderMermaid_PieChart(t *testing.T) {
+	input := `pie title Pets
+    "Dogs": 30
+    "Cats": 20
+    "Birds": 10`
+	result := RenderMermaid(input)
+	for _, want := range []string{"Pets", "Dogs", "Cats", "Birds", "%"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected %q in pie chart:\n%s", want, result)
+		}
+	}
+}
+
+func TestRenderMermaid_SequenceDiagram(t *testing.T) {
+	input := `sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: hello
+    B-->>A: hi
+    note over A,B: handshake`
+	result := RenderMermaid(input)
+	for _, want := range []string{"Alice", "Bob", "hello", "hi", "handshake"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected %q in sequence diagram:\n%s", want, result)
+		}
+	}
+	if !strings.Contains(result, "▶") && !strings.Contains(result, "◀") {
+		t.Errorf("expected arrows in sequence diagram:\n%s", result)
+	}
+}
+
+func TestRenderMermaid_ClassDiagram(t *testing.T) {
+	input := `classDiagram
+    class Animal {
+        +String name
+        +eat()
+    }
+    class Dog
+    Animal <|-- Dog`
+	result := RenderMermaid(input)
+	for _, want := range []string{"Animal", "Dog", "name", "eat", "◁──"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected %q in class diagram:\n%s", want, result)
+		}
+	}
+}
+
+func TestRenderMermaid_StateDiagram(t *testing.T) {
+	input := `stateDiagram-v2
+    [*] --> Still
+    Still --> Moving : start
+    Moving --> Still : stop`
+	result := RenderMermaid(input)
+	for _, want := range []string{"Still", "Moving", "start", "stop"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected %q in state diagram:\n%s", want, result)
+		}
+	}
+}
+
+func TestRenderMermaid_ERDiagram(t *testing.T) {
+	input := `erDiagram
+    CUSTOMER ||--o{ ORDER : places
+    CUSTOMER {
+        string name
+    }
+    ORDER {
+        int id
+    }`
+	result := RenderMermaid(input)
+	for _, want := range []string{"CUSTOMER", "ORDER", "name", "id", "places"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected %q in er diagram:\n%s", want, result)
+		}
+	}
+}
+
+func TestRenderMermaid_Subgraph(t *testing.T) {
+	input := `graph TD
+    subgraph cluster [Auth]
+        A[Login] --> B[Token]
+    end
+    B --> C[OK]`
+	result := RenderMermaid(input)
+	for _, want := range []string{"Auth", "Login", "Token", "OK"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected %q in subgraph diagram:\n%s", want, result)
+		}
+	}
+}
+
+func TestRenderMermaid_LongNodeLabel(t *testing.T) {
+	input := `graph TD
+    A[ThisIsAQuiteLongNodeLabel] --> B[OK]`
+	result := RenderMermaid(input)
+	if !strings.Contains(result, "ThisIsAQuiteLong") {
+		t.Errorf("long node label truncated too aggressively:\n%s", result)
+	}
+}
+
+func TestRenderMermaid_OneLinerChain(t *testing.T) {
+	result := RenderMermaid("graph LR; A[Start] --> B[Mid] --> C[End]")
+	for _, want := range []string{"Start", "Mid", "End"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected %q in one-liner:\n%s", want, result)
+		}
+	}
+}

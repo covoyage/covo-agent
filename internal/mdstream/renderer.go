@@ -1,59 +1,35 @@
-// Package mdstream provides a streaming-aware Markdown renderer with
-// LaTeX math formula rendering and syntax highlighting adaptation.
+// Package mdstream provides a streaming-aware Markdown renderer.
 //
-// The renderer is designed to handle partial Markdown input that grows
-// incrementally (streaming from an LLM). It buffers incomplete blocks
-// (code fences, math delimiters, etc.) and only renders complete blocks.
+// Feed() buffers incomplete fences / math blocks and only emits complete
+// output. Flush() renders whatever is left. Parsing and styling are the
+// same AST used by the interactive TUI.
 package mdstream
 
 import (
-	"fmt"
 	"strings"
 	"sync"
-	"unicode"
 
 	"github.com/covoyage/covo-agent/internal/diffrender"
+	"github.com/covoyage/covo-agent/internal/tui"
+	"github.com/covoyage/covonaut/tui/component"
 )
-
-// BlockType represents the type of a parsed Markdown block.
-type BlockType int
-
-const (
-	BlockText       BlockType = iota // plain text / inline markdown
-	BlockCodeFence                   // ``` code block
-	BlockCodeInline                  // `inline code`
-	BlockMathBlock                   // $$ block math $$
-	BlockMathInline                  // $ inline math $
-	BlockHeading                     // # heading
-	BlockList                        // - item / 1. item
-	BlockTable                       // | table |
-	BlockQuote                       // > quote
-	BlockBlank                       // empty line
-)
-
-// Block represents a parsed Markdown block.
-type Block struct {
-	Type     BlockType
-	Content  string
-	Lang     string // for code blocks
-	Complete bool   // true if the block is fully formed
-}
 
 // Renderer is a streaming Markdown renderer.
 type Renderer struct {
-	mu           sync.Mutex
-	buffer       strings.Builder
-	blocks       []Block
-	renderedText string // full rendered output of all complete blocks so far
+	mu     sync.Mutex
+	buffer strings.Builder
+	last   string
 
-	// Configuration
-	enableLaTeX     bool
-	enableSyntaxHL  bool
-	colorCodeFence  string
-	colorInlineCode string
-	colorMath       string
-	colorHeading    string
-	colorReset      string
+	enableLaTeX    bool
+	enableSyntaxHL bool
+	noColor        bool
+	width          int64
+
+	colorFence   string
+	colorInline  string
+	colorMath    string
+	colorHeading string
+	colorReset   string
 }
 
 // NewRenderer creates a new streaming Markdown renderer.
@@ -61,24 +37,22 @@ func NewRenderer() *Renderer {
 	return &Renderer{
 		enableLaTeX:    true,
 		enableSyntaxHL: diffrender.SyntaxEnabled(),
-		// ANSI color codes (empty = no color)
-		colorCodeFence:  "\033[36m", // cyan
-		colorInlineCode: "\033[33m", // yellow
-		colorMath:       "\033[35m", // magenta
-		colorHeading:    "\033[1m",  // bold
-		colorReset:      "\033[0m",
+		width:          0,
 	}
 }
 
-// SetColors configures the ANSI color codes. Pass empty strings to disable.
+// SetColors configures ANSI color codes. Empty strings disable markdown
+// chrome (headings, quotes, fences) so tests can assert on plain text.
+// Syntax highlighting is controlled separately via SetSyntaxHighlighting.
 func (r *Renderer) SetColors(codeFence, inlineCode, math, heading, reset string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.colorCodeFence = codeFence
-	r.colorInlineCode = inlineCode
+	r.colorFence = codeFence
+	r.colorInline = inlineCode
 	r.colorMath = math
 	r.colorHeading = heading
 	r.colorReset = reset
+	r.noColor = codeFence == "" && inlineCode == "" && math == "" && heading == "" && reset == ""
 }
 
 // SetLaTeX enables/disables LaTeX rendering.
@@ -95,26 +69,26 @@ func (r *Renderer) SetSyntaxHighlighting(enabled bool) {
 	r.enableSyntaxHL = enabled
 }
 
-// Feed appends new text to the renderer and returns any newly renderable output.
+// SetWidth sets the wrap width in terminal cells. Zero means no wrapping.
+func (r *Renderer) SetWidth(width int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.width = width
+}
+
+// Feed appends new text and returns any newly renderable output.
 func (r *Renderer) Feed(text string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
 	r.buffer.WriteString(text)
-	r.parseBlocks()
-	return r.renderNew()
+	return r.emit(true)
 }
 
-// Flush renders any remaining buffered content and returns it.
+// Flush renders remaining buffered content, including incomplete blocks.
 func (r *Renderer) Flush() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	// Mark all incomplete blocks as complete for final render
-	for i := range r.blocks {
-		r.blocks[i].Complete = true
-	}
-	return r.renderNew()
+	return r.emit(false)
 }
 
 // Reset clears the renderer state.
@@ -122,331 +96,124 @@ func (r *Renderer) Reset() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.buffer.Reset()
-	r.blocks = nil
-	r.renderedText = ""
+	r.last = ""
 }
 
-// renderComplete renders all complete blocks to a single string.
-// This is called on each Feed() and the result is diffed against
-// the previously rendered text to produce incremental output.
-func (r *Renderer) renderComplete() string {
-	var sb strings.Builder
-	for _, block := range r.blocks {
-		if !block.Complete {
-			break
-		}
-		sb.WriteString(r.renderBlock(block))
-	}
-	return sb.String()
-}
-
-// parseBlocks scans the buffer and extracts complete Markdown blocks.
-func (r *Renderer) parseBlocks() {
-	content := r.buffer.String()
-	r.blocks = nil
-
-	lines := strings.Split(content, "\n")
-	i := 0
-	for i < len(lines) {
-		line := lines[i]
-
-		// Code fence
-		if strings.HasPrefix(strings.TrimLeft(line, " "), "```") {
-			lang := strings.TrimPrefix(strings.TrimLeft(line, " "), "```")
-			lang = strings.TrimSpace(lang)
-
-			// Find closing fence
-			closed := false
-			var codeLines []string
-			for j := i + 1; j < len(lines); j++ {
-				if strings.HasPrefix(strings.TrimLeft(lines[j], " "), "```") {
-					closed = true
-					r.blocks = append(r.blocks, Block{
-						Type:     BlockCodeFence,
-						Content:  strings.Join(codeLines, "\n"),
-						Lang:     lang,
-						Complete: true,
-					})
-					i = j + 1
-					break
-				}
-				codeLines = append(codeLines, lines[j])
-			}
-			if !closed {
-				// Incomplete code block
-				r.blocks = append(r.blocks, Block{
-					Type:     BlockCodeFence,
-					Content:  strings.Join(codeLines, "\n"),
-					Lang:     lang,
-					Complete: false,
-				})
-				i = len(lines)
-			}
-			continue
-		}
-
-		// Block math $$...$$
-		if strings.Contains(line, "$$") {
-			// Find if this line contains both opening and closing $$
-			parts := strings.SplitN(line, "$$", 3)
-			if len(parts) >= 3 {
-				// Complete on one line: text $$math$$ text
-				r.blocks = append(r.blocks, Block{
-					Type:     BlockMathBlock,
-					Content:  parts[1],
-					Complete: true,
-				})
-				i++
-				continue
-			}
-
-			// Multi-line: find closing $$
-			closed := false
-			var mathLines []string
-			for j := i + 1; j < len(lines); j++ {
-				if strings.Contains(lines[j], "$$") {
-					closed = true
-					beforeClose := strings.SplitN(lines[j], "$$", 2)
-					mathLines = append(mathLines, beforeClose[0])
-					r.blocks = append(r.blocks, Block{
-						Type:     BlockMathBlock,
-						Content:  strings.Join(mathLines, "\n"),
-						Complete: true,
-					})
-					i = j + 1
-					break
-				}
-				mathLines = append(mathLines, lines[j])
-			}
-			if !closed {
-				r.blocks = append(r.blocks, Block{
-					Type:     BlockMathBlock,
-					Content:  strings.Join(mathLines, "\n"),
-					Complete: false,
-				})
-				i = len(lines)
-			}
-			continue
-		}
-
-		// Heading
-		trimmed := strings.TrimLeft(line, " ")
-		if strings.HasPrefix(trimmed, "#") {
-			level := 0
-			for level < len(trimmed) && trimmed[level] == '#' {
-				level++
-			}
-			if level <= 6 && level < len(trimmed) && trimmed[level] == ' ' {
-				r.blocks = append(r.blocks, Block{
-					Type:     BlockHeading,
-					Content:  strings.TrimSpace(trimmed[level:]),
-					Complete: true,
-				})
-				i++
-				continue
-			}
-		}
-
-		// Empty line
-		if strings.TrimSpace(line) == "" {
-			r.blocks = append(r.blocks, Block{Type: BlockBlank, Content: "", Complete: true})
-			i++
-			continue
-		}
-
-		// Regular text line (collect consecutive non-empty lines).
-		// The first line is always collected (even if it looks like a
-		// heading/code/math marker) to avoid infinite loops during
-		// streaming when partial markers arrive character by character.
-		var textLines []string
-		for i < len(lines) {
-			l := lines[i]
-			if strings.TrimSpace(l) == "" {
-				break
-			}
-			// After the first line, check if this line starts a new block type
-			if len(textLines) > 0 {
-				trimmed := strings.TrimLeft(l, " ")
-				if strings.HasPrefix(trimmed, "```") ||
-					strings.HasPrefix(trimmed, "#") ||
-					strings.Contains(l, "$$") {
-					break
-				}
-			}
-			textLines = append(textLines, l)
-			i++
-		}
-		if len(textLines) > 0 {
-			r.blocks = append(r.blocks, Block{
-				Type:     BlockText,
-				Content:  strings.Join(textLines, "\n"),
-				Complete: true,
-			})
-		}
-	}
-}
-
-// renderNew renders all complete blocks and returns only the new
-// portion (the suffix that wasn't in the previous render).
-func (r *Renderer) renderNew() string {
-	full := r.renderComplete()
-	// Find the common prefix length
-	old := r.renderedText
+func (r *Renderer) emit(skipIncomplete bool) string {
+	full := r.render(r.buffer.String(), skipIncomplete)
+	old := r.last
 	if strings.HasPrefix(full, old) {
 		delta := full[len(old):]
-		r.renderedText = full
+		r.last = full
 		return delta
 	}
-	// Fallback: if the new render doesn't start with the old one
-	// (e.g. a block type changed during streaming), re-render everything
-	r.renderedText = full
+	r.last = full
 	return full
 }
 
-// renderBlock renders a single block to terminal-friendly output.
-func (r *Renderer) renderBlock(b Block) string {
-	switch b.Type {
-	case BlockCodeFence:
-		return r.renderCodeFence(b)
-	case BlockMathBlock:
-		return r.renderMathBlock(b)
-	case BlockHeading:
-		return r.renderHeading(b)
-	case BlockBlank:
-		return "\n"
-	case BlockText:
-		return r.renderText(b.Content) + "\n"
-	default:
-		return b.Content + "\n"
+func (r *Renderer) render(src string, skipIncomplete bool) string {
+	th := r.theme(skipIncomplete)
+	lines := component.RenderMarkdown(src, r.width, th)
+	if len(lines) == 0 {
+		return ""
 	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
-func (r *Renderer) renderCodeFence(b Block) string {
-	var sb strings.Builder
-	if r.colorCodeFence != "" {
-		sb.WriteString(r.colorCodeFence)
+func (r *Renderer) theme(skipIncomplete bool) component.MarkdownTheme {
+	th := component.DefaultMarkdownTheme()
+	th.DisableSyntax = !r.enableSyntaxHL
+	th.SkipIncomplete = skipIncomplete
+	th.HighlightFence = func(source, lang string) string {
+		return diffrender.HighlightCode(source, lang, r.enableSyntaxHL)
 	}
-	if b.Lang != "" {
-		sb.WriteString(fmt.Sprintf("[%s]\n", b.Lang))
+	th.FenceRenderer = func(lang, source string, width int64) []string {
+		if lang != "mermaid" {
+			return nil
+		}
+		rendered := tui.RenderMermaid(source)
+		return strings.Split(rendered, "\n")
 	}
-	// Token-level syntax highlighting is gated by SetSyntaxHighlighting
-	// (NewRenderer defaults it from COVO_SYNTAX_HIGHLIGHT). Unrecognized
-	// languages pass through unchanged.
-	if content := diffrender.HighlightCode(b.Content, b.Lang, r.enableSyntaxHL); content != b.Content {
-		sb.WriteString(content)
-	} else {
-		sb.WriteString(b.Content)
-	}
-	sb.WriteString("\n")
-	if r.colorReset != "" {
-		sb.WriteString(r.colorReset)
-	}
-	return sb.String()
-}
-
-func (r *Renderer) renderMathBlock(b Block) string {
 	if !r.enableLaTeX {
-		return "$$" + b.Content + "$$\n"
+		th.MathFn = func(s string) string { return "$$" + s + "$$" }
 	}
-	var sb strings.Builder
-	if r.colorMath != "" {
-		sb.WriteString(r.colorMath)
-	}
-	sb.WriteString("⟨ ")
-	sb.WriteString(strings.TrimSpace(b.Content))
-	sb.WriteString(" ⟩")
-	if r.colorReset != "" {
-		sb.WriteString(r.colorReset)
-	}
-	return sb.String() + "\n"
-}
-
-func (r *Renderer) renderHeading(b Block) string {
-	var sb strings.Builder
-	if r.colorHeading != "" {
-		sb.WriteString(r.colorHeading)
-	}
-	sb.WriteString(b.Content)
-	if r.colorReset != "" {
-		sb.WriteString(r.colorReset)
-	}
-	return sb.String() + "\n"
-}
-
-func (r *Renderer) renderText(text string) string {
-	// Inline processing: code spans and inline math
-	var sb strings.Builder
-	i := 0
-	for i < len(text) {
-		// Inline code: `code`
-		if text[i] == '`' {
-			end := strings.Index(text[i+1:], "`")
-			if end >= 0 {
-				code := text[i+1 : i+1+end]
-				if r.colorInlineCode != "" {
-					sb.WriteString(r.colorInlineCode)
+	if r.noColor {
+		id := func(s string) string { return s }
+		th.HeadingFn = [6]func(string) string{id, id, id, id, id, id}
+		th.EmphasisFn = id
+		th.StrongFn = id
+		th.StrikeFn = id
+		th.MarkFn = id
+		th.CodeInlineFn = id
+		th.CodeBlockFn = id
+		th.CodeFenceFn = id
+		th.QuoteFn = id
+		th.LinkLabelFn = id
+		th.LinkURLFn = id
+		th.LinkRendererFn = nil
+		th.HRFn = id
+		th.ListBulletFn = id
+		th.TableBorderFn = id
+		th.TableHeaderFn = id
+		if r.enableLaTeX {
+			th.MathFn = id
+		}
+	} else {
+		reset := r.colorReset
+		wrap := func(prefix string) func(string) string {
+			return func(s string) string {
+				if prefix == "" {
+					return s
 				}
-				sb.WriteString(code)
-				if r.colorReset != "" {
-					sb.WriteString(r.colorReset)
-				}
-				i += end + 2
-				continue
+				return prefix + s + reset
 			}
 		}
-
-		// Inline math: $math$
-		if r.enableLaTeX && text[i] == '$' {
-			// Must not be preceded by a non-space char (to avoid currency)
-			if i == 0 || unicode.IsSpace(rune(text[i-1])) {
-				end := strings.Index(text[i+1:], "$")
-				if end >= 0 {
-					math := text[i+1 : i+1+end]
-					// Ensure closing $ is followed by space or end
-					afterIdx := i + 1 + end + 1
-					if afterIdx >= len(text) || unicode.IsSpace(rune(text[afterIdx])) || text[afterIdx] == '.' || text[afterIdx] == ',' {
-						if r.colorMath != "" {
-							sb.WriteString(r.colorMath)
-						}
-						sb.WriteString("⟨")
-						sb.WriteString(math)
-						sb.WriteString("⟩")
-						if r.colorReset != "" {
-							sb.WriteString(r.colorReset)
-						}
-						i += end + 2
-						continue
-					}
+		if r.colorFence != "" {
+			fn := wrap(r.colorFence)
+			th.CodeFenceFn = fn
+			th.CodeBlockFn = fn
+		}
+		if r.colorInline != "" {
+			th.CodeInlineFn = wrap(r.colorInline)
+		}
+		if r.colorMath != "" && r.enableLaTeX {
+			th.MathFn = wrap(r.colorMath)
+		}
+		if r.colorHeading != "" {
+			reset := r.colorReset
+			if reset == "" {
+				reset = "\033[0m"
+			}
+			mk := func(extra string) func(string) string {
+				return func(s string) string {
+					return r.colorHeading + extra + s + reset
 				}
 			}
+			th.HeadingFn = [6]func(string) string{
+				mk("\033[1m"),
+				mk(""),
+				mk("\033[2m"),
+				mk("\033[2m"),
+				mk("\033[2m\033[3m"),
+				mk("\033[2m\033[3m"),
+			}
 		}
-
-		sb.WriteByte(text[i])
-		i++
 	}
-	return sb.String()
+	return th
 }
 
-// IsInCodeBlock returns true if the current buffer is inside an unclosed code block.
+// IsInCodeBlock reports an unclosed fenced code block in the buffer.
 func (r *Renderer) IsInCodeBlock() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, b := range r.blocks {
-		if b.Type == BlockCodeFence && !b.Complete {
-			return true
-		}
-	}
-	return false
+	fence, _ := component.IncompleteMarkdown(r.buffer.String())
+	return fence
 }
 
-// IsInMathBlock returns true if the current buffer is inside an unclosed math block.
+// IsInMathBlock reports an unclosed $$ math block in the buffer.
 func (r *Renderer) IsInMathBlock() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, b := range r.blocks {
-		if b.Type == BlockMathBlock && !b.Complete {
-			return true
-		}
-	}
-	return false
+	_, math := component.IncompleteMarkdown(r.buffer.String())
+	return math
 }

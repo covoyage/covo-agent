@@ -8,7 +8,7 @@ app:
   welcome_type: Geben Sie Ihre Nachricht ein oder nutzen Sie "/help" für Befehle.
   welcome_model: Führen Sie `covo-agent model` aus, um Provider/Modell zu ändern.
   welcome_session: Sitzung
-  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  welcome_shortcuts: /help · /session · /skill · /memory · /curator · /quit
 statusline:
   mode_general: Allgemein
   mode_code: Code

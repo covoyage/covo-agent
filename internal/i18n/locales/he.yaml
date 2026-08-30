@@ -7,7 +7,7 @@ app:
   welcome_type: הקלד הודעה או השתמש ב-"/help" לפקודות.
   welcome_model: הרץ `covo-agent model` לשינוי ספק/מודל ברירת מחדל.
   welcome_session: מפגש
-  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  welcome_shortcuts: /help · /session · /skill · /memory · /curator · /quit
   quit_confirm: לחץ Ctrl+Q או Ctrl+D שוב ליציאה.
 statusline:
   mode_general: כללי

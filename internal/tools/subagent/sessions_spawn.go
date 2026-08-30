@@ -84,6 +84,8 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 			"- role: 'leaf' (default, cannot delegate) or 'orchestrator' (can further spawn children).",
 			"- persona: name or comma-separated names of behavior overlays (e.g. 'reviewer', 'concise,debugger').",
 			"    Injects tone/format/focus guidance as a system-reminder. Use 'list' to see available personas.",
+			"- isolation: Workspace isolation. 'shared' (default) uses the parent working directory;",
+			"    'worktree' runs the child in a detached git worktree so its file edits stay isolated.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -130,6 +132,11 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 					"type":        "string",
 					"description": "Override the model for this child (e.g. 'gpt-5.6'). Use for cost/speed optimization.",
 				},
+				"isolation": map[string]any{
+					"type":        "string",
+					"description": "Workspace isolation: 'shared' (default, same working directory as parent) or 'worktree' (detached git worktree).",
+					"enum":        []string{"shared", "worktree"},
+				},
 			},
 			"required": []string{"task"},
 		},
@@ -144,6 +151,7 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 				Persona        string   `json:"persona"`
 				Provider       string   `json:"provider"`
 				Model          string   `json:"model"`
+				Isolation      string   `json:"isolation"`
 			}
 			if err := json.Unmarshal(args, &params); err != nil {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
@@ -257,6 +265,9 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 				if params.Model != "" {
 					ctx = WithSubagentModel(ctx, params.Model)
 				}
+				if params.Isolation != "" {
+					ctx = WithSubagentIsolation(ctx, params.Isolation)
+				}
 
 				output, err := subagentRunner.Run(ctx, spawn, task, childToolsets, SubagentRunOptions{
 					Goal:         params.Task,
@@ -288,6 +299,9 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 				if ts != "delegation" {
 					safeToolsets = append(safeToolsets, ts)
 				}
+			}
+			if params.Isolation != "" {
+				ctx = WithSubagentIsolation(ctx, params.Isolation)
 			}
 
 			output, err := runner(ctx, task, safeToolsets, params.MaxTurns)

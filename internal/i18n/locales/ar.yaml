@@ -7,7 +7,7 @@ app:
   welcome_type: اكتب رسالتك أو استخدم "/help" للأوامر.
   welcome_model: شغّل `covo-agent model` لتغيير المزوّد/النموذج الافتراضي.
   welcome_session: جلسة
-  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  welcome_shortcuts: /help · /session · /skill · /memory · /curator · /quit
   quit_confirm: اضغط Ctrl+Q أو Ctrl+D مرة أخرى للخروج.
 statusline:
   mode_general: عام

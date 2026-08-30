@@ -499,12 +499,25 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 			// Inherit parent credential pool
 			childCredPool := cfg.CredentialPool
 
+			childWorkingDir := workingDir
+			var childWorktree *GitWorktree
+			if toolssubagent.SubagentIsolationFromContext(ctx) == "worktree" {
+				base := workingDir
+				if cfg.GitWorktree != nil && cfg.GitWorktree.BaseDir() != "" {
+					base = cfg.GitWorktree.BaseDir()
+				}
+				if gw := NewIsolatedGitWorktree(base); gw.Enabled() {
+					childWorktree = gw
+					childWorkingDir = base
+				}
+			}
+
 			childCfg := CovoAgentConfig{
 				Mode:            ModeGeneral,
 				Provider:        childProvider,
 				ProviderName:    providerName,
 				Model:           childModel,
-				WorkingDir:      workingDir,
+				WorkingDir:      childWorkingDir,
 				HomeDir:         homeDir,
 				Platform:        "minimal",
 				ExecutionMode:   execMode,
@@ -512,6 +525,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 				ComputerUse:     computerUse,
 				CredentialPool:  childCredPool,
 				ToolsetOverride: toolsetNames,
+				GitWorktree:     childWorktree,
 				// Inherit auxiliary config from parent so spawned children
 				// use the same auxiliary models for title/review/judge tasks.
 				Auxiliary:                cfg.Auxiliary,

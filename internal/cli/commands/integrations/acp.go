@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/cli/commands/setup"
 	"log"
 	"log/slog"
 	"os"
@@ -18,7 +19,7 @@ import (
 
 func NewACPCommand() *cobra.Command {
 	var check bool
-	var setup bool
+	var doSetup bool
 	var version bool
 	var wsMode bool
 	var wsAddr string
@@ -32,11 +33,20 @@ func NewACPCommand() *cobra.Command {
 				return nil
 			}
 			if check {
+				if err := cli.LoadDotEnv(); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: load .env: %v\n", err)
+				}
+				if _, err := cli.EnsureHomeDir(); err != nil {
+					return fmt.Errorf("ACP check failed: home dir: %w", err)
+				}
+				if !cli.HasProviderConfigured() {
+					return fmt.Errorf("ACP check failed: no provider configured. Run: covo-agent setup")
+				}
 				fmt.Fprintln(cmd.OutOrStdout(), "covo-agent ACP check OK")
 				return nil
 			}
-			if setup {
-				fmt.Fprintln(os.Stderr, "ACP setup: run 'covo-agent config' to configure provider/model")
+			if doSetup {
+				setup.Run()
 				return nil
 			}
 
@@ -89,7 +99,7 @@ func NewACPCommand() *cobra.Command {
 		},
 	}
 	acpCmd.Flags().BoolVar(&check, "check", false, "verify ACP dependencies and exit")
-	acpCmd.Flags().BoolVar(&setup, "setup", false, "run interactive provider/model setup")
+	acpCmd.Flags().BoolVar(&doSetup, "setup", false, "run interactive provider/model setup")
 	acpCmd.Flags().BoolVar(&version, "version", false, "show version and exit")
 	acpCmd.Flags().BoolVar(&wsMode, "ws", false, "start as WebSocket relay server (for remote IDE integration)")
 	acpCmd.Flags().StringVar(&wsAddr, "addr", ":17891", "WebSocket relay listen address (use with --ws)")

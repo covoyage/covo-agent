@@ -26,7 +26,7 @@ func NewPRCommand() *cobra.Command {
 	var publish bool
 	createCmd := &cobra.Command{
 		Use:   "create",
-		Short: "Generate a PR description from the current branch diff",
+		Short: "Print a git summary of the current branch (use --publish to open a GitHub PR)",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			args := []string{"create"}
@@ -39,7 +39,18 @@ func NewPRCommand() *cobra.Command {
 	}
 	createCmd.Flags().BoolVar(&publish, "publish", false, "push the PR to GitHub")
 	prCmd.AddCommand(createCmd)
-	prCmd.AddCommand(&cobra.Command{Use: "review", Short: "Generate a structured review of the current changes", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error { cmdPR([]string{"review"}); return nil }})
+	prCmd.AddCommand(&cobra.Command{
+		Use:   "review [base]",
+		Short: "Review current branch changes with the agent",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base := ""
+			if len(args) > 0 {
+				base = args[0]
+			}
+			return runReview(cmd.OutOrStdout(), base, false)
+		},
+	})
 	return prCmd
 }
 
@@ -53,7 +64,10 @@ func cmdPR(args []string) {
 	case "create":
 		cmdPRCreate(args[1:])
 	case "review":
-		cmdPRReview()
+		if err := runReview(os.Stdout, "", false); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	default:
 		printPRUsage()
 	}
@@ -63,9 +77,9 @@ func printPRUsage() {
 	fmt.Println("Usage: covo-agent pr <command>")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  create           Generate a PR description from the current branch diff")
+	fmt.Println("  create           Print a git summary of the current branch")
 	fmt.Println("    --publish      Push the PR to GitHub (requires GITHUB_TOKEN)")
-	fmt.Println("  review           Generate a structured review of the current changes")
+	fmt.Println("  review           Review current branch changes with the agent")
 	fmt.Println("  help             Show this help")
 }
 
@@ -223,86 +237,6 @@ func cmdPRCreate(args []string) {
 
 		fmt.Printf("\nPR created: %s\n", string(respBody))
 	}
-}
-
-func cmdPRReview() {
-	if _, err := exec.LookPath("git"); err != nil {
-		fmt.Fprintln(os.Stderr, "error: git is not installed or not in PATH")
-		os.Exit(1)
-	}
-
-	repoCheck := exec.Command("git", "rev-parse", "--is-inside-work-tree")
-	if err := repoCheck.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "error: not in a git repository")
-		os.Exit(1)
-	}
-
-	base := detectBaseBranch()
-
-	diffCmd := exec.Command("git", "diff", base+"...HEAD")
-	diffOut, err := diffCmd.Output()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error getting diff: ensure a base branch exists (main/master)")
-		os.Exit(1)
-	}
-	diff := string(diffOut)
-
-	if diff == "" {
-		fmt.Println("No changes detected.")
-		return
-	}
-
-	diffStatCmd := exec.Command("git", "diff", base+"...HEAD", "--stat")
-	diffStatOut, _ := diffStatCmd.Output()
-	diffStat := strings.TrimSpace(string(diffStatOut))
-
-	logCmd := exec.Command("git", "log", base+"..HEAD", "--oneline", "--no-decorate")
-	logOut, _ := logCmd.Output()
-	commits := strings.TrimSpace(string(logOut))
-
-	branchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	branchOut, _ := branchCmd.Output()
-	branch := strings.TrimSpace(string(branchOut))
-
-	fmt.Println("  ── PR Review ──")
-	fmt.Printf("  Branch: %s\n", branch)
-	fmt.Println()
-
-	if commits != "" {
-		fmt.Println("  Commits:")
-		for _, c := range strings.Split(commits, "\n") {
-			fmt.Printf("    %s\n", c)
-		}
-		fmt.Println()
-	}
-
-	fmt.Println("  Files Changed:")
-	if diffStat != "" {
-		for _, line := range strings.Split(diffStat, "\n") {
-			fmt.Printf("    %s\n", line)
-		}
-	} else {
-		fmt.Println("    (no file stats)")
-	}
-	fmt.Println()
-
-	fmt.Println("  Suggestions:")
-	lines := strings.Split(diff, "\n")
-	filesWithChanges := 0
-	for _, line := range lines {
-		if strings.HasPrefix(line, "diff --git") {
-			filesWithChanges++
-			parts := strings.Split(line, " ")
-			if len(parts) >= 3 {
-				fmt.Printf("    • Review changes in %s\n", strings.TrimPrefix(parts[len(parts)-1], "b/"))
-			}
-		}
-	}
-	if filesWithChanges == 0 {
-		fmt.Println("    No changes to review.")
-	}
-	fmt.Println()
-	fmt.Printf("  %d file(s) changed — review the diff above for details.\n", filesWithChanges)
 }
 
 // detectBaseBranch finds the best merge base (main > master > first parent).

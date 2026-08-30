@@ -50,3 +50,27 @@ func TestAgentUIBinderNilCoreIsSafe(t *testing.T) {
 	binder := &AgentUIBinder{}
 	binder.Bind(nil)
 }
+
+func TestFormatCompletionChip(t *testing.T) {
+	got := formatCompletionChip("code", "gpt-4.1", 5500*time.Millisecond)
+	if got != "code · gpt-4.1 · 5.5s" {
+		t.Fatalf("formatCompletionChip() = %q", got)
+	}
+	got = formatCompletionChip("", shortModelName("openai/gpt-4.1"), 12*time.Second)
+	if got != "gpt-4.1 · 12s" {
+		t.Fatalf("formatCompletionChip() = %q", got)
+	}
+	got = formatCompletionChip("code", "gpt-4.1", 83*time.Second)
+	if got != "code · gpt-4.1 · 1m23s" {
+		t.Fatalf("formatCompletionChip() = %q", got)
+	}
+}
+
+func TestShortModelName(t *testing.T) {
+	if got := shortModelName("openai/gpt-4.1"); got != "gpt-4.1" {
+		t.Fatalf("shortModelName() = %q", got)
+	}
+	if got := shortModelName("  gpt-4.1  "); got != "gpt-4.1" {
+		t.Fatalf("shortModelName() = %q", got)
+	}
+}

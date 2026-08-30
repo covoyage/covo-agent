@@ -10,7 +10,7 @@ import (
 func NewTestgenCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "testgen <file>",
-		Short: "Generate tests",
+		Short: "Create a test skeleton (or run gotests for Go)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			result, err := tools.GenerateTestsForFile(args[0])

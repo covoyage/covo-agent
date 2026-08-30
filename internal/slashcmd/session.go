@@ -22,6 +22,7 @@ func handleSession(sctx *SlashContext, parts []string) bool {
 	}
 	mgr := sctx.Runtime.Agents.Current()
 	if mgr == nil {
+		sctx.UI.App.PrintSystem(i18n.T("system.no_active_agent"))
 		return true
 	}
 	infos, _ := mgr.SessionManager().ListSessions(sctx.Runtime.Context)

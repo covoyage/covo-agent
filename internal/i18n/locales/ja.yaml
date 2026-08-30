@@ -7,7 +7,7 @@ app:
   welcome_type: メッセージを入力するか、"/help" でコマンドを確認してください。
   welcome_model: '`covo-agent model` を実行してデフォルトの provider/model を変更します。'
   welcome_session: セッション
-  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  welcome_shortcuts: /help · /session · /skill · /memory · /curator · /quit
 statusline:
   mode_general: 一般
   mode_code: コード

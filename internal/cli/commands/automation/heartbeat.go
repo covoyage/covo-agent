@@ -11,7 +11,7 @@ import (
 func NewHeartbeatCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "heartbeat <interval>",
-		Short: "Run heartbeat processing",
+		Short: "Schedule a recurring heartbeat cron job",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir, err := cli.HomeDir()

@@ -17,6 +17,9 @@ type BackgroundManager interface {
 	List() []runtimeapp.TaskSummary
 	Steer(id, instructions string) error
 	Cancel(id string) error
+	Get(id string) (runtimeapp.TaskSummary, bool)
+	Logs(id string) (string, error)
+	Respawn(id string, createAgent func() *agent.CovoAgent, notify func(string)) (string, error)
 }
 
 // StatusLineManager is the interface that SlashContext expects for status line operations.

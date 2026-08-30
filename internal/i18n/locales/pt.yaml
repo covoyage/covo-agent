@@ -9,7 +9,7 @@ app:
   welcome_type: Digite sua mensagem ou use "/help" para ver os comandos.
   welcome_model: Execute `covo-agent model` para alterar o provedor/modelo padrão.
   welcome_session: Sessão
-  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  welcome_shortcuts: /help · /session · /skill · /memory · /curator · /quit
   quit_confirm: Pressione Ctrl+Q ou Ctrl+D novamente para sair.
 statusline:
   mode_general: Geral

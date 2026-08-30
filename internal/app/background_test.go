@@ -84,6 +84,59 @@ func TestBackgroundManagerStartFailedCreateAgent(t *testing.T) {
 	}
 }
 
+func TestBackgroundManagerGetLogsAndRespawn(t *testing.T) {
+	now := time.Now()
+	mgr := &BackgroundManager{
+		tasks: map[string]*backgroundTask{
+			"bg-1": {
+				ID:          "bg-1",
+				Input:       "do the thing",
+				Status:      TaskCompleted,
+				Output:      "full output here",
+				Error:       "late warning",
+				Turns:       3,
+				startedAt:   now.Add(-time.Minute),
+				completedAt: now,
+			},
+		},
+		counter: 1,
+	}
+
+	summary, ok := mgr.Get("bg-1")
+	if !ok {
+		t.Fatal("expected Get to find bg-1")
+	}
+	if summary.Output != "full output here" {
+		t.Fatalf("Get should not truncate output, got %q", summary.Output)
+	}
+
+	logs, err := mgr.Logs("bg-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs, "full output here") || !strings.Contains(logs, "late warning") {
+		t.Fatalf("logs = %q", logs)
+	}
+
+	newID, err := mgr.Respawn("bg-1", func() *agent.CovoAgent { return nil }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newID == "bg-1" {
+		t.Fatal("respawn should allocate a new id")
+	}
+	task, ok := findTask(mgr.List(), newID)
+	if !ok {
+		t.Fatalf("respawned task %s missing", newID)
+	}
+	if task.Status != TaskFailed {
+		t.Fatalf("nil createAgent should fail, status=%s", task.Status)
+	}
+	if task.Input != "do the thing" {
+		t.Fatalf("respawn should reuse input, got %q", task.Input)
+	}
+}
+
 func TestBackgroundManagerListSortsAndTruncatesOutputRunes(t *testing.T) {
 	now := time.Now()
 	longOutput := strings.Repeat("你", 205)

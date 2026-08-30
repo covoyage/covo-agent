@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/covoyage/covo-agent/internal/agent/safety"
-	toolsstandingorders "github.com/covoyage/covo-agent/internal/tools/standingorders"
 	"github.com/covoyage/covo-agent/internal/evolution"
 	"github.com/covoyage/covo-agent/internal/kanban"
+	toolsstandingorders "github.com/covoyage/covo-agent/internal/tools/standingorders"
 )
 
 const (
@@ -102,10 +102,10 @@ type PromptBuilder struct {
 	personaMgr         *evolution.PersonaManager // optional, Honcho-style user dialect modeling
 	workDir            string
 	threatScanner      *safety.ThreatScanner
-	curator            *evolution.Curator    // optional, for nudge injection
-	kanbanMgr          *kanban.KanbanManager // optional, for kanban context injection
-	systemPrompt       string // replaces SOUL.md when set
-	appendSystemPrompt string // appended to context tier
+	curator            *evolution.Curator                       // optional, for nudge injection
+	kanbanMgr          *kanban.KanbanManager                    // optional, for kanban context injection
+	systemPrompt       string                                   // replaces SOUL.md when set
+	appendSystemPrompt string                                   // appended to context tier
 	standingOrders     *toolsstandingorders.StandingOrdersStore // optional, for standing orders injection
 
 	// Runtime metadata
@@ -191,6 +191,7 @@ func (pb *PromptBuilder) SetCurator(c *evolution.Curator) {
 func (pb *PromptBuilder) SetKanbanManager(km *kanban.KanbanManager) {
 	pb.kanbanMgr = km
 }
+
 // SetPersonaManager links the persona manager for user-dialect injection.
 func (pb *PromptBuilder) SetPersonaManager(pm *evolution.PersonaManager) {
 	pb.personaMgr = pm
@@ -426,25 +427,72 @@ type contextFile struct {
 	Content string
 }
 
+const (
+	contextFileBudgetChars = 16000
+	maxContextFileChars    = 8000
+)
+
 func (pb *PromptBuilder) loadContextFiles() []contextFile {
 	if pb.workDir == "" {
 		return nil
 	}
-	candidates := []string{"TOOLS.md", "COVO.md", "AGENTS.md"}
+	candidates := []string{
+		"TOOLS.md", "COVO.md", "AGENTS.md", "agents.md",
+		"CLAUDE.md", "claude.md",
+	}
+	absWork, err := filepath.Abs(pb.workDir)
+	if err != nil {
+		absWork = pb.workDir
+	}
+
+	seen := make(map[string]bool)
 	var result []contextFile
-	for _, name := range candidates {
-		path := filepath.Join(pb.workDir, name)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		content := strings.TrimSpace(string(data))
-		if content != "" {
+	total := 0
+	dir := absWork
+	for i := 0; i <= maxAncestorWalk; i++ {
+		for _, name := range candidates {
+			key := strings.ToLower(name)
+			if seen[key] {
+				continue
+			}
+			path := filepath.Join(dir, name)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			content := strings.TrimSpace(string(data))
+			if content == "" {
+				continue
+			}
+			if len(content) > maxContextFileChars {
+				content = content[:maxContextFileChars] + fmt.Sprintf("\n\n[...truncated %s: %d chars total]", name, len(content))
+			}
+			if total+len(content) > contextFileBudgetChars {
+				remain := contextFileBudgetChars - total
+				if remain <= 0 {
+					return result
+				}
+				content = content[:remain] + "\n\n[...truncated to project context budget]"
+			}
+			rel := name
+			if r, err := filepath.Rel(absWork, path); err == nil {
+				rel = r
+			}
+			seen[key] = true
+			total += len(content)
 			result = append(result, contextFile{
-				Name:    name,
-				Content: fmt.Sprintf("<project_context file=\"%s\">\n%s\n</project_context>", name, content),
+				Name:    rel,
+				Content: fmt.Sprintf("<project_context file=\"%s\">\n%s\n</project_context>", rel, content),
 			})
+			if total >= contextFileBudgetChars {
+				return result
+			}
 		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
 	}
 	return result
 }

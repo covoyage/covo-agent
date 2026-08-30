@@ -10,7 +10,7 @@ app:
   welcome_model: Varsayılan sağlayıcıyı/modeli değiştirmek için `covo-agent model`
     çalıştırın.
   welcome_session: Oturum
-  welcome_shortcuts: /help · /session · /skills · /memory · /curator · /quit
+  welcome_shortcuts: /help · /session · /skill · /memory · /curator · /quit
   quit_confirm: Çıkmak için tekrar Ctrl+Q veya Ctrl+D tuşlarına basın.
 statusline:
   mode_general: Genel
