@@ -31,6 +31,7 @@ type slashCompositionConfig struct {
 	OpenModelPicker   func()
 	OpenSettings      func()
 	OpenPromptQueue   func()
+	OpenDashboard     func()
 	BackgroundManager slashcmd.BackgroundManager
 	StatusLineManager slashcmd.StatusLineManager
 	WorkingDir        string
@@ -67,6 +68,7 @@ func newSlashContextBuilder(config slashCompositionConfig) *slashcmd.ContextBuil
 			OpenMCPMarketplace: openMCPMarketplace,
 			OpenSettings:       config.OpenSettings,
 			OpenPromptQueue:    config.OpenPromptQueue,
+			OpenDashboard:      config.OpenDashboard,
 		},
 		IO: slashcmd.IODependencies{
 			ExportSessionHTML:     exportSessionHTML,

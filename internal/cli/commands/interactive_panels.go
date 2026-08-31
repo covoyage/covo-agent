@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/covoyage/covonaut/tui/chat"
 	"github.com/covoyage/covonaut/tui/component"
 
 	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
 	"github.com/covoyage/covo-agent/internal/i18n"
+	"github.com/covoyage/covo-agent/internal/slashcmd"
 	toolsplanning "github.com/covoyage/covo-agent/internal/tools/planning"
 	agentui "github.com/covoyage/covo-agent/internal/tui"
 	agentpanels "github.com/covoyage/covo-agent/internal/tui/panels"
@@ -185,6 +187,163 @@ func (s *interactiveSession) openSessionTree() {
 	ov = loadUIBus().ShowPanel(tree, 80, 80)
 }
 
+func (s *interactiveSession) openCommandPalette() {
+	if s.app == nil {
+		return
+	}
+	items := agentui.CommandPaletteItems(slashcmd.BuildSlashSuggestions(), agentui.DefaultPaletteActions())
+	var ov chat.OverlayRef
+	closeOverlay := func() {
+		loadUIBus().ClosePanel(ov)
+	}
+	picker := agentui.NewCommandPalette(items, func(item agentui.PickerItem) {
+		closeOverlay()
+		s.runPaletteItem(item)
+	}, closeOverlay)
+	ov = loadUIBus().ShowPanel(picker, 70, 70)
+}
+
+func (s *interactiveSession) runPaletteItem(item agentui.PickerItem) {
+	value := item.Value
+	switch {
+	case strings.HasPrefix(value, "slash:"):
+		cmd := strings.TrimPrefix(value, "slash:")
+		if cmd != "" && !strings.HasPrefix(cmd, "/") {
+			cmd = "/" + cmd
+		}
+		if cmd != "" {
+			s.handleSubmit(context.Background(), cmd)
+		}
+	case value == "action:help":
+		s.openKeyHelp()
+	case value == "action:sessions":
+		s.openSessions()
+	case value == "action:todos":
+		s.openTodos()
+	case value == "action:skills":
+		s.openSkillCenter()
+	case value == "action:model":
+		s.openModelPicker()
+	case value == "action:settings":
+		s.openSettings()
+	case value == "action:queue":
+		s.showPromptQueue()
+	case value == "action:dashboard":
+		s.openDashboard()
+	case value == "action:search":
+		s.openHistorySearch()
+	case value == "action:files":
+		openChangedFilesPanel(s.changedFiles, s.workingDir)
+	}
+}
+
+func (s *interactiveSession) openHistorySearch() {
+	if s.app == nil {
+		return
+	}
+	history := s.app.History()
+	var ov chat.OverlayRef
+	closeOverlay := func() {
+		loadUIBus().ClosePanel(ov)
+	}
+	overlay := agentui.NewHistorySearchOverlay(history, func(match agentui.HistoryMatch) {
+		if start, _, ok := history.MessageLineRange(match.MsgIndex); ok {
+			history.JumpToAbsoluteLine(int64(start + match.LineIndex))
+			loadUIBus().Host().RequestRender()
+		}
+	}, closeOverlay)
+	ov = loadUIBus().ShowPanel(overlay, 80, 20)
+}
+
+func (s *interactiveSession) openDashboard() {
+	if s.app == nil {
+		return
+	}
+	data := s.dashboardData()
+	var ov chat.OverlayRef
+	closeOverlay := func() {
+		loadUIBus().ClosePanel(ov)
+	}
+	picker := agentui.NewDashboardPicker(data, func(item agentui.PickerItem) {
+		closeOverlay()
+		s.runDashboardItem(item)
+	}, closeOverlay)
+	ov = loadUIBus().ShowPanel(picker, 80, 80)
+}
+
+func (s *interactiveSession) dashboardData() agentui.DashboardData {
+	data := agentui.DashboardData{Busy: s.busy.Load()}
+	mgr := s.agentRuntime.Current()
+	if mgr != nil {
+		data.CurrentID = mgr.SessionManager().CurrentID()
+		if ag := mgr.Core(); ag != nil {
+			data.MsgCount = len(ag.State().Messages())
+		}
+		if data.Busy {
+			data.CurrentStatus = i18n.T("dashboard.status_working")
+		} else {
+			data.CurrentStatus = i18n.T("dashboard.status_idle")
+		}
+		infos, _ := mgr.SessionManager().ListSessions(context.Background())
+		for _, info := range infos {
+			status := i18n.T("dashboard.status_idle")
+			if info.ID == data.CurrentID && data.Busy {
+				status = i18n.T("dashboard.status_working")
+			}
+			data.Sessions = append(data.Sessions, agentui.DashboardSession{
+				ID:        info.ID,
+				Name:      info.Name,
+				Summary:   info.Summary,
+				Status:    status,
+				MsgCount:  info.MessageCount,
+				UpdatedAt: info.UpdatedAt,
+				IsCurrent: info.ID == data.CurrentID,
+			})
+		}
+	}
+	if s.bgManager != nil {
+		for _, task := range s.bgManager.List() {
+			data.Tasks = append(data.Tasks, agentui.DashboardTask{
+				ID:          task.ID,
+				Input:       task.Input,
+				Status:      string(task.Status),
+				Error:       task.Error,
+				Turns:       task.Turns,
+				CurrentTurn: task.CurrentTurn,
+				StartedAt:   task.StartedAt,
+			})
+		}
+	}
+	return data
+}
+
+func (s *interactiveSession) runDashboardItem(item agentui.PickerItem) {
+	value := item.Value
+	switch {
+	case strings.HasPrefix(value, "session:"):
+		sessionID := strings.TrimPrefix(value, "session:")
+		mgr := s.agentRuntime.Current()
+		if mgr == nil || sessionID == "" {
+			return
+		}
+		if err := mgr.SessionManager().ResumeSession(context.Background(), sessionID); err != nil {
+			loadUIBus().PrintError(fmt.Errorf("resume session: %w", err))
+			return
+		}
+		snap, _ := mgr.SessionManager().LoadSession(context.Background(), sessionID)
+		mgr.Core().State().Restore(snap)
+		shared.RestoreChatHistory(s.app, snap.Messages)
+		shortID := sessionID
+		if len(shortID) > 8 {
+			shortID = shortID[:8]
+		}
+		loadUIBus().PrintSystem(i18n.T("system.session_resumed", "id", shortID))
+		loadUIBus().StatusBar().SetMode(i18n.T("app.session_title", "id", shortID))
+	case strings.HasPrefix(value, "task:"):
+		loadUIBus().PrintSystem(i18n.T("dashboard.task_selected", "id", strings.TrimPrefix(value, "task:")))
+	}
+}
+
 func (s *interactiveSession) openSkillCenter() {
 	mgr := s.agentRuntime.Current()
 	if mgr == nil {
@@ -240,18 +399,21 @@ func (s *interactiveSession) openKeyHelp() {
 // corresponding panel openers.
 func (s *interactiveSession) installHotkeyRouter() {
 	s.app.Host().AddChild(agentui.NewHotkeyRouter(agentui.HotkeyRouterConfig{
-		Stop:             s.app.Stop,
-		PrintSystem:      s.app.PrintSystem,
-		OpenSessions:     s.openSessions,
-		OpenSessionTree:  s.openSessionTree,
-		OpenTodos:        s.openTodos,
-		OpenSkillCenter:  s.openSkillCenter,
-		OpenKeyHelp:      s.openKeyHelp,
-		OpenModelPicker:  s.openModelPicker,
-		OpenEditor:       s.openExternalEditorPanel,
-		OpenChangedFiles: func() { openChangedFilesPanel(s.changedFiles, s.workingDir) },
-		OpenSettings:     s.openSettings,
-		OpenPromptQueue:  s.showPromptQueue,
+		Stop:               s.app.Stop,
+		PrintSystem:        s.app.PrintSystem,
+		OpenSessions:       s.openSessions,
+		OpenSessionTree:    s.openSessionTree,
+		OpenTodos:          s.openTodos,
+		OpenSkillCenter:    s.openSkillCenter,
+		OpenCommandPalette: s.openCommandPalette,
+		OpenHistorySearch:  s.openHistorySearch,
+		OpenDashboard:      s.openDashboard,
+		OpenKeyHelp:        s.openKeyHelp,
+		OpenModelPicker:    s.openModelPicker,
+		OpenEditor:         s.openExternalEditorPanel,
+		OpenChangedFiles:   func() { openChangedFilesPanel(s.changedFiles, s.workingDir) },
+		OpenSettings:       s.openSettings,
+		OpenPromptQueue:    s.showPromptQueue,
 		ToggleVerbose: func() {
 			on := s.app.History().ToggleVerbose()
 			if on {

@@ -18,6 +18,9 @@ import (
 // prompts (which run on a background goroutine).
 func (s *interactiveSession) handleSubmit(ctx context.Context, input string) {
 	trimmed := strings.TrimSpace(input)
+	if s.pasteStore != nil {
+		trimmed = strings.TrimSpace(s.pasteStore.Expand(trimmed))
+	}
 	if trimmed == "" {
 		return
 	}
@@ -221,6 +224,9 @@ func (s *interactiveSession) submitPrompt(ctx context.Context, trimmed string) {
 		return
 	}
 	trimmed = result.Message
+	if s.pasteStore != nil {
+		trimmed = s.pasteStore.Expand(trimmed)
+	}
 
 	// Expand [image:name] placeholders to full file paths from pasted images.
 	s.pendingImages.Range(func(key, value any) bool {

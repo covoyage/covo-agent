@@ -19,12 +19,14 @@ type TodoItem struct {
 
 // FooterSnapshot is a thread-safe copy of status values used by render functions.
 type FooterSnapshot struct {
-	GitBranch   string
-	ContextUsed string
-	ContextWarn bool
-	Shortcuts   string
-	BgTaskCount int
-	Mode        string
+	GitBranch     string
+	ContextUsed   string
+	ContextWarn   bool
+	ContextTokens int64
+	ContextTotal  int64
+	Shortcuts     string
+	BgTaskCount   int
+	Mode          string
 }
 
 // StickyFooter renders active TODOs and the configurable status line.
@@ -34,6 +36,8 @@ type StickyFooter struct {
 	gitBranch     string
 	contextUsed   string
 	contextWarn   bool
+	contextTokens int64
+	contextTotal  int64
 	shortcuts     string
 	bgTaskCount   int
 	mode          string
@@ -68,6 +72,13 @@ func (footer *StickyFooter) SetContextWarn(warn bool) {
 	footer.mu.Unlock()
 }
 
+func (footer *StickyFooter) SetContextTokens(used, total int64) {
+	footer.mu.Lock()
+	footer.contextTokens = used
+	footer.contextTotal = total
+	footer.mu.Unlock()
+}
+
 func (footer *StickyFooter) SetShortcuts(shortcuts string) {
 	footer.mu.Lock()
 	footer.shortcuts = shortcuts
@@ -96,12 +107,14 @@ func (footer *StickyFooter) Snapshot() FooterSnapshot {
 	footer.mu.RLock()
 	defer footer.mu.RUnlock()
 	return FooterSnapshot{
-		GitBranch:   footer.gitBranch,
-		ContextUsed: footer.contextUsed,
-		ContextWarn: footer.contextWarn,
-		Shortcuts:   footer.shortcuts,
-		BgTaskCount: footer.bgTaskCount,
-		Mode:        footer.mode,
+		GitBranch:     footer.gitBranch,
+		ContextUsed:   footer.contextUsed,
+		ContextWarn:   footer.contextWarn,
+		ContextTokens: footer.contextTokens,
+		ContextTotal:  footer.contextTotal,
+		Shortcuts:     footer.shortcuts,
+		BgTaskCount:   footer.bgTaskCount,
+		Mode:          footer.mode,
 	}
 }
 
@@ -112,12 +125,14 @@ func (footer *StickyFooter) Render(width int64) []string {
 	todoStore := footer.todoStore
 	statusLineManager := footer.statusLineMgr
 	snapshot := FooterSnapshot{
-		GitBranch:   footer.gitBranch,
-		ContextUsed: footer.contextUsed,
-		ContextWarn: footer.contextWarn,
-		Shortcuts:   footer.shortcuts,
-		BgTaskCount: footer.bgTaskCount,
-		Mode:        footer.mode,
+		GitBranch:     footer.gitBranch,
+		ContextUsed:   footer.contextUsed,
+		ContextWarn:   footer.contextWarn,
+		ContextTokens: footer.contextTokens,
+		ContextTotal:  footer.contextTotal,
+		Shortcuts:     footer.shortcuts,
+		BgTaskCount:   footer.bgTaskCount,
+		Mode:          footer.mode,
 	}
 	footer.mu.RUnlock()
 

@@ -176,6 +176,14 @@ func (p *Picker) OnCancel(fn func()) { p.onCancel = fn }
 // OnToggle 设置多选切换回调。
 func (p *Picker) OnToggle(fn func(PickerItem)) { p.onToggle = fn }
 
+// SetSearching toggles inline filter mode. When enabled, printable keys
+// update the query instead of waiting for "/".
+func (p *Picker) SetSearching(on bool) {
+	p.mu.Lock()
+	p.searching = on
+	p.mu.Unlock()
+}
+
 // Invalidate 实现 core.Component。
 func (p *Picker) Invalidate() {}
 
@@ -292,7 +300,7 @@ func (p *Picker) handleKey(data string) core.Cmd {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// 搜索模式下捕获可打印字符
+	// 搜索模式下捕获可打印字符；Enter 选中当前项（命令面板即输即选）。
 	if p.searching {
 		for _, key := range terminal.ParseKeys(data) {
 			if key.IsRelease() {
@@ -300,10 +308,16 @@ func (p *Picker) handleKey(data string) core.Cmd {
 			}
 			switch {
 			case key.Name == "enter":
-				p.searching = false
-				p.selected = 0
-				p.offset = 0
-				p.applyFilterLocked()
+				if len(p.filtered) > 0 && p.onSelect != nil {
+					item := p.filtered[p.selected]
+					p.mu.Unlock()
+					p.onSelect(item)
+					p.mu.Lock()
+				}
+			case key.Name == "up":
+				p.moveLocked(-1)
+			case key.Name == "down":
+				p.moveLocked(1)
 			case key.Name == "escape":
 				p.searching = false
 				p.search = ""

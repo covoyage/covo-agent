@@ -78,6 +78,27 @@ func TestPicker_Search(t *testing.T) {
 	}
 }
 
+func TestPicker_SearchEnterSelects(t *testing.T) {
+	p := NewPicker(PickerConfig{
+		Title:      "Test",
+		PageSize:   10,
+		Searchable: true,
+	})
+	p.SetItems([]PickerItem{
+		{Value: "openai", Label: "OpenAI"},
+		{Value: "anthropic", Label: "Anthropic"},
+	})
+	var selected PickerItem
+	p.OnSelect(func(item PickerItem) { selected = item })
+	p.SetSearching(true)
+	p.Update(core.KeyMsg{Data: "a"})
+	p.Update(core.KeyMsg{Data: "n"})
+	p.Update(core.KeyMsg{Data: "\r"})
+	if selected.Value != "anthropic" {
+		t.Fatalf("search enter selected %q, want anthropic", selected.Value)
+	}
+}
+
 func TestPicker_OnSelect(t *testing.T) {
 	p := NewPicker(PickerConfig{Title: "Test", PageSize: 3})
 	p.SetItems([]PickerItem{

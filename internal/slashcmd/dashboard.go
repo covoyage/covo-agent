@@ -16,6 +16,10 @@ import (
 // (Working / Idle / Needs input / Completed), and background tasks are listed
 // with their current state.
 func handleDashboard(sctx *SlashContext, parts []string) bool {
+	if sctx.UI.OpenDashboard != nil {
+		sctx.UI.OpenDashboard()
+		return true
+	}
 	app := sctx.UI.App
 	if app == nil {
 		return true
@@ -62,7 +66,7 @@ func handleDashboard(sctx *SlashContext, parts []string) bool {
 		if len(tasks) == 0 {
 			b.WriteString("  (none)\n")
 		} else {
-				running, completed, failed := 0, 0, 0
+			running, completed, failed := 0, 0, 0
 			for _, t := range tasks {
 				switch t.Status {
 				case runtimeapp.TaskRunning:

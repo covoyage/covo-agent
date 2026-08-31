@@ -62,6 +62,7 @@ type UIDependencies struct {
 	OpenMCPMarketplace func()
 	OpenSettings       func()
 	OpenPromptQueue    func()
+	OpenDashboard      func()
 }
 
 // IODependencies groups import/export and clipboard integrations.

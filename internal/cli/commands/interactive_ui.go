@@ -6,7 +6,6 @@ import (
 	"log"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/covoyage/covonaut/tui"
@@ -23,6 +22,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/cli/commands/prefs"
 	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
 	"github.com/covoyage/covo-agent/internal/i18n"
+	"github.com/covoyage/covo-agent/internal/promptqueue"
 	"github.com/covoyage/covo-agent/internal/telemetry"
 	agenttheme "github.com/covoyage/covo-agent/internal/theme"
 	"github.com/covoyage/covo-agent/internal/tools"
@@ -136,22 +136,31 @@ func (s *interactiveSession) showPromptQueue() {
 		return
 	}
 	queue := shared.RuntimeState.PromptQueue()
-	if queue == nil || queue.IsEmpty() {
-		loadUIBus().PrintSystem(i18n.T("system.prompts_empty"))
-		return
+	pane := agentui.NewQueuePane(queue)
+	var ov chat.OverlayRef
+	closePane := func() {
+		loadUIBus().ClosePanel(ov)
 	}
-	var b strings.Builder
-	entries := queue.All()
-	b.WriteString(i18n.T("system.pending_prompts_header", "count", strconv.Itoa(len(entries))) + "\n")
-	for i, e := range entries {
-		b.WriteString(fmt.Sprintf("  %d. %s\n", i+1, e.Text))
-	}
-	loadUIBus().PrintSystem(b.String())
+	pane.SetOnClose(closePane)
+	pane.SetOnRemove(func(entry promptqueue.Entry) {
+		if queue != nil {
+			queue.Remove(entry.ID)
+		}
+		loadUIBus().Host().RequestRender()
+	})
+	pane.SetOnSendNow(func(entry promptqueue.Entry) {
+		if queue != nil {
+			queue.Remove(entry.ID)
+		}
+		closePane()
+		s.submitPrompt(context.Background(), entry.Text)
+	})
+	ov = loadUIBus().ShowPanel(pane, 80, 70)
 }
 
 // buildChatApp assembles the chat application around the submit handler.
 func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core.Suggestion) *chat.ChatApp {
-	return tui.NewChatApp(chat.ChatAppConfig{
+	app := tui.NewChatApp(chat.ChatAppConfig{
 		Title: fmt.Sprintf(
 			"covo-agent · provider=%s model=%s mode=%s",
 			s.providerType, s.model, s.mode,
@@ -193,6 +202,12 @@ func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core
 			},
 		},
 		OnSubmit: s.handleSubmit,
+		ExpandSubmit: func(input string) string {
+			if s.pasteStore == nil {
+				return input
+			}
+			return s.pasteStore.Expand(input)
+		},
 		OnInterrupt: func() {
 			if cf := s.cancelRun.Load(); cf != nil && *cf != nil {
 				(*cf)()
@@ -203,8 +218,28 @@ func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core
 		OnImagePaste: func() {
 			s.handleImagePaste()
 		},
+		OnTextPaste: func(text string) (string, bool) {
+			if !agentui.ShouldChipPaste(text) {
+				return "", false
+			}
+			if s.pasteStore == nil {
+				s.pasteStore = agentui.NewPasteStore()
+			}
+			return s.pasteStore.Store(text), true
+		},
+		Filter: func(_ core.Component, msg core.Msg) core.Msg {
+			if key, ok := msg.(core.KeyMsg); ok && terminal.MatchesKey(key.Data, "ctrl+k") {
+				s.openCommandPalette()
+				return nil
+			}
+			return msg
+		},
 		OnGhostRequest: agentui.NewAIGhostProvider(s.llm, shared.GhostModelFromConfig(s.cfg, s.providerType)).Handle,
 	})
+	if ed := app.Editor(); ed != nil {
+		ed.SetTextFn(agentui.StylePasteChips)
+	}
+	return app
 }
 
 // handleImagePaste reads an image from the clipboard and injects a reference
@@ -237,12 +272,13 @@ func (s *interactiveSession) wireFooter() {
 	s.statusLineMgr = agentui.NewStatusLineManager()
 	s.stickyFooter.SetStatusLineManager(s.statusLineMgr)
 	s.slashContext = newSlashContextBuilder(slashCompositionConfig{
-		App:         s.app,
-		Busy:        &s.busy,
-		Agents:      s.agentRuntime,
-		State:       shared.RuntimeState,
-		ActiveMode:  func() agent.AgentMode { return s.mode },
-		CreateAgent: s.createAgent,
+		App:           s.app,
+		Busy:          &s.busy,
+		Agents:        s.agentRuntime,
+		State:         shared.RuntimeState,
+		OpenDashboard: s.openDashboard,
+		ActiveMode:    func() agent.AgentMode { return s.mode },
+		CreateAgent:   s.createAgent,
 		ReplaceAgent: func(mode agent.AgentMode, preserveState bool) *agent.CovoAgent {
 			replacement, err := s.replaceAgent(s.requestFor(mode, s.llm, s.providerType, s.model), preserveState)
 			if err != nil {
@@ -300,11 +336,21 @@ func (s *interactiveSession) wireFooter() {
 		return pal.Dim.Render(b)
 	})
 	s.statusLineMgr.SetRenderFn("context-used", func(pal *theme.Palette) string {
-		c := s.stickyFooter.Snapshot().ContextUsed
-		if c == "" {
+		snap := s.stickyFooter.Snapshot()
+		if snap.ContextTotal > 0 {
+			bar := agentui.RenderContextBar(snap.ContextTokens, snap.ContextTotal, agentui.DefaultContextBarConfig(), pal)
+			if bar != "" {
+				return bar
+			}
+		}
+		if snap.ContextUsed == "" {
 			return ""
 		}
-		return pal.Dim.Render(c)
+		style := pal.Dim
+		if snap.ContextWarn {
+			style = pal.Error
+		}
+		return style.Render(snap.ContextUsed)
 	})
 	s.statusLineMgr.SetRenderFn("cost", func(pal *theme.Palette) string {
 		ca := s.agentRuntime.Current()
@@ -375,6 +421,7 @@ func (s *interactiveSession) pumpFooterStatus() {
 					if ce := ca.Core().ContextEngine(); ce != nil {
 						ctxLen = ce.ContextLength()
 					}
+					s.stickyFooter.SetContextTokens(promptTokens, ctxLen)
 					if ctxLen > 0 {
 						pct := promptTokens * 100 / ctxLen
 						if pct > 999 {
@@ -443,8 +490,15 @@ func (s *interactiveSession) registerKeybindings() {
 		DefaultKeys: []terminal.KeyID{"ctrl+t"},
 		Description: i18n.T("keybinding.todo"),
 	})
-	s.app.Keybindings().Register("app.skills", terminal.KeybindingDef{
+	s.app.Keybindings().Register("app.palette", terminal.KeybindingDef{
 		DefaultKeys: []terminal.KeyID{"ctrl+k"},
+		Description: i18n.T("keybinding.palette"),
+	})
+	s.app.Keybindings().Register("app.search", terminal.KeybindingDef{
+		DefaultKeys: []terminal.KeyID{"ctrl+s"},
+		Description: i18n.T("keybinding.search"),
+	})
+	s.app.Keybindings().Register("app.skills", terminal.KeybindingDef{
 		Description: i18n.T("keybinding.skills"),
 	})
 	s.app.Keybindings().Register("app.interrupt", terminal.KeybindingDef{

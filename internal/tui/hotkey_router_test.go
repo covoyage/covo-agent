@@ -8,13 +8,15 @@ import (
 func TestHotkeyRouterDispatchesCallbacks(t *testing.T) {
 	called := ""
 	router := NewHotkeyRouter(HotkeyRouterConfig{
-		OpenSessions:     func() { called = "sessions" },
-		OpenTodos:        func() { called = "todos" },
-		OpenSkillCenter:  func() { called = "skills" },
-		OpenModelPicker:  func() { called = "model" },
-		OpenSessionTree:  func() { called = "tree" },
-		OpenEditor:       func() { called = "editor" },
-		OpenChangedFiles: func() { called = "files" },
+		OpenSessions:       func() { called = "sessions" },
+		OpenTodos:          func() { called = "todos" },
+		OpenSkillCenter:    func() { called = "skills" },
+		OpenCommandPalette: func() { called = "palette" },
+		OpenHistorySearch:  func() { called = "search" },
+		OpenModelPicker:    func() { called = "model" },
+		OpenSessionTree:    func() { called = "tree" },
+		OpenEditor:         func() { called = "editor" },
+		OpenChangedFiles:   func() { called = "files" },
 	})
 	tests := []struct {
 		data string
@@ -22,7 +24,8 @@ func TestHotkeyRouterDispatchesCallbacks(t *testing.T) {
 	}{
 		{"\x0f", "sessions"},
 		{"\x14", "todos"},
-		{"\x0b", "skills"},
+		{"\x0b", "palette"},
+		{"\x13", "search"},
 		{"\x10", "model"},
 		{"\x19", "tree"},
 		{"\x05", "editor"},

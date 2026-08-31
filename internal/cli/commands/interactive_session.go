@@ -70,6 +70,7 @@ type interactiveSession struct {
 	busy          atomic.Bool
 	cancelRun     atomic.Pointer[context.CancelFunc]
 	pendingImages sync.Map
+	pasteStore    *agentui.PasteStore
 }
 
 // RunInteractive launches the interactive TUI, or the one-shot path when a
@@ -362,8 +363,14 @@ func (s *interactiveSession) run() {
 
 	s.installHotkeyRouter()
 
+	typeahead := agentui.CaptureTypeahead(os.Stdin)
 	if err := s.app.Start(); err != nil {
 		log.Fatalf("start tui: %v", err)
+	}
+	if typeahead != "" {
+		if ed := s.app.Editor(); ed != nil {
+			ed.SetValue(ed.GetValue() + typeahead)
+		}
 	}
 
 	cronScheduler := s.buildCronScheduler()

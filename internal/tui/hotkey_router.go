@@ -13,21 +13,24 @@ import (
 
 // HotkeyRouterConfig supplies command callbacks for application-level shortcuts.
 type HotkeyRouterConfig struct {
-	Stop             func() error
-	PrintSystem      func(string)
-	OpenSessions     func()
-	OpenSessionTree  func()
-	OpenTodos        func()
-	OpenSkillCenter  func()
-	OpenKeyHelp      func()
-	OpenModelPicker  func()
-	OpenEditor       func()
-	OpenChangedFiles func()
-	OpenSettings     func()
-	OpenPromptQueue  func()
-	ToggleVerbose    func()
-	Suggestions      *SuggestionsManager
-	QuitWindow       time.Duration
+	Stop               func() error
+	PrintSystem        func(string)
+	OpenSessions       func()
+	OpenSessionTree    func()
+	OpenTodos          func()
+	OpenSkillCenter    func()
+	OpenKeyHelp        func()
+	OpenModelPicker    func()
+	OpenEditor         func()
+	OpenChangedFiles   func()
+	OpenSettings       func()
+	OpenPromptQueue    func()
+	OpenCommandPalette func()
+	OpenHistorySearch  func()
+	OpenDashboard      func()
+	ToggleVerbose      func()
+	Suggestions        *SuggestionsManager
+	QuitWindow         time.Duration
 }
 
 // HotkeyRouter dispatches application-level keyboard shortcuts.
@@ -65,7 +68,9 @@ func (router *HotkeyRouter) HandleInput(data string) {
 	case terminal.MatchesKey(data, "ctrl+t"):
 		invoke(router.config.OpenTodos)
 	case terminal.MatchesKey(data, "ctrl+k"):
-		invoke(router.config.OpenSkillCenter)
+		invoke(router.config.OpenCommandPalette)
+	case terminal.MatchesKey(data, "ctrl+s"):
+		invoke(router.config.OpenHistorySearch)
 	case terminal.MatchesKey(data, "ctrl+p"):
 		invoke(router.config.OpenModelPicker)
 	case terminal.MatchesKey(data, "ctrl+y"):

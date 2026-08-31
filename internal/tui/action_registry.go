@@ -37,13 +37,16 @@ const (
 	ActionInterrupt ActionId = "interrupt"
 
 	// Panels
-	ActionOpenSessions     ActionId = "open_sessions"
-	ActionOpenTodos        ActionId = "open_todos"
-	ActionOpenSkillCenter  ActionId = "open_skill_center"
-	ActionOpenModelPicker  ActionId = "open_model_picker"
-	ActionOpenEditor       ActionId = "open_editor"
-	ActionOpenSessionTree  ActionId = "open_session_tree"
-	ActionOpenChangedFiles ActionId = "open_changed_files"
+	ActionOpenSessions       ActionId = "open_sessions"
+	ActionOpenTodos          ActionId = "open_todos"
+	ActionOpenSkillCenter    ActionId = "open_skill_center"
+	ActionOpenCommandPalette ActionId = "open_command_palette"
+	ActionOpenHistorySearch  ActionId = "open_history_search"
+	ActionOpenDashboard      ActionId = "open_dashboard"
+	ActionOpenModelPicker    ActionId = "open_model_picker"
+	ActionOpenEditor         ActionId = "open_editor"
+	ActionOpenSessionTree    ActionId = "open_session_tree"
+	ActionOpenChangedFiles   ActionId = "open_changed_files"
 
 	// Input
 	ActionSubmitPrompt ActionId = "submit_prompt"
@@ -386,10 +389,32 @@ func DefaultActions(terminalCtx *TerminalContext) []ActionDef {
 			Context:     WhenAgentScreen,
 		},
 		{
+			ID:          ActionOpenCommandPalette,
+			Label:       "palette",
+			Description: i18n.T("keybinding.palette"),
+			DefaultKeys: []terminal.KeyID{"ctrl+k"},
+			Category:    CatPanels,
+			Context:     WhenAgentScreen,
+		},
+		{
+			ID:          ActionOpenHistorySearch,
+			Label:       "search",
+			Description: i18n.T("keybinding.search"),
+			DefaultKeys: []terminal.KeyID{"ctrl+s"},
+			Category:    CatPanels,
+			Context:     WhenAgentScreen,
+		},
+		{
 			ID:          ActionOpenSkillCenter,
 			Label:       "skills",
 			Description: "Open skill center",
-			DefaultKeys: []terminal.KeyID{"ctrl+k"},
+			Category:    CatPanels,
+			Context:     WhenAgentScreen,
+		},
+		{
+			ID:          ActionOpenDashboard,
+			Label:       "dashboard",
+			Description: i18n.T("commands.dashboard"),
 			Category:    CatPanels,
 			Context:     WhenAgentScreen,
 		},
