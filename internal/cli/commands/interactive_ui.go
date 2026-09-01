@@ -169,12 +169,15 @@ func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core
 			Show: s.showReasoning,
 			Mode: s.thinkingMode,
 		},
-		ShowTimings:        true,
-		ShowTurns:          true,
-		AltScreen:          true,
-		MouseMode:          shared.DefaultMouseMode(),
-		KittyKeyboardMode:  shared.DefaultKeyboardMode(),
-		KittyKeyboardFlags: shared.DefaultKeyboardFlags(),
+		ShowTimings:               true,
+		ShowTurns:                 true,
+		AltScreen:                 true,
+		EditorPlaceholder:         i18n.T("app.composer_placeholder"),
+		EditorStartingPlaceholder: i18n.T("system.starting"),
+		EditorBusyPlaceholder:     i18n.T("app.composer_busy"),
+		MouseMode:                 shared.DefaultMouseMode(),
+		KittyKeyboardMode:         shared.DefaultKeyboardMode(),
+		KittyKeyboardFlags:        shared.DefaultKeyboardFlags(),
 		// Transcript display caps. Tune here (or surface in config) without
 		// touching covonaut internals; zero values fall back to defaults.
 		Limits: chat.DisplayLimits{
@@ -202,6 +205,7 @@ func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core
 			},
 		},
 		OnSubmit: s.handleSubmit,
+		OnQueue:  s.handleQueue,
 		ExpandSubmit: func(input string) string {
 			if s.pasteStore == nil {
 				return input

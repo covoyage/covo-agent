@@ -11,6 +11,8 @@ app:
   welcome_session: "Session"
   welcome_shortcuts: "/help · /session · /skill · /memory · /curator · /quit"
   quit_confirm: "Press Ctrl+Q or Ctrl+D again to exit."
+  composer_placeholder: "Type a message..."
+  composer_busy: "Ctrl+C interrupt · Tab queue"
 
 statusline:
   mode_general: "general"
@@ -18,7 +20,7 @@ statusline:
   bg_tasks: "⚙ {count} bg"
   tokens_io: "tokens: {input} in + {output} out = {total}"
   tokens: "tokens: {count}"
-  shortcuts: "ctrl+/ help  ctrl+k palette  ctrl+s search  ctrl+o session"
+  shortcuts: "ctrl+/ help  ctrl+k palette  tab queue  ctrl+s search"
   tool_calls: "tool calls: {count}"
   mode_desc: "Agent mode (general/code)"
   bg_desc: "Background task count"
@@ -200,6 +202,7 @@ system:
   queued: "(queued — will process after current reply)"
   steer_unsupported: "(steering not supported in TUI mode)"
   busy: "(busy — please wait for the current reply)"
+  starting: "Starting..."
   repetition_recovery_mild: "Your recent output contained repeated phrases or actions. Stop repeating yourself: vary your wording and reasoning, try a different tool or approach, or explain what is blocking you instead of looping."
   repetition_recovery_strong: "CRITICAL: you are STILL repeating yourself after a previous warning. You MUST abandon your current approach entirely, explain what you were trying to do and why it failed, and ask the user for guidance. Do not repeat the same wording or actions again."
   no_image: "⚠ No image found on clipboard"

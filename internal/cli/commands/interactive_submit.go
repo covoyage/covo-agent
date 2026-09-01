@@ -18,12 +18,23 @@ import (
 // prompts (which run on a background goroutine).
 func (s *interactiveSession) handleSubmit(ctx context.Context, input string) {
 	trimmed := strings.TrimSpace(input)
-	if s.pasteStore != nil {
-		trimmed = strings.TrimSpace(s.pasteStore.Expand(trimmed))
-	}
 	if trimmed == "" {
 		return
 	}
+
+	s.dispatchInput(ctx, trimmed)
+}
+
+func (s *interactiveSession) handleQueue(ctx context.Context, input string) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return
+	}
+	shared.RuntimeState.SetPendingInput(trimmed)
+	loadUIBus().PrintSystem(i18n.T("system.queued"))
+}
+
+func (s *interactiveSession) dispatchInput(ctx context.Context, trimmed string) {
 
 	// Handle pending approval via text input (y/s/a/n keys).
 	if s.permissionGate != nil && s.permissionGate.HasPending() {
@@ -224,9 +235,6 @@ func (s *interactiveSession) submitPrompt(ctx context.Context, trimmed string) {
 		return
 	}
 	trimmed = result.Message
-	if s.pasteStore != nil {
-		trimmed = s.pasteStore.Expand(trimmed)
-	}
 
 	// Expand [image:name] placeholders to full file paths from pasted images.
 	s.pendingImages.Range(func(key, value any) bool {

@@ -10,6 +10,8 @@ app:
   welcome_session: "会话"
   welcome_shortcuts: "/help · /session · /skill · /memory · /curator · /quit"
   quit_confirm: "再次按 Ctrl+Q 或 Ctrl+D 退出。"
+  composer_placeholder: "輸入訊息..."
+  composer_busy: "Ctrl+C 中斷 · Tab 排隊"
 
 statusline:
   mode_general: "通用"
@@ -17,7 +19,7 @@ statusline:
   bg_tasks: "⚙ {count} 后台"
   tokens_io: "tokens: {input} 入 + {output} 出 = {total}"
   tokens: "tokens: {count}"
-  shortcuts: "ctrl+/ 說明  ctrl+k 命令面板  ctrl+s 搜尋  ctrl+o 工作階段"
+  shortcuts: "ctrl+/ 說明  ctrl+k 命令面板  tab 排隊  ctrl+s 搜尋"
   tool_calls: "工具调用: {count}"
   mode_desc: "Agent 模式（通用/编码）"
   bg_desc: "后台任务数"
@@ -199,6 +201,7 @@ system:
   queued: "（已排队 — 当前回复完成后处理）"
   steer_unsupported: "（TUI 模式不支持引導）"
   busy: "（忙碌中 — 请等待当前回复）"
+  starting: "正在啟動..."
   repetition_recovery_mild: "你最近的輸出包含重複的措辭或動作。請停止重複：換一種表達和思路，嘗試不同的工具或方法，或者說明是什麼阻礙了你，而不是繼續循環。"
   repetition_recovery_strong: "嚴重：在上一次警告後你仍然在重複。你必須徹底放棄目前方案，說明你原本想做什麼、為什麼失敗了，並向使用者請求指導。不要再重複相同的措辭或動作。"
   no_image: "⚠ 剪贴板中未找到图片"

@@ -224,6 +224,27 @@ func (s *interactiveSession) run() {
 		agent.RegisterCustomMode(def)
 	}
 
+	slashSuggestions := slashcmd.BuildSlashSuggestions()
+	atSuggestions := slashcmd.BuildAtSuggestions()
+	s.app = s.buildChatApp(slashSuggestions, atSuggestions)
+	s.app.SuppressAutoRetry = true
+	s.app.History().SetTheme(chatHistoryTheme())
+	shared.RuntimeState.SetUI(agentui.NewUIBus(s.app))
+	s.app.HoldSubmit()
+	if ed := s.app.Editor(); ed != nil {
+		ed.SetPlaceholder(i18n.T("system.starting"))
+	}
+	typeahead := agentui.CaptureTypeahead(os.Stdin)
+	if err := s.app.Start(); err != nil {
+		log.Fatalf("start tui: %v", err)
+	}
+	defer s.app.Stop()
+	if typeahead != "" {
+		if ed := s.app.Editor(); ed != nil {
+			ed.SetValue(ed.GetValue() + typeahead)
+		}
+	}
+
 	s.agentFactory = runtimeapp.NewAgentFactory(agent.CovoAgentConfig{
 		WorkingDir:               s.workingDir,
 		HomeDir:                  s.homeDir,
@@ -256,6 +277,7 @@ func (s *interactiveSession) run() {
 		ContextLength: s.modelContextLen,
 	})
 	if err != nil {
+		_ = s.app.Stop()
 		log.Fatalf("create agent: %v", err)
 	}
 	s.agent = covoAgent
@@ -310,14 +332,6 @@ func (s *interactiveSession) run() {
 	})
 	s.agentRuntime.SetPrepare(s.prepareAgent)
 
-	slashSuggestions := slashcmd.BuildSlashSuggestions()
-	atSuggestions := slashcmd.BuildAtSuggestions()
-
-	s.app = s.buildChatApp(slashSuggestions, atSuggestions)
-	s.app.SuppressAutoRetry = true
-	s.app.History().SetTheme(chatHistoryTheme())
-	shared.RuntimeState.SetUI(agentui.NewUIBus(s.app))
-
 	s.wirePermissionGate()
 	s.wireApprovalOverlay()
 	s.wireHandoff()
@@ -363,15 +377,7 @@ func (s *interactiveSession) run() {
 
 	s.installHotkeyRouter()
 
-	typeahead := agentui.CaptureTypeahead(os.Stdin)
-	if err := s.app.Start(); err != nil {
-		log.Fatalf("start tui: %v", err)
-	}
-	if typeahead != "" {
-		if ed := s.app.Editor(); ed != nil {
-			ed.SetValue(ed.GetValue() + typeahead)
-		}
-	}
+	s.app.SetReady()
 
 	cronScheduler := s.buildCronScheduler()
 	cronScheduler.Start(context.Background())
