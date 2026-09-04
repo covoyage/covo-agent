@@ -18,8 +18,8 @@ github.com/chromedp/chromedp v0.14.2 h1:r3b/WtwM50RsBZHMUm9fsNhhzRStTHrKdr2zmwbZ
 github.com/chromedp/chromedp v0.14.2/go.mod h1:rHzAv60xDE7VNy/MYtTUrYreSc0ujt2O1/C3bzctYBo=
 github.com/chromedp/sysutil v1.1.0 h1:PUFNv5EcprjqXZD9nJb9b/c9ibAbxiYo4exNWZyipwM=
 github.com/chromedp/sysutil v1.1.0/go.mod h1:WiThHUdltqCNKGc4gaU50XgYjwjYIhKWoHGPTUfWTJ8=
-github.com/covoyage/covonaut v1.1.0 h1:2SAka1Dn2C8hiPYu0EYegzAzmo0VwNWPUou6+3IgrQo=
-github.com/covoyage/covonaut v1.1.0/go.mod h1:wJjLcpHpyNz3K91JZvgHDqIHF7ryMdwBELXE5zTc9l8=
+github.com/covoyage/covonaut v1.1.1 h1:p1lN3doPkNV8BkIRJWIHHSNA2TOms7LrmEvRREo7Mfk=
+github.com/covoyage/covonaut v1.1.1/go.mod h1:wJjLcpHpyNz3K91JZvgHDqIHF7ryMdwBELXE5zTc9l8=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

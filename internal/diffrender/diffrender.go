@@ -3,7 +3,7 @@
 // +/- lines, dim context) plus — when enabled and the language is recognized
 // — token-level syntax highlighting of content lines via chroma. Enabled
 // state follows COVO_SYNTAX_HIGHLIGHT (on by default; "0"/"false"/"off"/"no"
-// disables), mirroring CLAUDE_CODE_SYNTAX_HIGHLIGHT in Claude Code.
+// disables).
 package diffrender
 
 import (

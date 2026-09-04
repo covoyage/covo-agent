@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -8,17 +10,45 @@ import (
 )
 
 func TestShouldChipPaste(t *testing.T) {
-	if ShouldChipPaste(strings.Repeat("a", LargePasteThreshold-1)) {
-		t.Fatal("short single-line paste should not chip")
+	if ShouldChipPaste(strings.Repeat("a", ChipMinRunes)) {
+		t.Fatal("150-rune single line should not chip")
 	}
-	if !ShouldChipPaste(strings.Repeat("a", LargePasteThreshold)) {
-		t.Fatal("large paste should chip")
+	if !ShouldChipPaste(strings.Repeat("a", ChipMinRunes+1)) {
+		t.Fatal("151-rune paste should chip")
 	}
 	if ShouldChipPaste("hello\n") {
 		t.Fatal("trailing newline alone should not chip")
 	}
-	if !ShouldChipPaste("a\nb") {
-		t.Fatal("multiline paste should chip")
+	if ShouldChipPaste("a\nb") {
+		t.Fatal("two-line paste should stay as text")
+	}
+	if !ShouldChipPaste("a\nb\nc") {
+		t.Fatal("three-line paste should chip")
+	}
+	if !ShouldChipPaste(strings.Repeat("a", LargePasteThreshold)) {
+		t.Fatal("large paste should chip")
+	}
+}
+
+func TestFileRefFromPaste(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(file, []byte("hi"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := FileRefFromPaste(file+"\n", dir)
+	if !ok || got != "@file:notes.txt" {
+		t.Fatalf("file ref = %q ok=%v", got, ok)
+	}
+	got, ok = FileRefFromPaste(dir, dir)
+	if !ok || got != "@folder:." {
+		t.Fatalf("dir ref = %q ok=%v", got, ok)
+	}
+	if _, ok := FileRefFromPaste("https://example.com/a.go", dir); ok {
+		t.Fatal("url should not become a file ref")
+	}
+	if _, ok := FileRefFromPaste("not-a-path", dir); ok {
+		t.Fatal("bare word should not become a file ref")
 	}
 }
 

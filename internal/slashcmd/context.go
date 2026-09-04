@@ -50,19 +50,21 @@ type RuntimeDependencies struct {
 
 // UIDependencies groups UI callbacks and panel integrations.
 type UIDependencies struct {
-	App                *chat.ChatApp
-	StatusLineManager  StatusLineManager
-	OpenModelPicker    func()
-	RestoreChatHistory func(app *chat.ChatApp, msgs []agentcore.Message)
-	ShowStatsDialog    func(app *chat.ChatApp, ca *agent.CovoAgent)
-	ShowStatusInfo     func(app *chat.ChatApp, ca *agent.CovoAgent, ag *agentcore.Agent)
-	ShowRewindDialog   func(app *chat.ChatApp, snapshotFn func() agentcore.StateSnapshot, restoreFn func(agentcore.StateSnapshot))
-	ApplyNamedTheme    func(name string)
-	OpenChangedFiles   func()
-	OpenMCPMarketplace func()
-	OpenSettings       func()
-	OpenPromptQueue    func()
-	OpenDashboard      func()
+	App                  *chat.ChatApp
+	StatusLineManager    StatusLineManager
+	OpenModelPicker      func()
+	RestoreChatHistory   func(app *chat.ChatApp, msgs []agentcore.Message)
+	ShowStatsDialog      func(app *chat.ChatApp, ca *agent.CovoAgent)
+	ShowStatusInfo       func(app *chat.ChatApp, ca *agent.CovoAgent, ag *agentcore.Agent)
+	ShowRewindDialog     func(app *chat.ChatApp, snapshotFn func() agentcore.StateSnapshot, restoreFn func(agentcore.StateSnapshot))
+	ApplyNamedTheme      func(name string)
+	OpenChangedFiles     func()
+	OpenMCPMarketplace   func()
+	OpenSettings         func()
+	OpenPromptQueue      func()
+	OpenDashboard        func()
+	StashComposerDraft   func()
+	RestoreComposerDraft func()
 }
 
 // IODependencies groups import/export and clipboard integrations.

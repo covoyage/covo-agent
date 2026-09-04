@@ -172,6 +172,8 @@ func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core
 		ShowTimings:               true,
 		ShowTurns:                 true,
 		AltScreen:                 true,
+		Scrollback:                s.historyMode == "scrollback",
+		ProbeTerminal:             true,
 		EditorPlaceholder:         i18n.T("app.composer_placeholder"),
 		EditorStartingPlaceholder: i18n.T("system.starting"),
 		EditorBusyPlaceholder:     i18n.T("app.composer_busy"),
@@ -223,6 +225,9 @@ func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core
 			s.handleImagePaste()
 		},
 		OnTextPaste: func(text string) (string, bool) {
+			if ref, ok := agentui.FileRefFromPaste(text, s.workingDir); ok {
+				return ref, true
+			}
 			if !agentui.ShouldChipPaste(text) {
 				return "", false
 			}
@@ -290,17 +295,19 @@ func (s *interactiveSession) wireFooter() {
 			}
 			return replacement
 		},
-		SwitchToMode:      s.switchToMode,
-		SwitchModel:       s.switchModel,
-		SwitchProvider:    s.switchProvider,
-		OpenModelPicker:   s.openModelPicker,
-		OpenSettings:      s.openSettings,
-		OpenPromptQueue:   s.showPromptQueue,
-		BackgroundManager: s.bgManager,
-		StatusLineManager: s.statusLineMgr,
-		WorkingDir:        s.workingDir,
-		HomeDir:           s.homeDir,
-		ChangedFiles:      s.changedFiles,
+		SwitchToMode:         s.switchToMode,
+		SwitchModel:          s.switchModel,
+		SwitchProvider:       s.switchProvider,
+		OpenModelPicker:      s.openModelPicker,
+		OpenSettings:         s.openSettings,
+		OpenPromptQueue:      s.showPromptQueue,
+		StashComposerDraft:   s.stashComposerDraft,
+		RestoreComposerDraft: s.restoreComposerDraft,
+		BackgroundManager:    s.bgManager,
+		StatusLineManager:    s.statusLineMgr,
+		WorkingDir:           s.workingDir,
+		HomeDir:              s.homeDir,
+		ChangedFiles:         s.changedFiles,
 	})
 	s.statusLineMgr.SetRenderFn("mode", func(pal *theme.Palette) string {
 		md := s.stickyFooter.Snapshot().Mode

@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/alecthomas/chroma/v2 v2.27.0
-	github.com/covoyage/covonaut v1.1.0
+	github.com/covoyage/covonaut v1.1.1
 	github.com/gobwas/ws v1.4.0
 	github.com/google/uuid v1.6.0
 	github.com/spf13/cobra v1.10.2

@@ -161,6 +161,26 @@ func DisplayConfigFromCLI(cfg *cli.Config) (showReasoning bool, thinkingMode str
 	return showReasoning, thinkingMode
 }
 
+// HistoryModeFromCLI returns the transcript display strategy.
+// "virtualized" (default) keeps the full tree in ChatHistory and
+// assembles only the visible window. "scrollback" archives completed
+// turns to the terminal's native scrollback buffer.
+func HistoryModeFromCLI(cfg *cli.Config) string {
+	mode := "virtualized"
+	if cfg != nil && cfg.Display != nil && cfg.Display.HistoryMode != "" {
+		mode = cfg.Display.HistoryMode
+	}
+	if v := os.Getenv("COVO_HISTORY_MODE"); v != "" {
+		mode = v
+	}
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "scrollback", "native":
+		return "scrollback"
+	default:
+		return "virtualized"
+	}
+}
+
 // ThinkingConfigFromCLI builds the thinking/reasoning config from config file and env.
 // Accepts effort-level values (none/minimal/low/medium/high/xhigh)
 // and maps them to covonaut's internal representation.

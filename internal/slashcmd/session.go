@@ -78,6 +78,9 @@ func handleSession(sctx *SlashContext, parts []string) bool {
 		if mgr == nil {
 			return
 		}
+		if sctx.UI.StashComposerDraft != nil {
+			sctx.UI.StashComposerDraft()
+		}
 		if err := mgr.SessionManager().ResumeSession(sctx.Runtime.Context, item.ID); err != nil {
 			sctx.Runtime.State.UI().PrintError(fmt.Errorf("resume session: %w", err))
 			return
@@ -85,6 +88,9 @@ func handleSession(sctx *SlashContext, parts []string) bool {
 		snap, _ := mgr.SessionManager().LoadSession(sctx.Runtime.Context, item.ID)
 		mgr.Core().State().Restore(snap)
 		sctx.UI.RestoreChatHistory(sctx.UI.App, snap.Messages)
+		if sctx.UI.RestoreComposerDraft != nil {
+			sctx.UI.RestoreComposerDraft()
+		}
 		sctx.Runtime.State.UI().PrintSystem(i18n.T("system.session_resumed", "id", item.ID[:8]))
 		sctx.Runtime.State.UI().StatusBar().SetMode(i18n.T("app.session_title", "id", item.ID[:8]))
 	})
@@ -166,6 +172,9 @@ func handleResume(sctx *SlashContext, parts []string) bool {
 	}
 	sessionID := parts[1]
 	ctx := sctx.Runtime.Context
+	if sctx.UI.StashComposerDraft != nil {
+		sctx.UI.StashComposerDraft()
+	}
 	if err := covoAgent.SessionManager().ResumeSession(ctx, sessionID); err != nil {
 		sctx.UI.App.PrintError(fmt.Errorf("resume session: %w", err))
 		return true
@@ -178,6 +187,9 @@ func handleResume(sctx *SlashContext, parts []string) bool {
 		if sctx.UI.App != nil {
 			sctx.UI.RestoreChatHistory(sctx.UI.App, snap.Messages)
 		}
+	}
+	if sctx.UI.RestoreComposerDraft != nil {
+		sctx.UI.RestoreComposerDraft()
 	}
 	return true
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/diffrender"
 	"github.com/covoyage/covonaut/agentcore"
 	"github.com/covoyage/covonaut/tui/chat"
+	"github.com/covoyage/covonaut/tui/component"
 	"github.com/covoyage/covonaut/tui/core"
 	"github.com/covoyage/covonaut/tui/theme"
 
@@ -52,6 +53,7 @@ type interactiveSession struct {
 
 	showReasoning bool
 	thinkingMode  string
+	historyMode   string
 	gitTracker    *runtimeapp.GitBranchTracker
 
 	agent        *agent.CovoAgent
@@ -67,10 +69,61 @@ type interactiveSession struct {
 	slashContext   *slashcmd.ContextBuilder
 	changedFiles   *ChangedFilesTracker
 
-	busy          atomic.Bool
-	cancelRun     atomic.Pointer[context.CancelFunc]
-	pendingImages sync.Map
-	pasteStore    *agentui.PasteStore
+	busy           atomic.Bool
+	cancelRun      atomic.Pointer[context.CancelFunc]
+	pendingImages  sync.Map
+	pasteStore     *agentui.PasteStore
+	composerDrafts map[string]component.EditorDraft
+}
+
+func (s *interactiveSession) currentSessionID() string {
+	if s.agentRuntime == nil {
+		return ""
+	}
+	ca := s.agentRuntime.Current()
+	if ca == nil {
+		return ""
+	}
+	return ca.SessionManager().CurrentID()
+}
+
+func (s *interactiveSession) stashComposerDraft() {
+	if s.app == nil {
+		return
+	}
+	ed := s.app.Editor()
+	if ed == nil {
+		return
+	}
+	id := s.currentSessionID()
+	if id == "" {
+		return
+	}
+	draft := ed.CaptureDraft()
+	if s.composerDrafts == nil {
+		s.composerDrafts = make(map[string]component.EditorDraft)
+	}
+	if draft.Empty() {
+		delete(s.composerDrafts, id)
+		return
+	}
+	s.composerDrafts[id] = draft
+}
+
+func (s *interactiveSession) restoreComposerDraft() {
+	if s.app == nil {
+		return
+	}
+	ed := s.app.Editor()
+	if ed == nil {
+		return
+	}
+	id := s.currentSessionID()
+	if id == "" {
+		ed.Clear()
+		return
+	}
+	ed.RestoreDraft(s.composerDrafts[id])
 }
 
 // RunInteractive launches the interactive TUI, or the one-shot path when a
@@ -202,6 +255,7 @@ func (s *interactiveSession) run() {
 	workingDirOverride = workingDir
 
 	s.showReasoning, s.thinkingMode = shared.DisplayConfigFromCLI(s.cfg)
+	s.historyMode = shared.HistoryModeFromCLI(s.cfg)
 	s.modelContextLen = shared.ResolveModelContextLength(s.cfg, s.providerType, s.model)
 
 	var skillURLs []string
@@ -239,6 +293,7 @@ func (s *interactiveSession) run() {
 		log.Fatalf("start tui: %v", err)
 	}
 	defer s.app.Stop()
+	agentui.CaptureTerminalProbe(s.app)
 	if typeahead != "" {
 		if ed := s.app.Editor(); ed != nil {
 			ed.SetValue(ed.GetValue() + typeahead)

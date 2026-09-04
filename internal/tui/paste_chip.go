@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -15,6 +17,11 @@ import (
 // LargePasteThreshold is the byte size above which a single-line paste is
 // stored as a chip instead of exploding the composer.
 const LargePasteThreshold = 10 * 1024
+
+// ChipMinLines / ChipMinRunes: two-line snippets stay as text; only
+// larger pastes collapse to a chip.
+const ChipMinLines = 3
+const ChipMinRunes = 150
 
 const pasteChipPrefix = "[Pasted ~"
 
@@ -81,7 +88,72 @@ func (s *PasteStore) Expand(input string) string {
 
 // ShouldChip reports whether pasted text should be collapsed.
 func ShouldChipPaste(text string) bool {
-	return pasteLineCount(text) >= 2 || len(text) >= LargePasteThreshold
+	t := strings.TrimRight(text, "\r\n")
+	if t == "" {
+		return false
+	}
+	if pasteLineCount(text) >= ChipMinLines {
+		return true
+	}
+	return len([]rune(t)) > ChipMinRunes || len(text) >= LargePasteThreshold
+}
+
+// FileRefFromPaste returns an @file/@folder reference when the paste is a
+// single existing local path. consume is false when the text should be
+// inserted unchanged.
+func FileRefFromPaste(text, cwd string) (string, bool) {
+	path := pastedLocalPath(text)
+	if path == "" {
+		return "", false
+	}
+	resolved := path
+	if cwd != "" && !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(cwd, resolved)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", false
+	}
+	kind := "file"
+	if info.IsDir() {
+		kind = "folder"
+	}
+	display := resolved
+	if cwd != "" {
+		if rel, err := filepath.Rel(cwd, resolved); err == nil && rel != "" && !strings.HasPrefix(rel, "..") {
+			display = rel
+		}
+	}
+	if strings.ContainsAny(display, " \t") {
+		return "@" + kind + ":`" + display + "`", true
+	}
+	return "@" + kind + ":" + display, true
+}
+
+func pastedLocalPath(text string) string {
+	t := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n"))
+	if t == "" || strings.Contains(t, "\n") {
+		return ""
+	}
+	if strings.Contains(t, "://") {
+		return ""
+	}
+	if strings.HasPrefix(t, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return ""
+		}
+		if t == "~" {
+			return home
+		}
+		if strings.HasPrefix(t, "~/") {
+			t = filepath.Join(home, t[2:])
+		}
+	}
+	if !strings.ContainsAny(t, `/\`) && !filepath.IsAbs(t) {
+		return ""
+	}
+	return t
 }
 
 // StylePasteChips wraps chip tokens in the composer using the active theme.

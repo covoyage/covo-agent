@@ -75,6 +75,7 @@ func (s *interactiveSession) openSessions() {
 		if mgr == nil {
 			return
 		}
+		s.stashComposerDraft()
 		if err := mgr.SessionManager().ResumeSession(context.Background(), item.ID); err != nil {
 			loadUIBus().PrintError(fmt.Errorf("resume session: %w", err))
 			return
@@ -82,6 +83,7 @@ func (s *interactiveSession) openSessions() {
 		snap, _ := mgr.SessionManager().LoadSession(context.Background(), item.ID)
 		mgr.Core().State().Restore(snap)
 		shared.RestoreChatHistory(s.app, snap.Messages)
+		s.restoreComposerDraft()
 		loadUIBus().PrintSystem(i18n.T("system.session_resumed", "id", item.ID[:8]))
 		loadUIBus().StatusBar().SetMode(i18n.T("app.session_title", "id", item.ID[:8]))
 	})
@@ -173,6 +175,7 @@ func (s *interactiveSession) openSessionTree() {
 		if mgr == nil {
 			return
 		}
+		s.stashComposerDraft()
 		if err := mgr.SessionManager().ResumeSession(context.Background(), sessionID); err != nil {
 			loadUIBus().PrintError(fmt.Errorf("resume session: %w", err))
 			return
@@ -180,6 +183,7 @@ func (s *interactiveSession) openSessionTree() {
 		snap, _ := mgr.SessionManager().LoadSession(context.Background(), sessionID)
 		mgr.Core().State().Restore(snap)
 		shared.RestoreChatHistory(s.app, snap.Messages)
+		s.restoreComposerDraft()
 		loadUIBus().PrintSystem(i18n.T("system.session_resumed", "id", sessionID[:8]))
 		loadUIBus().StatusBar().SetMode(i18n.T("app.session_title", "id", sessionID[:8]))
 		loadUIBus().Host().RequestRender()
@@ -326,6 +330,7 @@ func (s *interactiveSession) runDashboardItem(item agentui.PickerItem) {
 		if mgr == nil || sessionID == "" {
 			return
 		}
+		s.stashComposerDraft()
 		if err := mgr.SessionManager().ResumeSession(context.Background(), sessionID); err != nil {
 			loadUIBus().PrintError(fmt.Errorf("resume session: %w", err))
 			return
@@ -333,6 +338,7 @@ func (s *interactiveSession) runDashboardItem(item agentui.PickerItem) {
 		snap, _ := mgr.SessionManager().LoadSession(context.Background(), sessionID)
 		mgr.Core().State().Restore(snap)
 		shared.RestoreChatHistory(s.app, snap.Messages)
+		s.restoreComposerDraft()
 		shortID := sessionID
 		if len(shortID) > 8 {
 			shortID = shortID[:8]

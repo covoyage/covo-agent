@@ -9,7 +9,7 @@ package externalagent
 // final-answer selection.
 //
 // Wire format: JSON-RPC "lite" over newline-delimited JSON on stdin/stdout
-// (the "jsonrpc" header is omitted, matching codex-rs/app-server):
+// (the "jsonrpc" header is omitted):
 //
 //	out:  {"id":1,"method":"initialize","params":{...}}
 //	in:   {"id":1,"result":{...}}

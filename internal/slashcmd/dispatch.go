@@ -285,7 +285,13 @@ func handleClear(sctx *SlashContext, parts []string) bool {
 
 // handleQuit handles /quit, /exit, /q
 func handleQuit(sctx *SlashContext, parts []string) bool {
-	safego.SafeGo(func() { _ = sctx.UI.App.Stop() }, nil)
+	if sctx.UI.App == nil {
+		return true
+	}
+	app := sctx.UI.App
+	// Stop off the event loop so terminal teardown cannot deadlock the
+	// in-flight submit/update. Capture app because sctx is request-scoped.
+	safego.SafeGo(func() { _ = app.Stop() }, nil)
 	return true
 }
 

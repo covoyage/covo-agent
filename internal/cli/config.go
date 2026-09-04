@@ -81,6 +81,7 @@ type DisplayConfig struct {
 	ThinkingMode   string `yaml:"thinking_mode,omitempty"`   // collapsed / truncated / full (default: collapsed)
 	Theme          string `yaml:"theme,omitempty"`           // color theme preset name (e.g. "dracula", "nord")
 	AmbiguousWidth string `yaml:"ambiguous_width,omitempty"` // East-Asian ambiguous char width: auto (default), narrow, wide
+	HistoryMode    string `yaml:"history_mode,omitempty"`    // virtualized (default) or scrollback
 }
 
 // AmbiguousWidthMode returns the configured East-Asian ambiguous-character

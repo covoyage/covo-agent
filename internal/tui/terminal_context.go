@@ -4,6 +4,17 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
+
+	"github.com/covoyage/covonaut/tui/terminal"
+)
+
+// TerminalContextGlobal 缓存进程级终端能力快照：首次通过 TerminalContext()
+// 访问时从环境初始化，之后可由 ApplyTerminalProbe 用引擎端探测结果润色。
+var (
+	terminalCtxOnce       sync.Once
+	terminalCtxMu         sync.RWMutex
+	terminalContextGlobal = &TerminalContext{OS: runtime.GOOS}
 )
 
 // ---------------------------------------------------------------------------
@@ -161,9 +172,18 @@ func (c *TerminalContext) QuitKey() string {
 }
 
 // NeedsModifierRescue 返回当前终端是否需要 macOS CoreGraphics 修饰键侧信道。
-// Apple Terminal 丢失 Shift/Option/Cmd + Enter 修饰位。
+// 原生 macOS 终端（Apple Terminal、iTerm2）以及无法识别的 macOS 裸终端都有
+// 丢失 Shift/Option/Cmd + Enter 修饰位的风险；CoreGraphics 快照是幂等的
+// （只反映物理按键），因此覆盖得宽一些没有副作用。
 func (c *TerminalContext) NeedsModifierRescue() bool {
-	return c.Brand == BrandAppleTerminal
+	if c.OS != "darwin" {
+		return false
+	}
+	switch c.Brand {
+	case BrandAppleTerminal, BrandITerm2:
+		return true
+	}
+	return c.Brand == BrandUnknown && c.TERMProgram == ""
 }
 
 // --- internal detection helpers ---
@@ -235,4 +255,59 @@ func detectKittyKeyboard(brand TerminalBrand, mux MultiplexerKind) bool {
 	default:
 		return false
 	}
+}
+
+// ApplyTerminalProbe 用引擎端（covonaut）主动探测的结果润色终端上下文。
+// covonaut 在 Start 时对可探测的终端（无 env 快路径命中的）做一次 ≤200ms 的
+// DA1/DA2/XTVERSION 探测，结果合并 env 后由引擎缓存；这里只把探测补充到的
+// 信息（品牌、真彩色、以及 kitty keyboard protocol 证据）回写本地上下文。
+func ApplyTerminalProbe(caps terminal.Capabilities) {
+	if !caps.Probed || caps.Brand == "" && !caps.TrueColor {
+		return
+	}
+	cp := *GetTerminalContext()
+	if caps.Brand != "" {
+		cp.Brand = brandFromNormalized(caps.Brand)
+	}
+	if caps.TrueColor && cp.Color != ColorTrueColor {
+		cp.Color = ColorTrueColor
+	}
+	if caps.KittyKeyboard {
+		cp.KittyKeyboardLikely = true
+	}
+	storeTerminalContext(&cp)
+}
+
+// brandFromNormalized maps covonaut 的归一化品牌 token 到本地 TerminalBrand。
+func brandFromNormalized(token string) TerminalBrand {
+	switch token {
+	case "kitty":
+		return BrandKitty
+	case "wezterm":
+		return BrandWezTerm
+	case "ghostty":
+		return BrandGhostty
+	case "alacritty":
+		return BrandAlacritty
+	case "iterm":
+		return BrandITerm2
+	default:
+		return BrandUnknown
+	}
+}
+
+// GetTerminalContext 返回进程级终端能力快照。首次访问时从环境初始化，之后可被
+// ApplyTerminalProbe 润色。返回值为不可变快照，可安全并发读取。
+func GetTerminalContext() *TerminalContext {
+	terminalCtxOnce.Do(func() { storeTerminalContext(DetectTerminalContext()) })
+	terminalCtxMu.RLock()
+	defer terminalCtxMu.RUnlock()
+	return terminalContextGlobal
+}
+
+// storeTerminalContext 原子地替换进程级快照。
+func storeTerminalContext(c *TerminalContext) {
+	terminalCtxMu.Lock()
+	terminalContextGlobal = c
+	terminalCtxMu.Unlock()
 }

@@ -18,25 +18,27 @@ import (
 )
 
 type slashCompositionConfig struct {
-	App               *chat.ChatApp
-	Busy              *atomic.Bool
-	Agents            *runtimeapp.AgentRuntime
-	State             *runtimeapp.RuntimeState
-	ActiveMode        func() agent.AgentMode
-	CreateAgent       func(agent.AgentMode) *agent.CovoAgent
-	ReplaceAgent      func(agent.AgentMode, bool) *agent.CovoAgent
-	SwitchToMode      func(agent.AgentMode)
-	SwitchModel       func(string)
-	SwitchProvider    func(string) error
-	OpenModelPicker   func()
-	OpenSettings      func()
-	OpenPromptQueue   func()
-	OpenDashboard     func()
-	BackgroundManager slashcmd.BackgroundManager
-	StatusLineManager slashcmd.StatusLineManager
-	WorkingDir        string
-	HomeDir           string
-	ChangedFiles      *ChangedFilesTracker
+	App                  *chat.ChatApp
+	Busy                 *atomic.Bool
+	Agents               *runtimeapp.AgentRuntime
+	State                *runtimeapp.RuntimeState
+	ActiveMode           func() agent.AgentMode
+	CreateAgent          func(agent.AgentMode) *agent.CovoAgent
+	ReplaceAgent         func(agent.AgentMode, bool) *agent.CovoAgent
+	SwitchToMode         func(agent.AgentMode)
+	SwitchModel          func(string)
+	SwitchProvider       func(string) error
+	OpenModelPicker      func()
+	OpenSettings         func()
+	OpenPromptQueue      func()
+	OpenDashboard        func()
+	StashComposerDraft   func()
+	RestoreComposerDraft func()
+	BackgroundManager    slashcmd.BackgroundManager
+	StatusLineManager    slashcmd.StatusLineManager
+	WorkingDir           string
+	HomeDir              string
+	ChangedFiles         *ChangedFilesTracker
 }
 
 func newSlashContextBuilder(config slashCompositionConfig) *slashcmd.ContextBuilder {
@@ -65,10 +67,12 @@ func newSlashContextBuilder(config slashCompositionConfig) *slashcmd.ContextBuil
 			OpenChangedFiles: func() {
 				openChangedFilesPanel(config.ChangedFiles, config.WorkingDir)
 			},
-			OpenMCPMarketplace: openMCPMarketplace,
-			OpenSettings:       config.OpenSettings,
-			OpenPromptQueue:    config.OpenPromptQueue,
-			OpenDashboard:      config.OpenDashboard,
+			OpenMCPMarketplace:   openMCPMarketplace,
+			OpenSettings:         config.OpenSettings,
+			OpenPromptQueue:      config.OpenPromptQueue,
+			OpenDashboard:        config.OpenDashboard,
+			StashComposerDraft:   config.StashComposerDraft,
+			RestoreComposerDraft: config.RestoreComposerDraft,
 		},
 		IO: slashcmd.IODependencies{
 			ExportSessionHTML:     exportSessionHTML,

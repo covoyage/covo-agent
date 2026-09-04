@@ -1,15 +1,13 @@
 package externalagent
 
 // claudeProvider drives the Claude Code CLI over its stream-json control
-// protocol, mirroring the official Claude Agent SDK's local (subprocess)
-// transport. The CLI subprocess owns the full agent loop (tool execution,
-// context management, retries, stopping conditions); this provider implements
-// the control-protocol side: the initialize handshake, sending the user
-// prompt, answering tool-permission control requests, interrupting on
-// cancellation, and collecting the final result.
+// protocol via a local subprocess. The CLI subprocess owns the full agent
+// loop (tool execution, context management, retries, stopping conditions);
+// this provider implements the control-protocol side: the initialize
+// handshake, sending the user prompt, answering tool-permission control
+// requests, interrupting on cancellation, and collecting the final result.
 //
-// Wire format (JSON-lines over stdin/stdout), matching
-// anthropics/claude-agent-sdk:
+// Wire format is JSON-lines over stdin/stdout:
 //
 //	out:  {"type":"control_request","request_id":"req_1_..","request":{...}}
 //	in:   {"type":"control_response","response":{"subtype":"success",..}}
