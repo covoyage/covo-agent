@@ -19,6 +19,7 @@ func TestBuildSlashSuggestions_HasAllCommands(t *testing.T) {
 		"compact", "curator",
 		"retry",
 		"background", "queue", "steer", "cancel", "logs", "respawn", "agents",
+		"btw", "thinking", "verbose", "busy",
 		"statusline", "rewind", "plan", "act", "stats",
 		"usage", "vim", "recap", "focus", "quit"}
 	for _, cmd := range required {

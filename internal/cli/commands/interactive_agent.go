@@ -49,6 +49,28 @@ func (s *interactiveSession) createAgent(m agent.AgentMode) *agent.CovoAgent {
 	return newCA
 }
 
+func sideQuestionToolAllowed(name string) bool {
+	switch name {
+	case "read", "read_file", "grep", "glob", "ls", "list", "search",
+		"web_search", "web_fetch", "code_navigate", "search_files", "find":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *interactiveSession) createSideAgent(m agent.AgentMode) *agent.CovoAgent {
+	req := s.requestFor(m, s.llm, s.providerType, s.model)
+	req.ToolNameFilter = sideQuestionToolAllowed
+	newCA, err := s.agentFactory.New(req)
+	if err != nil {
+		log.Printf("create side agent: %v", err)
+		return nil
+	}
+	s.prepareAgent(newCA)
+	return newCA
+}
+
 func (s *interactiveSession) replaceAgent(request runtimeapp.AgentRequest, preserveState bool) (*agent.CovoAgent, error) {
 	replacement, err := s.agentRuntime.Replace(request, preserveState)
 	if err != nil {

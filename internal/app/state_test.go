@@ -1,9 +1,11 @@
 package app
 
 import (
+	"context"
 	"sync"
 	"testing"
 
+	"github.com/covoyage/covo-agent/internal/promptqueue"
 	"github.com/covoyage/covo-agent/internal/tui"
 )
 
@@ -53,6 +55,102 @@ func TestRuntimeStateSettersAndPendingTake(t *testing.T) {
 	}
 	if got := state.TakePendingInput(); got != "" {
 		t.Fatalf("second TakePendingInput() = %q", got)
+	}
+}
+
+func TestRuntimeStateEnqueueRejectsWhenFull(t *testing.T) {
+	state := NewRuntimeState()
+	q := state.PromptQueue()
+	for q.Len() < q.MaxSize() {
+		if res := state.EnqueuePrompt("item"); !res.OK {
+			t.Fatalf("expected enqueue ok at len %d", q.Len())
+		}
+	}
+	res := state.EnqueuePrompt("overflow")
+	if !res.Full || res.OK {
+		t.Fatalf("expected full rejection, got %+v", res)
+	}
+	if q.Len() != q.MaxSize() {
+		t.Fatalf("len=%d want %d", q.Len(), q.MaxSize())
+	}
+	front := state.EnqueuePromptFront("interrupt")
+	if !front.Full {
+		t.Fatal("front enqueue should also reject when full")
+	}
+}
+
+func TestRuntimeStateResetPromptQueue(t *testing.T) {
+	state := NewRuntimeState()
+	state.EnqueuePrompt("one")
+	state.EnqueuePrompt("two")
+	state.SetPendingInput("legacy")
+	state.ResetPromptQueue()
+	if state.HasQueuedPrompts() {
+		t.Fatal("queue should be empty after reset")
+	}
+	if got := state.TakePendingInput(); got != "" {
+		t.Fatalf("pending leftover %q", got)
+	}
+}
+
+type memQueueStore struct {
+	mu   sync.Mutex
+	data map[string][]promptqueue.Entry
+}
+
+func (m *memQueueStore) SavePromptQueue(_ context.Context, sessionID string, entries []promptqueue.Entry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.data == nil {
+		m.data = map[string][]promptqueue.Entry{}
+	}
+	cp := append([]promptqueue.Entry(nil), entries...)
+	m.data[sessionID] = cp
+	return nil
+}
+
+func (m *memQueueStore) LoadPromptQueue(_ context.Context, sessionID string) ([]promptqueue.Entry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]promptqueue.Entry(nil), m.data[sessionID]...), nil
+}
+
+func TestRuntimeStateSwitchPromptQueue(t *testing.T) {
+	store := &memQueueStore{data: map[string][]promptqueue.Entry{}}
+	state := NewRuntimeState()
+	state.BindPromptQueueSession(context.Background(), store, "sess-a")
+	if res := state.EnqueuePrompt("from-a"); !res.OK {
+		t.Fatal(res)
+	}
+	state.SwitchPromptQueue(context.Background(), store, "sess-b")
+	if state.HasQueuedPrompts() {
+		t.Fatal("sess-b should start empty")
+	}
+	if res := state.EnqueuePrompt("from-b"); !res.OK {
+		t.Fatal(res)
+	}
+	state.SwitchPromptQueue(context.Background(), store, "sess-a")
+	got := state.TakePendingInput()
+	if got != "from-a" {
+		t.Fatalf("restored %q", got)
+	}
+}
+
+func TestRuntimeStateEnqueueMerged(t *testing.T) {
+	state := NewRuntimeState()
+	if res := state.EnqueuePrompt("add tests"); !res.OK {
+		t.Fatal(res)
+	}
+	merged := state.EnqueueMerged("also lint")
+	if !merged.OK || !merged.Merged {
+		t.Fatalf("expected merge, got %+v", merged)
+	}
+	if state.PromptQueue().Len() != 1 {
+		t.Fatalf("len=%d", state.PromptQueue().Len())
+	}
+	got := state.TakePendingInput()
+	if got == "add tests" || got == "also lint" {
+		t.Fatalf("expected combined text, got %q", got)
 	}
 }
 

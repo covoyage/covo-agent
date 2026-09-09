@@ -6,6 +6,7 @@ import (
 	"log"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/covoyage/covonaut/tui"
@@ -153,6 +154,10 @@ func (s *interactiveSession) showPromptQueue() {
 			queue.Remove(entry.ID)
 		}
 		closePane()
+		if s.busy.Load() {
+			s.enqueuePrompt(entry.Text, true)
+			return
+		}
 		s.submitPrompt(context.Background(), entry.Text)
 	})
 	ov = loadUIBus().ShowPanel(pane, 80, 70)
@@ -166,8 +171,9 @@ func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core
 			s.providerType, s.model, s.mode,
 		),
 		ReasoningRenderer: &chat.DefaultReasoningRenderer{
-			Show: s.showReasoning,
-			Mode: s.thinkingMode,
+			Show:   s.showReasoning && s.thinkingMode != "hide",
+			Stream: s.thinkingStream,
+			Mode:   s.thinkingMode,
 		},
 		ShowTimings:               true,
 		ShowTurns:                 true,
@@ -215,10 +221,17 @@ func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core
 			return s.pasteStore.Expand(input)
 		},
 		OnInterrupt: func() {
-			if cf := s.cancelRun.Load(); cf != nil && *cf != nil {
-				(*cf)()
+			if s.sideBusy.Load() {
+				s.cancelSideRun()
+				loadUIBus().PrintSystem(i18n.T("system.btw_cancelled"))
+				return
+			}
+			if s.interruptCurrentRun() {
 				loadUIBus().PrintSystem(i18n.T("system.interrupted"))
 			}
+		},
+		CanInterrupt: func() bool {
+			return s.sideBusy.Load()
 		},
 		OnHistoryJump: s.handleHistoryJump,
 		OnImagePaste: func() {
@@ -281,13 +294,17 @@ func (s *interactiveSession) wireFooter() {
 	s.statusLineMgr = agentui.NewStatusLineManager()
 	s.stickyFooter.SetStatusLineManager(s.statusLineMgr)
 	s.slashContext = newSlashContextBuilder(slashCompositionConfig{
-		App:           s.app,
-		Busy:          &s.busy,
-		Agents:        s.agentRuntime,
-		State:         shared.RuntimeState,
-		OpenDashboard: s.openDashboard,
-		ActiveMode:    func() agent.AgentMode { return s.mode },
-		CreateAgent:   s.createAgent,
+		App:             s.app,
+		Busy:            &s.busy,
+		SideBusy:        &s.sideBusy,
+		CancelSide:      s.cancelSideRun,
+		SetSideCancel:   s.setSideCancel,
+		Agents:          s.agentRuntime,
+		State:           shared.RuntimeState,
+		OpenDashboard:   s.openDashboard,
+		ActiveMode:      func() agent.AgentMode { return s.mode },
+		CreateAgent:     s.createAgent,
+		CreateSideAgent: s.createSideAgent,
 		ReplaceAgent: func(mode agent.AgentMode, preserveState bool) *agent.CovoAgent {
 			replacement, err := s.replaceAgent(s.requestFor(mode, s.llm, s.providerType, s.model), preserveState)
 			if err != nil {
@@ -373,6 +390,25 @@ func (s *interactiveSession) wireFooter() {
 			return ""
 		}
 		return pal.Dim.Render(fmt.Sprintf("$%.4f", cost))
+	})
+	s.statusLineMgr.SetRenderFn("activity", func(pal *theme.Palette) string {
+		var parts []string
+		if s.busy.Load() {
+			parts = append(parts, i18n.T("statusline.activity_busy"))
+		}
+		if queue := shared.RuntimeState.PromptQueue(); queue != nil && !queue.IsEmpty() {
+			parts = append(parts, i18n.T("statusline.activity_queue", "count", strconv.Itoa(queue.Len())))
+		}
+		if s.busy.Load() && busyInputMode() == "steer" {
+			parts = append(parts, i18n.T("statusline.activity_steer"))
+		}
+		if s.sideBusy.Load() {
+			parts = append(parts, i18n.T("statusline.activity_side"))
+		}
+		if len(parts) == 0 {
+			return ""
+		}
+		return pal.Accent.Render(strings.Join(parts, " · "))
 	})
 	s.statusLineMgr.SetRenderFn("queued", func(pal *theme.Palette) string {
 		queue := shared.RuntimeState.PromptQueue()

@@ -88,3 +88,12 @@ func TestAgentFactoryReadsCurrentProfileForEveryBuild(t *testing.T) {
 		t.Fatalf("updated ToolProfile = %q", got)
 	}
 }
+
+func TestAgentFactoryAppliesToolNameFilter(t *testing.T) {
+	factory := NewAgentFactory(agent.CovoAgentConfig{}, nil)
+	filter := func(name string) bool { return name == "read" }
+	got := factory.Config(AgentRequest{ToolNameFilter: filter})
+	if got.ToolNameFilter == nil || !got.ToolNameFilter("read") || got.ToolNameFilter("bash") {
+		t.Fatal("ToolNameFilter was not applied")
+	}
+}

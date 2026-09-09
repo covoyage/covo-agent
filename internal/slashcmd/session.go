@@ -85,6 +85,9 @@ func handleSession(sctx *SlashContext, parts []string) bool {
 			sctx.Runtime.State.UI().PrintError(fmt.Errorf("resume session: %w", err))
 			return
 		}
+		if sctx.Runtime.State != nil {
+			sctx.Runtime.State.SwitchPromptQueue(sctx.Runtime.Context, mgr.SessionManager(), item.ID)
+		}
 		snap, _ := mgr.SessionManager().LoadSession(sctx.Runtime.Context, item.ID)
 		mgr.Core().State().Restore(snap)
 		sctx.UI.RestoreChatHistory(sctx.UI.App, snap.Messages)
@@ -180,6 +183,9 @@ func handleResume(sctx *SlashContext, parts []string) bool {
 		return true
 	}
 	fullID := covoAgent.SessionManager().CurrentID()
+	if sctx.Runtime.State != nil {
+		sctx.Runtime.State.SwitchPromptQueue(ctx, covoAgent.SessionManager(), fullID)
+	}
 	sctx.UI.App.PrintSystem(i18n.T("system.resumed_session", "id", fullID[:8]))
 	if ag := sctx.Runtime.Agents.Core(); ag != nil {
 		snap, _ := covoAgent.SessionManager().LoadSession(ctx, fullID)

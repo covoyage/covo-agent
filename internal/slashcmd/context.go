@@ -33,19 +33,23 @@ type ImportSessionFunc func(ctx context.Context, mgr interface{}, path string) (
 
 // RuntimeDependencies groups runtime controls and mutable runtime state.
 type RuntimeDependencies struct {
-	Context        context.Context
-	Busy           *atomic.Bool
-	Agents         *runtimeapp.AgentRuntime
-	State          *runtimeapp.RuntimeState
-	ActiveMode     func() agent.AgentMode
-	CreateAgent    func(agent.AgentMode) *agent.CovoAgent
-	ReplaceAgent   func(agent.AgentMode, bool) *agent.CovoAgent
-	SwitchToMode   func(agent.AgentMode)
-	SwitchModel    func(string)
-	SwitchProvider func(string) error
-	WorkingDir     string
-	ProviderType   string
-	Model          string
+	Context         context.Context
+	Busy            *atomic.Bool
+	Agents          *runtimeapp.AgentRuntime
+	State           *runtimeapp.RuntimeState
+	ActiveMode      func() agent.AgentMode
+	CreateAgent     func(agent.AgentMode) *agent.CovoAgent
+	CreateSideAgent func(agent.AgentMode) *agent.CovoAgent
+	ReplaceAgent    func(agent.AgentMode, bool) *agent.CovoAgent
+	CancelSide      func()
+	SetSideCancel   func(context.CancelFunc)
+	SideBusy        *atomic.Bool
+	SwitchToMode    func(agent.AgentMode)
+	SwitchModel     func(string)
+	SwitchProvider  func(string) error
+	WorkingDir      string
+	ProviderType    string
+	Model           string
 }
 
 // UIDependencies groups UI callbacks and panel integrations.

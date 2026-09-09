@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/covoyage/covonaut/agentcore"
 	"github.com/covoyage/covo-agent/internal/session/sqlitefs"
+	"github.com/covoyage/covonaut/agentcore"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver
 )
 
@@ -38,6 +38,10 @@ func NewStore(dir string) (*Store, error) {
 	db.SetMaxIdleConns(1)
 
 	s := &Store{db: db, dir: dir}
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
@@ -115,16 +119,29 @@ func (s *Store) migrate() error {
 		END;
 
 		CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
-	`)
 
-	// Schema v1 → v2: add parent_id, label, summary columns
-	if err == nil {
-		_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN parent_id TEXT DEFAULT ''`)
-		_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN label TEXT DEFAULT ''`)
-		_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN summary TEXT DEFAULT ''`)
+		CREATE TABLE IF NOT EXISTS prompt_queue (
+			session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			seq         INTEGER NOT NULL,
+			id          TEXT NOT NULL,
+			text        TEXT NOT NULL,
+			queued_at   INTEGER NOT NULL,
+			combined    INTEGER NOT NULL DEFAULT 0,
+			source_ids  TEXT DEFAULT '[]',
+			PRIMARY KEY (session_id, seq)
+		);
+		CREATE INDEX IF NOT EXISTS idx_prompt_queue_session ON prompt_queue(session_id);
+	`)
+	if err != nil {
+		return err
 	}
 
-	return err
+	// Schema v1 → v2: add parent_id, label, summary columns
+	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN parent_id TEXT DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN label TEXT DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN summary TEXT DEFAULT ''`)
+
+	return nil
 }
 
 // ---------------------------------------------------------------------------

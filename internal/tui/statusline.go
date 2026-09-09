@@ -35,6 +35,7 @@ func NewStatusLineManager() *StatusLineManager {
 		{ID: "git-branch", Label: "git-branch", Description: i18n.T("statusline.git_desc"), Enabled: true},
 		{ID: "context-used", Label: "context-used", Description: i18n.T("statusline.tokens_desc"), Enabled: true},
 		{ID: "cost", Label: "cost", Description: i18n.T("statusline.cost_desc"), Enabled: true},
+		{ID: "activity", Label: "activity", Description: i18n.T("statusline.activity_desc"), Enabled: true},
 		{ID: "queued", Label: "queued", Description: i18n.T("statusline.queued_desc"), Enabled: true},
 		{ID: "shortcuts", Label: "shortcuts", Description: i18n.T("statusline.shortcuts_desc"), Enabled: true},
 	}}

@@ -10,6 +10,7 @@ import (
 	"github.com/covoyage/covonaut/agentcore"
 	covosession "github.com/covoyage/covonaut/session"
 
+	"github.com/covoyage/covo-agent/internal/promptqueue"
 	"github.com/covoyage/covo-agent/internal/session/sqlite"
 )
 
@@ -242,11 +243,29 @@ func (m *Manager) FormatSessionInfo(info covosession.Info) string {
 		info.ID[:8], marker, fork, updated, info.MessageCount, name, label)
 }
 
+func (m *Manager) SavePromptQueue(ctx context.Context, sessionID string, entries []promptqueue.Entry) error {
+	if m.store == nil {
+		return nil
+	}
+	return m.store.SavePromptQueue(ctx, sessionID, entries)
+}
+
+func (m *Manager) LoadPromptQueue(ctx context.Context, sessionID string) ([]promptqueue.Entry, error) {
+	if m.store == nil {
+		return nil, nil
+	}
+	return m.store.LoadPromptQueue(ctx, sessionID)
+}
+
 func (m *Manager) Close() {
 	if m.currentID != "" && m.store != nil {
-		// If the current session has no messages, clean it up
-		if count, err := m.store.MessageCount(context.Background(), m.currentID); err == nil && count == 0 {
-			_ = m.store.DeleteSession(context.Background(), m.currentID)
+		ctx := context.Background()
+		msgCount, msgErr := m.store.MessageCount(ctx, m.currentID)
+		queueCount, queueErr := m.store.PromptQueueCount(ctx, m.currentID)
+		// Drop unused empty sessions, but keep a session that still has a
+		// queued prompt even if no messages were persisted yet.
+		if msgErr == nil && queueErr == nil && msgCount == 0 && queueCount == 0 {
+			_ = m.store.DeleteSession(ctx, m.currentID)
 		}
 	}
 	m.currentID = ""

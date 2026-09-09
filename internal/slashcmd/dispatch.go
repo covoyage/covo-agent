@@ -61,6 +61,8 @@ var slashDispatch = map[string]slashHandler{
 	"snapshot":          handleSnapshot,
 	"unrevert":          handleUnrevert,
 	"reasoning":         handleReasoning,
+	"thinking":          handleThinking,
+	"verbose":           handleVerbose,
 	"personality":       handlePersonality,
 	"busy":              handleBusy,
 	"template":          handleTemplate,
@@ -272,9 +274,18 @@ func handleClear(sctx *SlashContext, parts []string) bool {
 	if sctx.Services.ResetChangedFiles != nil {
 		sctx.Services.ResetChangedFiles()
 	}
+	if sctx.Runtime.State != nil {
+		sctx.Runtime.State.PersistPromptQueue(sctx.Runtime.Context)
+	}
 	newCA := sctx.Runtime.ReplaceAgent(sctx.Runtime.ActiveMode(), false)
 	if newCA == nil {
 		return true
+	}
+	if sctx.Runtime.State != nil {
+		sm := newCA.SessionManager()
+		sm.EnsureCurrentSession(sctx.Runtime.Context, sctx.Runtime.WorkingDir)
+		sctx.Runtime.State.BindPromptQueueSession(sctx.Runtime.Context, sm, sm.CurrentID())
+		sctx.Runtime.State.ResetPromptQueue()
 	}
 	if sctx.UI.App != nil {
 		sctx.UI.App.History().Clear()

@@ -3,6 +3,9 @@ package slashcmd
 import (
 	"fmt"
 	"strings"
+	"unicode"
+
+	"github.com/covoyage/covonaut/agentcore"
 
 	"github.com/covoyage/covo-agent/internal/agent"
 	runtimeapp "github.com/covoyage/covo-agent/internal/app"
@@ -66,23 +69,66 @@ func handleQueue(sctx *SlashContext, parts []string) bool {
 	return true
 }
 
-// handleSteer handles /steer
+func looksLikeBackgroundTaskID(id string) bool {
+	if id == "" {
+		return false
+	}
+	if strings.HasPrefix(id, "bg-") {
+		rest := strings.TrimPrefix(id, "bg-")
+		if rest == "" {
+			return false
+		}
+		for _, r := range rest {
+			if !unicode.IsDigit(r) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// handleSteer handles /steer. `/steer <bg-id> <msg>` redirects a background
+// task; `/steer <msg>` injects into the current foreground run.
 func handleSteer(sctx *SlashContext, parts []string) bool {
-	if sctx.Services.BackgroundManager == nil {
-		sctx.UI.App.PrintSystem("(background tasks are not available)")
+	if len(parts) < 2 {
+		sctx.UI.App.PrintSystem("Usage: /steer <instructions>  or  /steer <bg-id> <instructions>")
 		return true
 	}
-	if len(parts) < 3 {
-		sctx.UI.App.PrintSystem("Usage: /steer <bg-id> <instructions>")
+	if looksLikeBackgroundTaskID(parts[1]) {
+		if sctx.Services.BackgroundManager == nil {
+			sctx.UI.App.PrintSystem("(background tasks are not available)")
+			return true
+		}
+		if len(parts) < 3 {
+			sctx.UI.App.PrintSystem("Usage: /steer <bg-id> <instructions>")
+			return true
+		}
+		id := parts[1]
+		instructions := strings.Join(parts[2:], " ")
+		if err := sctx.Services.BackgroundManager.Steer(id, instructions); err != nil {
+			sctx.UI.App.PrintError(err)
+			return true
+		}
+		sctx.UI.App.PrintSystem(fmt.Sprintf("steered task %s", id))
 		return true
 	}
-	id := parts[1]
-	instructions := strings.Join(parts[2:], " ")
-	if err := sctx.Services.BackgroundManager.Steer(id, instructions); err != nil {
-		sctx.UI.App.PrintError(err)
+	instructions := strings.TrimSpace(strings.TrimPrefix(sctx.Input, parts[0]))
+	if instructions == "" {
+		sctx.UI.App.PrintSystem("Usage: /steer <instructions>")
 		return true
 	}
-	sctx.UI.App.PrintSystem(fmt.Sprintf("steered task %s", id))
+	if sctx.Runtime.Busy == nil || !sctx.Runtime.Busy.Load() {
+		sctx.UI.App.PrintSystem(i18n.T("system.steer_idle"))
+		return true
+	}
+	ag := sctx.Runtime.Agents.Core()
+	if ag == nil {
+		sctx.UI.App.PrintSystem(i18n.T("system.no_active_agent"))
+		return true
+	}
+	ag.Steer(agentcore.Message{Role: agentcore.RoleUser, Content: instructions})
+	sctx.UI.App.PrintSystem(i18n.T("system.steered", "text", truncate(instructions, 60)))
 	return true
 }
 

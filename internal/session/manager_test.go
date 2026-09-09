@@ -1,10 +1,13 @@
 package session
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	covosession "github.com/covoyage/covonaut/session"
+
+	"github.com/covoyage/covo-agent/internal/promptqueue"
 )
 
 func TestFormatSessionInfo(t *testing.T) {
@@ -77,6 +80,36 @@ func TestFormatSessionInfo(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestCloseKeepsSessionWithQueuedPrompts(t *testing.T) {
+	home := t.TempDir()
+	mgr, err := NewManager(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	id, err := mgr.NewSession(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.SavePromptQueue(ctx, id, []promptqueue.Entry{{ID: "q1", Text: "later", QueuedAt: time.Now()}}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.Close()
+
+	mgr2, err := NewManager(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { mgr2.Close() })
+	got, err := mgr2.LoadPromptQueue(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Text != "later" {
+		t.Fatalf("queue should survive Close, got %+v", got)
+	}
 }
 
 func containsStr(s, substr string) bool {

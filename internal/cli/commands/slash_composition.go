@@ -2,17 +2,17 @@ package commands
 
 import (
 	"context"
-	"github.com/covoyage/covo-agent/internal/cli"
-	"github.com/covoyage/covo-agent/internal/cli/commands/integrations"
-	"github.com/covoyage/covo-agent/internal/cli/commands/prefs"
-	cmdsession "github.com/covoyage/covo-agent/internal/cli/commands/session"
-	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
 	"sync/atomic"
 
 	"github.com/covoyage/covonaut/tui/chat"
 
 	"github.com/covoyage/covo-agent/internal/agent"
 	runtimeapp "github.com/covoyage/covo-agent/internal/app"
+	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/cli/commands/integrations"
+	"github.com/covoyage/covo-agent/internal/cli/commands/prefs"
+	cmdsession "github.com/covoyage/covo-agent/internal/cli/commands/session"
+	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
 	"github.com/covoyage/covo-agent/internal/session"
 	"github.com/covoyage/covo-agent/internal/slashcmd"
 )
@@ -20,10 +20,14 @@ import (
 type slashCompositionConfig struct {
 	App                  *chat.ChatApp
 	Busy                 *atomic.Bool
+	SideBusy             *atomic.Bool
+	CancelSide           func()
+	SetSideCancel        func(context.CancelFunc)
 	Agents               *runtimeapp.AgentRuntime
 	State                *runtimeapp.RuntimeState
 	ActiveMode           func() agent.AgentMode
 	CreateAgent          func(agent.AgentMode) *agent.CovoAgent
+	CreateSideAgent      func(agent.AgentMode) *agent.CovoAgent
 	ReplaceAgent         func(agent.AgentMode, bool) *agent.CovoAgent
 	SwitchToMode         func(agent.AgentMode)
 	SwitchModel          func(string)
@@ -44,16 +48,20 @@ type slashCompositionConfig struct {
 func newSlashContextBuilder(config slashCompositionConfig) *slashcmd.ContextBuilder {
 	return &slashcmd.ContextBuilder{
 		Runtime: slashcmd.RuntimeDependencies{
-			Busy:           config.Busy,
-			Agents:         config.Agents,
-			State:          config.State,
-			ActiveMode:     config.ActiveMode,
-			CreateAgent:    config.CreateAgent,
-			ReplaceAgent:   config.ReplaceAgent,
-			SwitchToMode:   config.SwitchToMode,
-			SwitchModel:    config.SwitchModel,
-			SwitchProvider: config.SwitchProvider,
-			WorkingDir:     config.WorkingDir,
+			Busy:            config.Busy,
+			SideBusy:        config.SideBusy,
+			CancelSide:      config.CancelSide,
+			SetSideCancel:   config.SetSideCancel,
+			Agents:          config.Agents,
+			State:           config.State,
+			ActiveMode:      config.ActiveMode,
+			CreateAgent:     config.CreateAgent,
+			CreateSideAgent: config.CreateSideAgent,
+			ReplaceAgent:    config.ReplaceAgent,
+			SwitchToMode:    config.SwitchToMode,
+			SwitchModel:     config.SwitchModel,
+			SwitchProvider:  config.SwitchProvider,
+			WorkingDir:      config.WorkingDir,
 		},
 		UI: slashcmd.UIDependencies{
 			App:                config.App,

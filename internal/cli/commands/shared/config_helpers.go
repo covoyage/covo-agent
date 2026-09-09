@@ -143,12 +143,16 @@ func ApprovalConfigFromCLI(cfg *cli.Config, cliYolo bool) *approval.Config {
 }
 
 // DisplayConfigFromCLI reads display configuration from config file and env.
-func DisplayConfigFromCLI(cfg *cli.Config) (showReasoning bool, thinkingMode string) {
-	thinkingMode = "collapsed"
+func DisplayConfigFromCLI(cfg *cli.Config) (showReasoning bool, thinkingMode string, thinkingStream bool) {
+	thinkingMode = "summary"
+	thinkingStream = true
 	if cfg.Display != nil {
 		showReasoning = cfg.Display.ShowReasoning
 		if cfg.Display.ThinkingMode != "" {
 			thinkingMode = cfg.Display.ThinkingMode
+		}
+		if cfg.Display.ThinkingStream != nil {
+			thinkingStream = *cfg.Display.ThinkingStream
 		}
 	}
 	// Env overrides
@@ -158,7 +162,37 @@ func DisplayConfigFromCLI(cfg *cli.Config) (showReasoning bool, thinkingMode str
 	if v := os.Getenv("COVO_THINKING_MODE"); v != "" {
 		thinkingMode = v
 	}
-	return showReasoning, thinkingMode
+	if v := os.Getenv("COVO_THINKING_STREAM"); v != "" {
+		thinkingStream = v == "1" || v == "true" || v == "on"
+	}
+	switch strings.ToLower(strings.TrimSpace(thinkingMode)) {
+	case "hide", "full", "truncated", "summary":
+	case "collapsed":
+		thinkingMode = "summary"
+	default:
+		thinkingMode = "summary"
+	}
+	if thinkingMode == "hide" {
+		showReasoning = false
+	}
+	return showReasoning, thinkingMode, thinkingStream
+}
+
+// VerboseLevelFromCLI returns off, on, or full (default on).
+func VerboseLevelFromCLI(cfg *cli.Config) string {
+	level := "on"
+	if cfg != nil && cfg.Display != nil && cfg.Display.Verbose != "" {
+		level = cfg.Display.Verbose
+	}
+	if v := os.Getenv("COVO_VERBOSE"); v != "" {
+		level = v
+	}
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "off", "full":
+		return strings.ToLower(strings.TrimSpace(level))
+	default:
+		return "on"
+	}
 }
 
 // HistoryModeFromCLI returns the transcript display strategy.

@@ -78,7 +78,9 @@ type ThinkingConfig struct {
 type DisplayConfig struct {
 	Language       string `yaml:"language,omitempty"`        // UI language: en, zh, zh-hant, ja, ko, etc.
 	ShowReasoning  bool   `yaml:"show_reasoning,omitempty"`  // show thinking blocks (default: false)
-	ThinkingMode   string `yaml:"thinking_mode,omitempty"`   // collapsed / truncated / full (default: collapsed)
+	ThinkingMode   string `yaml:"thinking_mode,omitempty"`   // hide / summary / truncated / full (default: summary)
+	ThinkingStream *bool  `yaml:"thinking_stream,omitempty"` // stream thinking while pending (default: true)
+	Verbose        string `yaml:"verbose,omitempty"`         // off / on / full (default: on)
 	Theme          string `yaml:"theme,omitempty"`           // color theme preset name (e.g. "dracula", "nord")
 	AmbiguousWidth string `yaml:"ambiguous_width,omitempty"` // East-Asian ambiguous char width: auto (default), narrow, wide
 	HistoryMode    string `yaml:"history_mode,omitempty"`    // virtualized (default) or scrollback

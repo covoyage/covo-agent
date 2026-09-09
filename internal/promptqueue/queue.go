@@ -22,9 +22,26 @@ type Entry struct {
 
 // Queue is a thread-safe multi-prompt queue with merge support.
 type Queue struct {
-	mu      sync.Mutex
-	entries []Entry
-	maxSize int
+	mu       sync.Mutex
+	entries  []Entry
+	maxSize  int
+	onChange func()
+}
+
+// SetOnChange registers a callback invoked after a successful mutation.
+func (q *Queue) SetOnChange(fn func()) {
+	q.mu.Lock()
+	q.onChange = fn
+	q.mu.Unlock()
+}
+
+func (q *Queue) notifyChanged() {
+	q.mu.Lock()
+	fn := q.onChange
+	q.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 // New creates a prompt queue with the given maximum size.
@@ -35,46 +52,82 @@ func New(maxSize int) *Queue {
 	return &Queue{maxSize: maxSize}
 }
 
-// Push adds a prompt to the back of the queue.
-func (q *Queue) Push(text string) Entry {
+// IsFull reports whether the queue has reached maxSize.
+func (q *Queue) IsFull() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	return len(q.entries) >= q.maxSize
+}
 
+// MaxSize returns the queue capacity.
+func (q *Queue) MaxSize() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.maxSize
+}
+
+// Push adds a prompt to the back of the queue. If the queue is full the
+// prompt is rejected and a zero Entry is returned.
+func (q *Queue) Push(text string) Entry {
+	entry, _ := q.TryPush(text)
+	return entry
+}
+
+// TryPush adds a prompt to the back of the queue. ok is false when the
+// queue is full; the oldest entries are never dropped.
+func (q *Queue) TryPush(text string) (Entry, bool) {
+	q.mu.Lock()
+	if len(q.entries) >= q.maxSize {
+		q.mu.Unlock()
+		return Entry{}, false
+	}
 	entry := Entry{
 		ID:       generateID(text, len(q.entries)),
 		Text:     text,
 		QueuedAt: time.Now(),
 	}
 	q.entries = append(q.entries, entry)
-	q.trim()
+	q.mu.Unlock()
+	q.notifyChanged()
+	return entry, true
+}
+
+// PushFront adds a prompt to the front of the queue (send-now / interrupt
+// semantics). If the queue is full the prompt is rejected.
+func (q *Queue) PushFront(text string) Entry {
+	entry, _ := q.TryPushFront(text)
 	return entry
 }
 
-// PushFront adds a prompt to the front of the queue (send-now semantics).
-func (q *Queue) PushFront(text string) Entry {
+// TryPushFront adds a prompt to the front of the queue. ok is false when full.
+func (q *Queue) TryPushFront(text string) (Entry, bool) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
-
+	if len(q.entries) >= q.maxSize {
+		q.mu.Unlock()
+		return Entry{}, false
+	}
 	entry := Entry{
 		ID:       generateID(text, 0),
 		Text:     text,
 		QueuedAt: time.Now(),
 	}
 	q.entries = append([]Entry{entry}, q.entries...)
-	q.trim()
-	return entry
+	q.mu.Unlock()
+	q.notifyChanged()
+	return entry, true
 }
 
 // Pop removes and returns the front entry. Returns ok=false if empty.
 func (q *Queue) Pop() (Entry, bool) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
-
 	if len(q.entries) == 0 {
+		q.mu.Unlock()
 		return Entry{}, false
 	}
 	entry := q.entries[0]
 	q.entries = q.entries[1:]
+	q.mu.Unlock()
+	q.notifyChanged()
 	return entry, true
 }
 
@@ -82,7 +135,6 @@ func (q *Queue) Pop() (Entry, bool) {
 func (q *Queue) Peek() (Entry, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-
 	if len(q.entries) == 0 {
 		return Entry{}, false
 	}
@@ -113,39 +165,45 @@ func (q *Queue) All() []Entry {
 // Clear removes all entries.
 func (q *Queue) Clear() {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	q.entries = nil
+	q.mu.Unlock()
+	q.notifyChanged()
+}
+
+// Replace overwrites the queue contents without firing OnChange.
+func (q *Queue) Replace(entries []Entry) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(entries) == 0 {
+		q.entries = nil
+		return
+	}
+	q.entries = append([]Entry(nil), entries...)
 }
 
 // Remove removes the entry with the given ID. Returns true if found.
 func (q *Queue) Remove(id string) bool {
 	q.mu.Lock()
-	defer q.mu.Unlock()
-
 	for i, e := range q.entries {
 		if e.ID == id {
 			q.entries = append(q.entries[:i], q.entries[i+1:]...)
+			q.mu.Unlock()
+			q.notifyChanged()
 			return true
 		}
 	}
+	q.mu.Unlock()
 	return false
 }
 
 // TryMerge attempts to merge the last entry with the given text if they
 // are similar enough. Returns true if merged, false if the text was pushed
 // as a new entry.
-//
-// Merge rules:
-//   - Two entries can merge if both are short (< mergeThreshold chars)
-//   - The merged text combines both with a separator
 func (q *Queue) TryMerge(text string, mergeThreshold int) bool {
 	if mergeThreshold <= 0 {
 		mergeThreshold = 200
 	}
-
 	q.mu.Lock()
-	defer q.mu.Unlock()
-
 	if len(q.entries) == 0 {
 		entry := Entry{
 			ID:       generateID(text, 0),
@@ -153,32 +211,36 @@ func (q *Queue) TryMerge(text string, mergeThreshold int) bool {
 			QueuedAt: time.Now(),
 		}
 		q.entries = append(q.entries, entry)
-		q.trim()
+		q.mu.Unlock()
+		q.notifyChanged()
 		return false
 	}
-
 	last := &q.entries[len(q.entries)-1]
 	if len(last.Text) < mergeThreshold && len(text) < mergeThreshold {
-		// Merge: combine texts
 		merged := Entry{
 			ID:        generateID(last.Text+text, len(q.entries)),
 			Text:      last.Text + "\n---\n" + text,
 			QueuedAt:  last.QueuedAt,
 			Combined:  true,
-			SourceIDs: append(last.SourceIDs, last.ID),
+			SourceIDs: append(append([]string{}, last.SourceIDs...), last.ID),
 		}
 		q.entries[len(q.entries)-1] = merged
+		q.mu.Unlock()
+		q.notifyChanged()
 		return true
 	}
-
-	// Can't merge — push new entry
+	if len(q.entries) >= q.maxSize {
+		q.mu.Unlock()
+		return false
+	}
 	entry := Entry{
 		ID:       generateID(text, len(q.entries)),
 		Text:     text,
 		QueuedAt: time.Now(),
 	}
 	q.entries = append(q.entries, entry)
-	q.trim()
+	q.mu.Unlock()
+	q.notifyChanged()
 	return false
 }
 
@@ -187,10 +249,8 @@ func (q *Queue) CanMergeFollower(text string, mergeThreshold int) bool {
 	if mergeThreshold <= 0 {
 		mergeThreshold = 200
 	}
-
 	q.mu.Lock()
 	defer q.mu.Unlock()
-
 	if len(q.entries) == 0 {
 		return false
 	}
@@ -203,10 +263,8 @@ func (q *Queue) CanMergeFront(text string, mergeThreshold int) bool {
 	if mergeThreshold <= 0 {
 		mergeThreshold = 200
 	}
-
 	q.mu.Lock()
 	defer q.mu.Unlock()
-
 	if len(q.entries) == 0 {
 		return false
 	}
@@ -217,21 +275,14 @@ func (q *Queue) CanMergeFront(text string, mergeThreshold int) bool {
 // DrainAll returns all entries and clears the queue.
 func (q *Queue) DrainAll() []Entry {
 	q.mu.Lock()
-	defer q.mu.Unlock()
-
 	result := q.entries
 	q.entries = nil
+	q.mu.Unlock()
+	q.notifyChanged()
 	return result
 }
 
-func (q *Queue) trim() {
-	if len(q.entries) > q.maxSize {
-		q.entries = q.entries[len(q.entries)-q.maxSize:]
-	}
-}
-
 func generateID(text string, seq int) string {
-	// Simple ID: timestamp + seq + text hash prefix
 	t := time.Now().UnixNano()
 	h := uint64(0)
 	for _, c := range text {

@@ -9,11 +9,12 @@ import (
 
 // AgentRequest contains the values that may change when rebuilding an agent.
 type AgentRequest struct {
-	Mode          agent.AgentMode
-	Provider      agentcore.Provider
-	ProviderName  string
-	Model         string
-	ContextLength int64
+	Mode           agent.AgentMode
+	Provider       agentcore.Provider
+	ProviderName   string
+	Model          string
+	ContextLength  int64
+	ToolNameFilter func(string) bool
 }
 
 // AgentFactory builds agents from one stable base configuration.
@@ -34,6 +35,7 @@ func (factory *AgentFactory) Config(request AgentRequest) agent.CovoAgentConfig 
 	config.ProviderName = request.ProviderName
 	config.Model = request.Model
 	config.ModelContextLength = request.ContextLength
+	config.ToolNameFilter = request.ToolNameFilter
 	if factory.state != nil {
 		config.ToolProfile = factory.state.ActiveProfile()
 	}

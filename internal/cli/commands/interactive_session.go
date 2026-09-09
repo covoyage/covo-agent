@@ -51,10 +51,12 @@ type interactiveSession struct {
 	model        string
 	mode         agent.AgentMode
 
-	showReasoning bool
-	thinkingMode  string
-	historyMode   string
-	gitTracker    *runtimeapp.GitBranchTracker
+	showReasoning  bool
+	thinkingMode   string
+	thinkingStream bool
+	historyMode    string
+	verboseLevel   string
+	gitTracker     *runtimeapp.GitBranchTracker
 
 	agent        *agent.CovoAgent
 	agentFactory *runtimeapp.AgentFactory
@@ -70,7 +72,9 @@ type interactiveSession struct {
 	changedFiles   *ChangedFilesTracker
 
 	busy           atomic.Bool
+	sideBusy       atomic.Bool
 	cancelRun      atomic.Pointer[context.CancelFunc]
+	cancelSide     atomic.Pointer[context.CancelFunc]
 	pendingImages  sync.Map
 	pasteStore     *agentui.PasteStore
 	composerDrafts map[string]component.EditorDraft
@@ -85,6 +89,23 @@ func (s *interactiveSession) currentSessionID() string {
 		return ""
 	}
 	return ca.SessionManager().CurrentID()
+}
+
+func (s *interactiveSession) bindPromptQueue(sessionID string) {
+	ca := s.agentRuntime.Current()
+	if ca == nil {
+		return
+	}
+	shared.RuntimeState.BindPromptQueueSession(context.Background(), ca.SessionManager(), sessionID)
+}
+
+func (s *interactiveSession) switchPromptQueue(sessionID string) {
+	ca := s.agentRuntime.Current()
+	if ca == nil {
+		shared.RuntimeState.ResetPromptQueue()
+		return
+	}
+	shared.RuntimeState.SwitchPromptQueue(context.Background(), ca.SessionManager(), sessionID)
 }
 
 func (s *interactiveSession) stashComposerDraft() {
@@ -254,8 +275,9 @@ func (s *interactiveSession) run() {
 	s.workingDir = workingDir
 	workingDirOverride = workingDir
 
-	s.showReasoning, s.thinkingMode = shared.DisplayConfigFromCLI(s.cfg)
+	s.showReasoning, s.thinkingMode, s.thinkingStream = shared.DisplayConfigFromCLI(s.cfg)
 	s.historyMode = shared.HistoryModeFromCLI(s.cfg)
+	s.verboseLevel = shared.VerboseLevelFromCLI(s.cfg)
 	s.modelContextLen = shared.ResolveModelContextLength(s.cfg, s.providerType, s.model)
 
 	var skillURLs []string
@@ -283,6 +305,9 @@ func (s *interactiveSession) run() {
 	s.app = s.buildChatApp(slashSuggestions, atSuggestions)
 	s.app.SuppressAutoRetry = true
 	s.app.History().SetTheme(chatHistoryTheme())
+	if s.verboseLevel != "" {
+		s.app.History().SetVerboseLevel(s.verboseLevel)
+	}
 	shared.RuntimeState.SetUI(agentui.NewUIBus(s.app))
 	s.app.HoldSubmit()
 	if ed := s.app.Editor(); ed != nil {
@@ -357,7 +382,11 @@ func (s *interactiveSession) run() {
 	} else {
 		covoAgent.SessionManager().EnsureCurrentSession(context.Background(), s.workingDir)
 	}
-	defer s.agentRuntime.Close()
+	s.bindPromptQueue(covoAgent.SessionManager().CurrentID())
+	defer func() {
+		shared.RuntimeState.PersistPromptQueue(context.Background())
+		s.agentRuntime.Close()
+	}()
 
 	agentUIBinder := &runtimeapp.AgentUIBinder{
 		App: func() *chat.ChatApp { return s.app },

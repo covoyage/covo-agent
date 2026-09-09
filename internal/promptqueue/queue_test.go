@@ -207,21 +207,31 @@ func TestQueue_CanMergeFollower_EmptyQueue(t *testing.T) {
 	}
 }
 
-func TestQueue_MaxSize(t *testing.T) {
+func TestQueue_MaxSizeRejects(t *testing.T) {
 	q := New(3)
 	q.Push("a")
 	q.Push("b")
 	q.Push("c")
-	q.Push("d") // should trim oldest
-
+	if _, ok := q.TryPush("d"); ok {
+		t.Fatal("expected full queue to reject")
+	}
 	if q.Len() != 3 {
 		t.Fatalf("expected 3, got %d", q.Len())
 	}
-
-	// Should have b, c, d (a was trimmed)
 	popped, _ := q.Pop()
-	if popped.Text != "b" {
-		t.Errorf("expected 'b', got %q", popped.Text)
+	if popped.Text != "a" {
+		t.Errorf("expected oldest entry kept, got %q", popped.Text)
+	}
+}
+
+func TestQueue_TryPushFrontFull(t *testing.T) {
+	q := New(1)
+	q.Push("a")
+	if _, ok := q.TryPushFront("b"); ok {
+		t.Fatal("expected full queue to reject front push")
+	}
+	if q.Len() != 1 {
+		t.Fatalf("len = %d", q.Len())
 	}
 }
 
@@ -262,4 +272,28 @@ func TestQueue_Concurrent(t *testing.T) {
 
 	<-done
 	// Should not deadlock or panic
+}
+
+func TestQueue_OnChangeAndReplace(t *testing.T) {
+	q := New(10)
+	n := 0
+	q.SetOnChange(func() { n++ })
+	q.Push("a")
+	q.PushFront("b")
+	q.Pop()
+	q.Remove("missing")
+	if n != 3 {
+		t.Fatalf("mutations=%d want 3", n)
+	}
+	q.Replace([]Entry{{ID: "x", Text: "loaded"}})
+	if n != 3 {
+		t.Fatalf("Replace should not notify, n=%d", n)
+	}
+	if q.Len() != 1 || q.All()[0].Text != "loaded" {
+		t.Fatalf("replace contents: %+v", q.All())
+	}
+	q.Clear()
+	if n != 4 {
+		t.Fatalf("clear notify n=%d", n)
+	}
 }

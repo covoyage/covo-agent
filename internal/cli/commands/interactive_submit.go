@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
+	"github.com/covoyage/covonaut/agentcore"
+
 	"github.com/covoyage/covo-agent/internal/agent"
+	runtimeapp "github.com/covoyage/covo-agent/internal/app"
 	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
 	"github.com/covoyage/covo-agent/internal/i18n"
 	"github.com/covoyage/covo-agent/internal/safego"
@@ -30,8 +34,7 @@ func (s *interactiveSession) handleQueue(ctx context.Context, input string) {
 	if trimmed == "" {
 		return
 	}
-	shared.RuntimeState.SetPendingInput(trimmed)
-	loadUIBus().PrintSystem(i18n.T("system.queued"))
+	s.enqueuePrompt(trimmed, false)
 }
 
 func (s *interactiveSession) dispatchInput(ctx context.Context, trimmed string) {
@@ -181,22 +184,114 @@ func (s *interactiveSession) handleApproveCommand(trimmed string) {
 	}
 }
 
+func busyInputMode() string {
+	switch mode := shared.RuntimeState.BusyInputMode(); mode {
+	case "interrupt", "queue", "steer", "collect", "block":
+		return mode
+	default:
+		return "block"
+	}
+}
+
+func reportQueueFull() {
+	n, max := 0, 0
+	if q := shared.RuntimeState.PromptQueue(); q != nil {
+		n, max = q.Len(), q.MaxSize()
+	}
+	loadUIBus().PrintSystem(i18n.T("system.queue_full", "count", strconv.Itoa(n), "max", strconv.Itoa(max)))
+}
+
+func (s *interactiveSession) enqueuePrompt(text string, front bool) bool {
+	var result runtimeapp.EnqueueResult
+	if front {
+		result = shared.RuntimeState.EnqueuePromptFront(text)
+	} else {
+		result = shared.RuntimeState.EnqueuePrompt(text)
+	}
+	if result.Full {
+		reportQueueFull()
+		return false
+	}
+	loadUIBus().PrintSystem(i18n.T("system.queued"))
+	return true
+}
+
+func (s *interactiveSession) enqueueMerged(text string) bool {
+	result := shared.RuntimeState.EnqueueMerged(text)
+	if result.Full {
+		reportQueueFull()
+		return false
+	}
+	if result.Merged {
+		loadUIBus().PrintSystem(i18n.T("system.queued_merged"))
+		return true
+	}
+	loadUIBus().PrintSystem(i18n.T("system.queued"))
+	return true
+}
+
+func (s *interactiveSession) setSideCancel(cancel context.CancelFunc) {
+	if cancel == nil {
+		s.cancelSide.Store(nil)
+		return
+	}
+	s.cancelSide.Store(&cancel)
+}
+
+func (s *interactiveSession) cancelSideRun() {
+	if cf := s.cancelSide.Load(); cf != nil && *cf != nil {
+		(*cf)()
+	}
+	s.cancelSide.Store(nil)
+}
+
+func (s *interactiveSession) interruptCurrentRun() bool {
+	cf := s.cancelRun.Load()
+	if cf == nil || *cf == nil {
+		return false
+	}
+	if s.agentRuntime != nil {
+		if ag := s.agentRuntime.Core(); ag != nil {
+			ag.ClearSteering()
+		}
+	}
+	(*cf)()
+	return true
+}
+
+func (s *interactiveSession) steerCurrentRun(text string) bool {
+	if s.agentRuntime == nil {
+		loadUIBus().PrintSystem(i18n.T("system.no_active_agent"))
+		return false
+	}
+	ag := s.agentRuntime.Core()
+	if ag == nil {
+		loadUIBus().PrintSystem(i18n.T("system.no_active_agent"))
+		return false
+	}
+	ag.Steer(agentcore.Message{Role: agentcore.RoleUser, Content: text})
+	loadUIBus().PrintSystem(i18n.T("system.steered", "text", shared.Truncate(text, 60)))
+	return true
+}
+
 // submitPrompt dispatches a plain prompt to the agent, handling busy-mode
-// (interrupt/queue/steer/block) and context preprocessing first.
+// (interrupt/queue/steer/collect/block) and context preprocessing first.
 func (s *interactiveSession) submitPrompt(ctx context.Context, trimmed string) {
 	if s.busy.Load() {
-		switch shared.RuntimeState.BusyInputMode() {
+		switch busyInputMode() {
 		case "interrupt":
-			if cf := s.cancelRun.Load(); cf != nil && *cf != nil {
-				(*cf)()
-				loadUIBus().PrintSystem(i18n.T("system.interrupted"))
+			if !s.enqueuePrompt(trimmed, true) {
+				return
+			}
+			if s.interruptCurrentRun() {
+				loadUIBus().PrintSystem(i18n.T("system.interrupt_next", "text", shared.Truncate(trimmed, 60)))
 			}
 		case "queue":
-			shared.RuntimeState.SetPendingInput(trimmed)
-			loadUIBus().PrintSystem(i18n.T("system.queued"))
+			s.enqueuePrompt(trimmed, false)
+		case "collect":
+			s.enqueueMerged(trimmed)
 		case "steer":
-			// Steering: inject as follow-up message
-			loadUIBus().PrintSystem(i18n.T("system.steer_unsupported"))
+			s.steerCurrentRun(trimmed)
 		default: // "block"
 			loadUIBus().PrintSystem(i18n.T("system.busy"))
 		}

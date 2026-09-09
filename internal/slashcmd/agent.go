@@ -133,16 +133,16 @@ func handlePersonality(sctx *SlashContext, parts []string) bool {
 // handleBusy handles /busy
 func handleBusy(sctx *SlashContext, parts []string) bool {
 	if len(parts) < 2 {
-		sctx.UI.App.PrintSystem(fmt.Sprintf("Usage: /busy block|queue|interrupt (current: %s)", sctx.Runtime.State.BusyInputMode()))
+		sctx.UI.App.PrintSystem(i18n.T("system.busy_usage", "mode", sctx.Runtime.State.BusyInputMode()))
 		return true
 	}
 	mode := strings.ToLower(parts[1])
 	switch mode {
-	case "block", "queue", "interrupt":
+	case "block", "queue", "collect", "steer", "interrupt":
 		sctx.Runtime.State.SetBusyInputMode(mode)
-		sctx.UI.App.PrintSystem(fmt.Sprintf("Busy-Enter mode set to: %s", mode))
+		sctx.UI.App.PrintSystem(i18n.T("system.busy_set", "mode", mode))
 	default:
-		sctx.UI.App.PrintSystem("Invalid mode. Use: block, queue, interrupt")
+		sctx.UI.App.PrintSystem(i18n.T("system.busy_invalid"))
 	}
 	return true
 }

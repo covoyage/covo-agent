@@ -30,10 +30,30 @@ func ChatMessageFromAgentMessage(msg agentcore.Message) chat.ChatMessage {
 	if text == "" && len(msg.ToolCalls) > 0 {
 		text = i18n.T("statusline.tool_calls", "count", fmt.Sprintf("%d", len(msg.ToolCalls)))
 	}
-	return chat.ChatMessage{
+	cm := chat.ChatMessage{
 		Role: role,
 		Text: text,
 	}
+	if isSideMessage(msg) {
+		cm.Meta = "side"
+	}
+	return cm
+}
+
+func isSideMessage(msg agentcore.Message) bool {
+	if msg.Name == "side" {
+		return true
+	}
+	if msg.Metadata == nil {
+		return false
+	}
+	if side, ok := msg.Metadata["side"].(bool); ok {
+		return side
+	}
+	if side, ok := msg.Metadata["side"].(string); ok {
+		return side == "true" || side == "side"
+	}
+	return false
 }
 
 // restoreMessages converts a session snapshot into structured transcript
@@ -66,6 +86,9 @@ func restoreMessages(msgs []agentcore.Message) []chat.ChatMessage {
 			cm := ChatMessageFromAgentMessage(msg)
 			if cm.Text == "" {
 				continue
+			}
+			if isSideMessage(msg) {
+				cm.Meta = "side"
 			}
 			out = append(out, cm)
 		}

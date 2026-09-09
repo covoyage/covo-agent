@@ -80,6 +80,7 @@ func (s *interactiveSession) openSessions() {
 			loadUIBus().PrintError(fmt.Errorf("resume session: %w", err))
 			return
 		}
+		s.switchPromptQueue(item.ID)
 		snap, _ := mgr.SessionManager().LoadSession(context.Background(), item.ID)
 		mgr.Core().State().Restore(snap)
 		shared.RestoreChatHistory(s.app, snap.Messages)
@@ -180,6 +181,7 @@ func (s *interactiveSession) openSessionTree() {
 			loadUIBus().PrintError(fmt.Errorf("resume session: %w", err))
 			return
 		}
+		s.switchPromptQueue(sessionID)
 		snap, _ := mgr.SessionManager().LoadSession(context.Background(), sessionID)
 		mgr.Core().State().Restore(snap)
 		shared.RestoreChatHistory(s.app, snap.Messages)
@@ -251,11 +253,16 @@ func (s *interactiveSession) openHistorySearch() {
 		loadUIBus().ClosePanel(ov)
 	}
 	overlay := agentui.NewHistorySearchOverlay(history, func(match agentui.HistoryMatch) {
+		history.RevealThroughMessage(match.MsgIndex)
+		_ = history.Render(80)
 		if start, _, ok := history.MessageLineRange(match.MsgIndex); ok {
 			history.JumpToAbsoluteLine(int64(start + match.LineIndex))
-			loadUIBus().Host().RequestRender()
 		}
-	}, closeOverlay)
+		loadUIBus().Host().RequestRender()
+	}, func() {
+		history.RevealThroughMessage(-1)
+		closeOverlay()
+	})
 	ov = loadUIBus().ShowPanel(overlay, 80, 20)
 }
 
@@ -421,12 +428,8 @@ func (s *interactiveSession) installHotkeyRouter() {
 		OpenSettings:       s.openSettings,
 		OpenPromptQueue:    s.showPromptQueue,
 		ToggleVerbose: func() {
-			on := s.app.History().ToggleVerbose()
-			if on {
-				s.app.PrintSystem(i18n.T("system.verbose_on"))
-			} else {
-				s.app.PrintSystem(i18n.T("system.verbose_off"))
-			}
+			s.app.History().ToggleVerbose()
+			s.app.PrintSystem(i18n.T("system.verbose_set", "level", s.app.History().VerboseLevel()))
 			loadUIBus().Host().RequestRender()
 		},
 		Suggestions: s.suggestionsMgr,

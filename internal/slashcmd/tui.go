@@ -57,6 +57,80 @@ func handleUsage(sctx *SlashContext, parts []string) bool {
 	return true
 }
 
+func handleVerbose(sctx *SlashContext, parts []string) bool {
+	h := sctx.UI.App.History()
+	if len(parts) < 2 {
+		sctx.UI.App.PrintSystem(i18n.T("system.verbose_usage", "level", h.VerboseLevel()))
+		return true
+	}
+	level := strings.ToLower(parts[1])
+	switch level {
+	case "off", "on", "full":
+		got := h.SetVerboseLevel(level)
+		sctx.UI.App.PrintSystem(i18n.T("system.verbose_set", "level", got))
+	default:
+		sctx.UI.App.PrintSystem(i18n.T("system.verbose_invalid"))
+	}
+	return true
+}
+
+func handleThinking(sctx *SlashContext, parts []string) bool {
+	if len(parts) < 2 {
+		sctx.UI.App.PrintSystem(i18n.T("system.thinking_usage"))
+		return true
+	}
+	mode := strings.ToLower(parts[1])
+	stream := true
+	if cur, ok := sctx.UI.App.History().ReasoningRenderer().(*chat.DefaultReasoningRenderer); ok {
+		stream = cur.Stream
+	}
+	switch mode {
+	case "collapsed":
+		mode = "summary"
+	case "stream":
+		on := true
+		if len(parts) >= 3 {
+			switch strings.ToLower(parts[2]) {
+			case "off", "false", "0":
+				on = false
+			case "on", "true", "1":
+				on = true
+			default:
+				sctx.UI.App.PrintSystem(i18n.T("system.thinking_stream_invalid"))
+				return true
+			}
+		}
+		show := true
+		mode = "summary"
+		if cur, ok := sctx.UI.App.History().ReasoningRenderer().(*chat.DefaultReasoningRenderer); ok {
+			show = cur.Show
+			mode = cur.Mode
+		}
+		sctx.UI.App.History().SetReasoningRenderer(&chat.DefaultReasoningRenderer{
+			Show:   show,
+			Stream: on,
+			Mode:   mode,
+		})
+		state := "off"
+		if on {
+			state = "on"
+		}
+		sctx.UI.App.PrintSystem(i18n.T("system.thinking_stream_set", "state", state))
+		return true
+	case "hide", "summary", "truncated", "full":
+	default:
+		sctx.UI.App.PrintSystem(i18n.T("system.thinking_invalid"))
+		return true
+	}
+	sctx.UI.App.History().SetReasoningRenderer(&chat.DefaultReasoningRenderer{
+		Show:   mode != "hide",
+		Stream: stream,
+		Mode:   mode,
+	})
+	sctx.UI.App.PrintSystem(i18n.T("system.thinking_set", "mode", mode))
+	return true
+}
+
 // handleVim toggles vim-style modal editing in the TUI editor.
 func handleVim(sctx *SlashContext, parts []string) bool {
 	ed := sctx.UI.App.Editor()
