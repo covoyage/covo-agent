@@ -17,6 +17,12 @@ type TodoItem struct {
 	Priority string
 }
 
+// PlanItem is the footer's presentation model for an agent plan step.
+type PlanItem struct {
+	Step   string
+	Status string
+}
+
 // FooterSnapshot is a thread-safe copy of status values used by render functions.
 type FooterSnapshot struct {
 	GitBranch     string
@@ -29,10 +35,11 @@ type FooterSnapshot struct {
 	Mode          string
 }
 
-// StickyFooter renders active TODOs and the configurable status line.
+// StickyFooter renders active TODOs, the current plan, and the configurable status line.
 type StickyFooter struct {
 	mu            sync.RWMutex
 	todoStore     func() []TodoItem
+	planStore     func() []PlanItem
 	gitBranch     string
 	contextUsed   string
 	contextWarn   bool
@@ -51,6 +58,12 @@ func NewStickyFooter() *StickyFooter {
 func (footer *StickyFooter) SetTodoStore(store func() []TodoItem) {
 	footer.mu.Lock()
 	footer.todoStore = store
+	footer.mu.Unlock()
+}
+
+func (footer *StickyFooter) SetPlanStore(store func() []PlanItem) {
+	footer.mu.Lock()
+	footer.planStore = store
 	footer.mu.Unlock()
 }
 
@@ -123,6 +136,7 @@ func (footer *StickyFooter) Invalidate() {}
 func (footer *StickyFooter) Render(width int64) []string {
 	footer.mu.RLock()
 	todoStore := footer.todoStore
+	planStore := footer.planStore
 	statusLineManager := footer.statusLineMgr
 	snapshot := FooterSnapshot{
 		GitBranch:     footer.gitBranch,
@@ -138,6 +152,11 @@ func (footer *StickyFooter) Render(width int64) []string {
 
 	palette := theme.CurrentPalette()
 	var lines []string
+	if planStore != nil {
+		if planLine := footer.renderPlanLine(planStore(), palette, width); planLine != "" {
+			lines = append(lines, planLine)
+		}
+	}
 	if todoStore != nil {
 		active := filterActive(todoStore())
 		if len(active) > 0 {
@@ -148,6 +167,33 @@ func (footer *StickyFooter) Render(width int64) []string {
 		lines = append(lines, infoLine)
 	}
 	return lines
+}
+
+func (footer *StickyFooter) renderPlanLine(items []PlanItem, palette *theme.Palette, width int64) string {
+	if len(items) == 0 {
+		return ""
+	}
+	done := 0
+	var current string
+	for _, item := range items {
+		switch item.Status {
+		case "completed":
+			done++
+		case "in_progress":
+			current = item.Step
+		}
+	}
+	label := palette.Dim.Render(fmt.Sprintf("PLAN %d/%d", done, len(items)))
+	if current != "" {
+		if int64(core.VisibleWidth(current)) > 48 {
+			current = core.TruncateToWidth(current, 45, "")
+		}
+		label = label + "  " + palette.Accent.Render("◐ "+current)
+	}
+	if core.VisibleWidth(label) > width {
+		label = core.TruncateToWidth(label, width, "")
+	}
+	return core.PadToWidth(label, width)
 }
 
 func (footer *StickyFooter) renderTodoLine(items []TodoItem, palette *theme.Palette, width int64) string {

@@ -22,6 +22,7 @@ type ToolsetFilter struct {
 	planModeChecker func() bool       // returns true when agent is in Plan mode
 	planModeAllowed map[string]bool   // tools allowed in Plan mode
 	nameFilter      func(string) bool // optional per-tool-name predicate (e.g. headless --tools)
+	leanMode        bool              // hide long-tail schemas; keep them via tool_search
 	logger          *slog.Logger
 }
 
@@ -35,6 +36,7 @@ type ToolsetFilterConfig struct {
 	PlanModeChecker func() bool       // returns true when agent is in Plan mode
 	PlanModeAllowed map[string]bool   // tools allowed in Plan mode (overrides filtering)
 	NameFilter      func(string) bool // optional per-tool-name predicate; nil = no extra filtering
+	LeanMode        bool              // hide long-tail schemas; keep them via tool_search
 	Logger          *slog.Logger
 }
 
@@ -64,6 +66,7 @@ func NewToolsetFilter(cfg ToolsetFilterConfig) *ToolsetFilter {
 		planModeChecker: cfg.PlanModeChecker,
 		planModeAllowed: planModeAllowed,
 		nameFilter:      cfg.NameFilter,
+		leanMode:        cfg.LeanMode,
 		logger:          cfg.Logger,
 	}
 }
@@ -123,6 +126,9 @@ func (tf *ToolsetFilter) BeforeModelCall(_ context.Context, _ *agentcore.AgentRu
 		if tf.nameFilter != nil && !tf.nameFilter(def.Name) {
 			continue
 		}
+		if tf.leanMode && !LeanDirectTools[def.Name] {
+			continue
+		}
 		filtered = append(filtered, def)
 	}
 
@@ -154,6 +160,80 @@ func (tf *ToolsetFilter) InvalidateTools() {
 func (tf *ToolsetFilter) InvalidateAvailability() {
 	tf.filter.InvalidateAvailability()
 }
+
+// ToolPreview is a read-only snapshot of what the model would see.
+type ToolPreview struct {
+	Kept     []string
+	Excluded map[string]string // tool name → reason
+	Toolsets []string
+	Platform string
+	PlanMode bool
+	LeanMode bool
+}
+
+// Preview applies the same filters as BeforeModelCall without mutating a request.
+func (tf *ToolsetFilter) Preview(allToolNames []string) ToolPreview {
+	out := ToolPreview{
+		Excluded: make(map[string]string),
+		LeanMode: tf.leanMode,
+	}
+	if tf.platforms != nil {
+		out.Platform = tf.platforms()
+	}
+	if out.Platform == "" {
+		out.Platform = "cli"
+	}
+	if tf.platform != nil {
+		out.Toolsets = append([]string(nil), tf.platform.ToolsetNames(out.Platform)...)
+	}
+	out.PlanMode = tf.planModeChecker != nil && tf.planModeChecker()
+
+	if tf.filter == nil || len(allToolNames) == 0 {
+		out.Kept = append([]string(nil), allToolNames...)
+		sort.Strings(out.Kept)
+		return out
+	}
+
+	result, err := tf.filter.Filter(out.Toolsets, tf.availability, allToolNames)
+	if err != nil {
+		out.Kept = append([]string(nil), allToolNames...)
+		sort.Strings(out.Kept)
+		return out
+	}
+	for name, reason := range result.Excluded {
+		out.Excluded[name] = reason
+	}
+
+	allowed := make(map[string]bool, len(result.Tools))
+	for _, name := range result.Tools {
+		allowed[name] = true
+	}
+	for _, name := range allToolNames {
+		if !allowed[name] {
+			if _, ok := out.Excluded[name]; !ok {
+				out.Excluded[name] = "not in active toolsets"
+			}
+			continue
+		}
+		if out.PlanMode && !tf.planModeAllowed[name] {
+			out.Excluded[name] = "plan mode"
+			continue
+		}
+		if tf.nameFilter != nil && !tf.nameFilter(name) {
+			out.Excluded[name] = "name filter"
+			continue
+		}
+		if tf.leanMode && !LeanDirectTools[name] {
+			out.Excluded[name] = "lean"
+			continue
+		}
+		out.Kept = append(out.Kept, name)
+	}
+	sort.Strings(out.Kept)
+	return out
+}
+
+func (tf *ToolsetFilter) LeanMode() bool { return tf.leanMode }
 
 // --- Delegation Scoping ---
 
@@ -260,7 +340,8 @@ func stripDangerousFromList(tools []string) []string {
 var DefaultPlanModeAllowedTools = map[string]bool{
 	// Read-only file/search tools
 	"read": true, "grep": true, "glob": true, "ls": true,
-	"web_search": true, "web_fetch": true,
+	"search_files": true,
+	"web_search":   true, "web_fetch": true,
 	"session_search": true, "diffs": true,
 	"git_status": true, "git_log": true, "git_diff": true,
 	// Planning workflow tools (do not mutate files)
@@ -270,6 +351,20 @@ var DefaultPlanModeAllowedTools = map[string]bool{
 	"memory_recall": true,
 	// Tool discovery (read-only)
 	"tool_search": true, "tool_describe": true,
+}
+
+// LeanDirectTools are the schemas always sent to the model when lean mode is
+// on. Everything else stays in the registry and is reachable through
+// tool_search / tool_describe / tool_call (including MCP).
+var LeanDirectTools = map[string]bool{
+	"read": true, "edit": true, "write_file": true, "ls": true,
+	"search_files": true,
+	"bash":         true, "git_status": true, "git_diff": true, "git_log": true,
+	"web_fetch": true, "todo": true, "update_plan": true, "clarify": true,
+	"exit_plan_mode": true, "session_search": true, "diffs": true,
+	"apply_patch": true, "edit_block": true, "skill": true,
+	"tool_search": true, "tool_describe": true, "tool_call": true,
+	"secrets": true, "ask_user": true, "memory": true,
 }
 
 // SetPlanModeChecker sets the function used to check if the agent is in

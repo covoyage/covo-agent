@@ -65,6 +65,10 @@ func (ca *CovoAgent) SkillUsage() *evolution.SkillUsageTracker {
 	return ca.skillUsage
 }
 
+func (ca *CovoAgent) WorkshopStore() *evolution.WorkshopStore {
+	return ca.workshopStore
+}
+
 // PersonaManager returns the Honcho-style user dialect modeling manager.
 func (ca *CovoAgent) PersonaManager() *evolution.PersonaManager {
 	return ca.personaMgr

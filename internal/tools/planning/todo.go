@@ -123,8 +123,8 @@ func BuildTodoTool(store *TodoStore) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "todo",
 		Description: strings.Join([]string{
-			"Manage an in-memory task list for tracking work within the current session.",
-			"Use this to break down complex tasks, track progress, and ensure nothing is missed.",
+			"Session-only task list (lost on restart). For work that must survive, use kanban or create_goal.",
+			"Use this to break down the current turn's work and track progress.",
 			"",
 			"When no 'todos' parameter is given, reads and returns the current task list.",
 			"When 'todos' is given, writes the task list (replaces or merges).",

@@ -7,6 +7,14 @@ import (
 	"github.com/covoyage/covonaut/agentcore"
 )
 
+// SideQuestionAllowedTools is the /btw side-agent allowlist. Mutating and
+// session-wide tools stay on the main agent.
+var SideQuestionAllowedTools = map[string]bool{
+	"read": true, "read_file": true, "grep": true, "glob": true,
+	"ls": true, "list": true, "search": true, "web_search": true,
+	"web_fetch": true, "view_image": true, "video_analyze": true, "code_navigate": true, "search_files": true, "find": true,
+}
+
 // PlanModeAllowedTools are tools explicitly permitted in Plan mode.
 // This set includes read-only inspection tools, planning workflow tools
 // (todo, update_plan, clarify), and the exit_plan_mode escape hatch.
@@ -16,7 +24,7 @@ var PlanModeAllowedTools = map[string]bool{
 	// Read-only file/search tools
 	"read": true, "grep": true, "glob": true, "ls": true,
 	"search_files": true,
-	"web_search": true, "web_fetch": true,
+	"web_search":   true, "web_fetch": true, "view_image": true, "video_analyze": true,
 	"session_search": true, "diffs": true,
 	"git_status": true, "git_log": true, "git_diff": true,
 	// Planning workflow tools (do not mutate files)

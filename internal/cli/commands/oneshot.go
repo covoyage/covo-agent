@@ -48,6 +48,7 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelError)}))
 	workingDir, _ := os.Getwd()
+	skillCfgGet, skillCfgSet := shared.SkillConfigFns(cfg)
 
 	covoAgent, err := agent.NewCovoAgent(agent.CovoAgentConfig{
 		Mode:                     mode,
@@ -66,6 +67,11 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 		AppendSystemPrompt:       appendSystemPrompt,
 		Auxiliary:                shared.AuxiliaryConfigFromCLI(cfg),
 		AuxiliaryProviderBuilder: cli.ResolveAuxiliaryProviderBuilder(),
+		SkillExtraDirs:           shared.SkillExtraDirs(cfg),
+		SkillDisabled:            shared.SkillDisabled(cfg),
+		SkillConfigGet:           skillCfgGet,
+		SkillConfigSet:           skillCfgSet,
+		LeanTools:                shared.LeanToolsEnabled(cfg),
 	})
 	if err != nil {
 		log.Fatalf("create agent: %v", err)

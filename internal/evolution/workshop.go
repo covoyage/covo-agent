@@ -15,6 +15,7 @@ type SkillProposalKind string
 const (
 	ProposalCreate SkillProposalKind = "create"
 	ProposalUpdate SkillProposalKind = "update"
+	ProposalDelete SkillProposalKind = "delete"
 )
 
 type SkillProposalStatus string
@@ -27,14 +28,14 @@ const (
 )
 
 type SkillProposal struct {
-	ID        string             `yaml:"id"`
-	Kind      SkillProposalKind  `yaml:"kind"`
+	ID        string              `yaml:"id"`
+	Kind      SkillProposalKind   `yaml:"kind"`
 	Status    SkillProposalStatus `yaml:"status"`
-	SkillName string             `yaml:"skill_name"`
-	Body      string             `yaml:"body"`
-	Rationale string             `yaml:"rationale,omitempty"`
-	CreatedAt time.Time          `yaml:"created_at"`
-	UpdatedAt time.Time          `yaml:"updated_at"`
+	SkillName string              `yaml:"skill_name"`
+	Body      string              `yaml:"body"`
+	Rationale string              `yaml:"rationale,omitempty"`
+	CreatedAt time.Time           `yaml:"created_at"`
+	UpdatedAt time.Time           `yaml:"updated_at"`
 }
 
 type WorkshopStore struct {

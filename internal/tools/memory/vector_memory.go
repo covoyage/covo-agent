@@ -292,25 +292,25 @@ func truncateMax(s string, max int) string {
 
 func BuildMemorySemanticSearchTool(vm *VectorMem) *agentcore.Tool {
 	return buildVecTool(vm, "memory_semantic_search",
-		"搜索向量记忆库，返回语义接近的内容。用于在知识库中查找相关的历史对话、决策或笔记。",
+		"Search the embedding knowledge base (not session memory, not MEMORY.md). Use the memory tool for agent/user facts.",
 	)
 }
 
 func BuildMemorySemanticStoreTool(vm *VectorMem) *agentcore.Tool {
 	return buildVecStoreTool(vm, "memory_semantic_store",
-		"将内容存入向量记忆库。id 由调用者指定，相同 id 会覆盖已有记录。",
+		"Store text in the embedding knowledge base. Same id overwrites. Do not use this for MEMORY.md facts.",
 	)
 }
 
 func BuildMemorySemanticForgetTool(vm *VectorMem) *agentcore.Tool {
 	return buildVecForgetTool(vm, "memory_semantic_forget",
-		"从向量记忆库中删除指定 id 的记录。",
+		"Delete an embedding knowledge-base record by id.",
 	)
 }
 
 func BuildMemorySemanticStatsTool(vm *VectorMem) *agentcore.Tool {
 	return buildVecStatsTool(vm, "memory_semantic_stats",
-		"查看向量记忆库的统计信息，包括总记录数和文件大小。",
+		"Stats for the embedding knowledge base (count and file size).",
 	)
 }
 

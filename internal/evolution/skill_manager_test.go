@@ -148,6 +148,48 @@ original body
 	}
 }
 
+func TestSkillManagerExtraRootsFirstWins(t *testing.T) {
+	tmp := t.TempDir()
+	managed := filepath.Join(tmp, "managed")
+	workspace := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(filepath.Join(managed, "shared"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "shared"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "only-ws"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite(filepath.Join(managed, "shared", "SKILL.md"), "---\nname: shared\ndescription: managed\n---\nmanaged body\n")
+	mustWrite(filepath.Join(workspace, "shared", "SKILL.md"), "---\nname: shared\ndescription: workspace\n---\nworkspace body\n")
+	mustWrite(filepath.Join(workspace, "only-ws", "SKILL.md"), "---\nname: only-ws\ndescription: workspace only\n---\nws only\n")
+
+	mgr := NewSkillManager(managed, nil)
+	mgr.SetExtraRoots([]string{workspace})
+
+	got, err := mgr.Read("shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "workspace body") {
+		t.Fatalf("workspace skill should win, got %s", got)
+	}
+	got, err = mgr.Read("only-ws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "ws only") {
+		t.Fatalf("extra root skill missing: %s", got)
+	}
+}
+
 func TestSkillManagerRejectsUnsafeSkillNames(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "skill-manager-test")
 	if err != nil {

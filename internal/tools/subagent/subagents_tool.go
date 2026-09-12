@@ -20,6 +20,7 @@ type SubagentRun struct {
 	StartedAt     time.Time   `json:"started_at"`
 	EndedAt       *time.Time  `json:"ended_at,omitempty"`
 	Depth         int         `json:"depth"`
+	OwnerTurn     int         `json:"-"` // yield-claim generation; 0 = not owned by a yield turn
 	InputMessages []string    `json:"-"`
 	inputChan     chan string `json:"-"` // real-time message channel
 }
@@ -30,6 +31,7 @@ type SubagentRegistry struct {
 	runs            map[string]*SubagentRun
 	cancels         map[string]context.CancelFunc // active cancel funcs by id
 	counter         int
+	currentTurn     int            // yield ownership generation
 	store           *SubagentStore // optional persistence layer
 	parentSessionFn func() string  // optional: returns parent session ID for persistence
 }
@@ -98,6 +100,45 @@ func (r *SubagentRegistry) StartWithCancel(parentCtx context.Context, task strin
 	ctx, cancel := context.WithCancel(parentCtx)
 	r.cancels[id] = cancel
 	return ctx, id
+}
+
+// StartBackground registers a child that can be claimed by sessions_yield.
+// The returned context is detached from the parent tool call so the child
+// keeps running after spawn returns.
+func (r *SubagentRegistry) StartBackground(parentCtx context.Context, task string, depth int) (context.Context, string) {
+	runCtx := context.WithoutCancel(parentCtx)
+	ctx, id := r.StartWithCancel(runCtx, task, depth)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.currentTurn == 0 {
+		r.currentTurn = 1
+	}
+	if run, ok := r.runs[id]; ok {
+		run.OwnerTurn = r.currentTurn
+	}
+	return ctx, id
+}
+
+// ClaimYield succeeds only when this turn owns at least one still-running
+// background child. On success those children stay running, but a later
+// yield cannot claim them again until new background spawns happen.
+func (r *SubagentRegistry) ClaimYield() ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.currentTurn == 0 {
+		return nil, fmt.Errorf("no pending child completion owned by this turn")
+	}
+	var ids []string
+	for _, run := range r.runs {
+		if run.Status == "running" && run.OwnerTurn == r.currentTurn {
+			ids = append(ids, run.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("no pending child completion owned by this turn")
+	}
+	r.currentTurn++
+	return ids, nil
 }
 
 // allocIDLocked allocates the next subagent ID. If a persistent store is

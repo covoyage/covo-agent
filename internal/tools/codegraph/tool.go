@@ -10,10 +10,10 @@ import (
 )
 
 // BuildCodeGraphTool returns a tool that builds a Go package dependency graph.
-func BuildCodeGraphTool() *agentcore.Tool {
+func BuildCodeGraphTool(workDir string) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "code_graph",
-		Description: `Build a dependency graph of Go packages in the workspace.
+		Description: `Build a dependency graph of Go packages in the workspace (Go only, not a general code graph).
 
 Analyzes import statements across all .go files and produces a directed graph
 showing which packages depend on which. Can detect import cycles.
@@ -45,12 +45,12 @@ Output formats: text (default), mermaid, dot.`,
 				params.Format = "text"
 			}
 
-			workDir, _ := ctx.Value("work_dir").(string)
-			if workDir == "" {
-				workDir = "."
+			dir := workDir
+			if dir == "" {
+				dir = "."
 			}
 
-			graph, err := codegraph.Build(workDir)
+			graph, err := codegraph.Build(dir)
 			if err != nil {
 				return nil, fmt.Errorf("build code graph: %w", err)
 			}

@@ -68,7 +68,7 @@ func BuildKanbanTool(km *KanbanManager) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "kanban",
 		Description: strings.Join([]string{
-			"Manage a kanban-style task board for structured project execution.",
+			"Persistent kanban board (survives restarts). Prefer this over todo for multi-session work.",
 			"Use this to break down large tasks, track dependencies, and coordinate parallel work.",
 			"",
 			"The board supports hierarchical tasks (epics → stories → tasks → subtasks).",

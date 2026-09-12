@@ -23,6 +23,7 @@ type Curator struct {
 	usage        *SkillUsageTracker
 	memory       *MemorySystem
 	skillMgr     *SkillManager
+	workshop     *WorkshopStore
 	extractor    *TrajectorySkillExtractor
 	nudgeSystem  *NudgeSystem
 	reviewer     SessionReviewer // BackgroundReviewer for post-session analysis
@@ -91,6 +92,12 @@ func (c *Curator) SetSkillManager(sm *SkillManager) {
 	}
 }
 
+// SetWorkshopStore routes extracted skills through a pending proposal instead
+// of writing SKILL.md immediately. Nil keeps the previous auto-create path.
+func (c *Curator) SetWorkshopStore(store *WorkshopStore) {
+	c.workshop = store
+}
+
 // SetNudgeSystem assigns or creates a nudge system.
 func (c *Curator) SetNudgeSystem(cfg NudgeConfig, homeDir string) {
 	c.nudgeSystem = NewNudgeSystem(homeDir, c.memory, c.skillMgr, c.usage, cfg, c.logger)
@@ -140,10 +147,11 @@ func (c *Curator) OnSessionEnd(trajectory []map[string]any, llmCall func(ctx con
 					"name", candidate.Name,
 					"confidence", candidate.Confidence,
 				)
-				// Auto-create high-confidence candidates
 				if candidate.Confidence >= 0.8 {
-					if err := c.createSkillFromCandidate(*candidate); err != nil {
-						c.logger.Warn("curator: auto-create skill failed", "name", candidate.Name, "error", err)
+					if err := c.proposeOrCreateSkill(*candidate); err != nil {
+						c.logger.Warn("curator: skill proposal failed", "name", candidate.Name, "error", err)
+					} else if c.workshop != nil {
+						c.logger.Info("curator: skill proposed", "name", candidate.Name)
 					} else {
 						c.logger.Info("curator: skill auto-created", "name", candidate.Name)
 					}
@@ -180,6 +188,21 @@ func (c *Curator) createSkillFromCandidate(candidate ExtractionCandidate) error 
 
 	_, err := c.skillMgr.Create(candidate.Name, candidate.Description, candidate.Body)
 	return err
+}
+
+func (c *Curator) proposeOrCreateSkill(candidate ExtractionCandidate) error {
+	if candidate.Name == "" || candidate.Body == "" {
+		return fmt.Errorf("candidate missing name or body")
+	}
+	if c.workshop != nil {
+		rationale := candidate.Description
+		if rationale == "" {
+			rationale = fmt.Sprintf("extracted from session (confidence %.0f%%)", candidate.Confidence*100)
+		}
+		_, err := c.workshop.Create(ProposalCreate, candidate.Name, candidate.Body, rationale)
+		return err
+	}
+	return c.createSkillFromCandidate(candidate)
 }
 
 // PendingNudgesForPrompt returns system prompt content for pending nudges.
@@ -320,9 +343,10 @@ func (c *Curator) RunNow() {
 }
 
 // Distill runs skill extraction on the given trajectory on demand (the same
-// pipeline used automatically at session end) and, if a candidate is produced,
-// persists it as a skill. Returns the candidate (may be nil) and whether a skill
-// was created.
+// pipeline used automatically at session end). When a workshop store is
+// attached, the candidate is saved as a pending proposal instead of a live
+// skill. Returns the candidate (may be nil) and whether a live skill was
+// created.
 func (c *Curator) Distill(
 	ctx context.Context,
 	trajectory []map[string]any,
@@ -339,11 +363,11 @@ func (c *Curator) Distill(
 		return candidate, false, err
 	}
 	created := false
-	if c.skillMgr != nil {
-		if err := c.createSkillFromCandidate(*candidate); err != nil {
+	if c.workshop != nil || c.skillMgr != nil {
+		if err := c.proposeOrCreateSkill(*candidate); err != nil {
 			return candidate, false, err
 		}
-		created = true
+		created = c.workshop == nil
 	}
 	return candidate, created, nil
 }

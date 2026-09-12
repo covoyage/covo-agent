@@ -57,8 +57,8 @@ func TestGenerateTestsForFileGoSkeleton(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "skeleton" {
-		t.Fatalf("expected 'skeleton', got %q", result.Status)
+	if result.Status != "suggested" && result.Status != "generated" {
+		t.Fatalf("expected suggested or generated, got %q", result.Status)
 	}
 	if result.Language != "go" {
 		t.Errorf("expected 'go', got %q", result.Language)
@@ -68,12 +68,13 @@ func TestGenerateTestsForFileGoSkeleton(t *testing.T) {
 	if result.TestFile != testFile {
 		t.Errorf("expected test file %q, got %q", testFile, result.TestFile)
 	}
-	data, _ := os.ReadFile(testFile)
-	if !strings.Contains(string(data), "package calculator") {
-		t.Error("generated test missing package declaration")
-	}
-	if !strings.Contains(string(data), "func TestCalculator") {
-		t.Error("generated test missing TestCalculator function")
+	if result.Status == "suggested" {
+		if _, err := os.Stat(testFile); !os.IsNotExist(err) {
+			t.Fatal("suggested path should not write a skeleton file")
+		}
+		if !strings.Contains(result.Error, testFile) {
+			t.Errorf("expected path in error, got %q", result.Error)
+		}
 	}
 }
 
@@ -102,8 +103,8 @@ func TestGenerateTestsForFilePython(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "skeleton" {
-		t.Fatalf("expected 'skeleton', got %q", result.Status)
+	if result.Status != "suggested" {
+		t.Fatalf("expected 'suggested', got %q", result.Status)
 	}
 	if result.Language != "python" {
 		t.Errorf("expected 'python', got %q", result.Language)
@@ -112,6 +113,9 @@ func TestGenerateTestsForFilePython(t *testing.T) {
 	testFile := filepath.Join(dir, "test_helper.py")
 	if result.TestFile != testFile {
 		t.Errorf("expected %q, got %q", testFile, result.TestFile)
+	}
+	if _, err := os.Stat(testFile); !os.IsNotExist(err) {
+		t.Fatal("python path should not write a skeleton file")
 	}
 }
 
@@ -124,8 +128,8 @@ func TestGenerateTestsForFileJavaScript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "skeleton" {
-		t.Fatalf("expected 'skeleton', got %q", result.Status)
+	if result.Status != "suggested" {
+		t.Fatalf("expected 'suggested', got %q", result.Status)
 	}
 	if result.Language != "javascript" {
 		t.Errorf("expected 'javascript', got %q", result.Language)
@@ -135,9 +139,8 @@ func TestGenerateTestsForFileJavaScript(t *testing.T) {
 	if result.TestFile != testFile {
 		t.Errorf("expected %q, got %q", testFile, result.TestFile)
 	}
-	data, _ := os.ReadFile(testFile)
-	if !strings.Contains(string(data), "vitest") {
-		t.Error("generated test missing vitest import")
+	if _, err := os.Stat(testFile); !os.IsNotExist(err) {
+		t.Fatal("javascript path should not write a skeleton file")
 	}
 }
 

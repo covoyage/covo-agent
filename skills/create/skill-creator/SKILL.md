@@ -1,121 +1,64 @@
 ---
 name: skill-creator
-description: "Use when creating new skills, editing existing skills, or verifying skills before use"
-version: 2.0.0
+description: "Use when creating or editing user-local skills; propose via skill_workshop or skill_manage, never write live SKILL.md."
+version: 2.1.0
 author: Covo Agent
+license: MIT
+platforms: [linux, macos, windows]
+metadata:
+  tags: [skills, authoring, workshop]
+  related_skills: [skill-authoring]
 ---
 
-# Creating Skills — TDD for Process Documentation
+# Creating user-local skills
 
-Write the skill. Test it with a subagent. Close loopholes.
+Durable skill create/edit/patch/delete goes through `skill_workshop` or `skill_manage` as a **pending proposal**. Tell the user to run `/skill apply <id>` after review.
 
-If you didn't watch an agent fail WITHOUT the skill, you don't know if the skill teaches the right thing.
+Do **not** write `~/.covo-agent/skills/.../SKILL.md` yourself.
+Do **not** apply, reject, or quarantine from the tool.
 
-## What is a Skill?
+For skills that ship in this repo (`skills/<category>/<name>/`), use `skill-authoring` and edit the file in git. This skill is only for user-local skills.
 
-A reference guide for proven techniques, patterns, or tools. Helps future agent instances find and apply effective approaches.
+## Workflow
 
-**Skills are:** reusable techniques, patterns, reference guides.
+1. Establish the contract: trigger, expected outcome, and whether the skill needs scripts/references.
+2. Propose with `skill_manage(action='create'|'edit'|'patch')` or `skill_workshop`. Do not write the live file.
+3. Return the proposal id and tell the user: `/skill apply <id>`.
+4. Stop. Live install is user-only.
 
-**Skills are NOT:** narratives about how you solved a problem once.
+## Frontmatter
 
-## TDD Cycle for Skills
+Required: `name`, `description` (≤1024 chars).
 
-| TDD | Skill Creation |
-|-----|---------------|
-| Test case | Pressure scenario with subagent |
-| Test fails (RED) | Agent violates rule without skill (baseline) |
-| Test passes (GREEN) | Agent complies with skill present |
-| Refactor | Close loopholes while maintaining compliance |
-
-### RED: Run baseline without skill
-Dispatch subagent with task → document what fails → capture rationalizations verbatim.
-
-### GREEN: Write minimal skill
-Address ONLY the failures seen. Don't add content for hypothetical cases.
-
-### REFACTOR: Close loopholes
-Agent found new rationalization? Add explicit counter. Re-test.
-
-## Skill Structure
-
-```markdown
+```yaml
 ---
-name: skill-name
-description: Use when [triggering conditions]
+name: my-skill-name
+description: Use when <trigger>. <one-line behavior>.
+version: 1.0.0
+author: Covo Agent
+license: MIT
+metadata:
+  tags: [short, tags]
 ---
+```
 
+`description` is the discovery surface. Start with "Use when...". Put triggering conditions there, not a full workflow dump.
+
+## Body shape
+
+```
 # Title
 
 ## Overview
-Core principle in 1-2 sentences.
-
 ## When to Use
-Bullet list with symptoms and use cases. When NOT to use.
-
-## Quick Reference
-Table or bullets for quick scanning.
-
-## Implementation
-Code examples or patterns.
-
-## Common Mistakes
-What goes wrong + fixes.
-
-## Red Flags — STOP
-List of warning signs.
+## Commands / Implementation
+## Common Pitfalls
+## Verification Checklist
 ```
 
-## CSO — Agent Search Optimization
+Keep commands real: real binary names, real flags, real install sources. Never invent a Homebrew tap or CLI.
 
-**Critical: description = when to use, NOT what the skill does.**
+## Iron law
 
-```yaml
-# ❌ BAD: Summarizes workflow — agent skips reading skill
-description: Use for TDD — write test first, watch it fail, write minimal code, refactor
+No live SKILL.md writes. Proposal → user `/skill apply`. In-repo skills → `skill-authoring`.
 
-# ✅ GOOD: Just triggering conditions
-description: Use when implementing any feature or bugfix, before writing implementation code
-```
-
-**Why:** When description summarizes workflow, agent follows the description shortcut and never reads the full skill body. This was empirically proven.
-
-### Description Rules
-1. Start with "Use when..."
-2. Describe triggering conditions ONLY — never the process
-3. Use concrete triggers (symptoms, situations, error messages)
-4. Keep under 500 characters
-5. Write in third person
-
-```yaml
-# ✅ GOOD
-description: Use when tests have race conditions, timing dependencies, or pass/fail inconsistently
-
-# ✅ GOOD
-description: Use when using React Router and handling authentication redirects
-
-# ❌ BAD
-description: Helps with async testing when tests are flaky
-```
-
-### Keyword Coverage
-Use words agent would search for: error messages, symptoms ("flaky", "hanging"), tool names, file types, library names.
-
-### Token Efficiency Targets
-- Frequently-loaded skills: <200 words
-- Other skills: <500 words
-- Don't repeat cross-referenced skills
-- Link heavy reference to separate files
-
-## Anti-Patterns
-
-| Pattern | Why Bad |
-|---------|---------|
-| Narrative examples | Too specific, not reusable |
-| Multi-language dilution | Maintenance burden |
-| Description with workflow | Agent skips reading skill body |
-| Generic labels (step1, helper2) | No semantic meaning |
-
-## Iron Law
-
-**No skill without a failing test first.** Applies to NEW skills AND EDITS. No exceptions — not for "simple additions", "just a section", or "documentation updates".

@@ -147,6 +147,7 @@ type Config struct {
 	Display         *DisplayConfig             `yaml:"display,omitempty"`
 	Env             map[string]string          `yaml:"env,omitempty"`
 	Skills          *SkillsConfig              `yaml:"skills,omitempty"`
+	Tools           *ToolsConfig               `yaml:"tools,omitempty"`
 	Curator         *CuratorConfig             `yaml:"curator,omitempty"`
 	Auxiliary       *AuxiliaryConfig           `yaml:"auxiliary,omitempty"`
 	MCPServers      map[string]MCPServerConfig `yaml:"mcp_servers,omitempty"`
@@ -167,6 +168,13 @@ type SkillsConfig struct {
 	Disabled          []string          `yaml:"disabled,omitempty"`
 	Tier              string            `yaml:"tier,omitempty"`
 	Config            map[string]string `yaml:"config,omitempty"`
+}
+
+type ToolsConfig struct {
+	// Lean hides long-tail tool schemas from the model and leaves them
+	// discoverable via tool_search / tool_describe / tool_call.
+	// Default is auto: enable when more than one MCP server is configured.
+	Lean string `yaml:"lean,omitempty"` // auto / on / off
 }
 
 type CuratorConfig struct {
@@ -359,6 +367,9 @@ func MergeConfig(global, project *Config) *Config {
 				out.Env[k] = v
 			}
 		}
+	}
+	if project.Tools != nil {
+		out.Tools = project.Tools
 	}
 	if project.Skills != nil {
 		if out.Skills == nil {

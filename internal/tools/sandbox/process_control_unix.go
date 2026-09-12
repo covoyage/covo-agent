@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
@@ -11,6 +12,28 @@ import (
 
 func configureProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+}
+
+func signalProcess(pid int, process *os.Process, name string) error {
+	var sig syscall.Signal
+	switch name {
+	case "INT":
+		sig = syscall.SIGINT
+	case "TSTP":
+		sig = syscall.SIGTSTP
+	default:
+		return fmt.Errorf("unsupported signal %s", name)
+	}
+	pgid, err := syscall.Getpgid(pid)
+	if err == nil {
+		if err := syscall.Kill(-pgid, sig); err == nil {
+			return nil
+		}
+	}
+	if process != nil {
+		return process.Signal(sig)
+	}
+	return syscall.Kill(pid, sig)
 }
 
 func terminateProcessTree(pid int, process *os.Process, grace time.Duration) error {

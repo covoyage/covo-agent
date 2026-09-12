@@ -6,7 +6,9 @@ author: Covo Agent
 license: MIT
 platforms: [linux, macos, windows]
 prerequisites:
+  env: [NOTION_API_KEY]
   env_vars: [NOTION_API_KEY]
+  commands: [python3]
 metadata:
   tags: [Notion, Productivity, Notes, Database, API, CLI, Workers]
   homepage: https://developers.notion.com
@@ -14,7 +16,15 @@ metadata:
 
 # Notion
 
-Talk to Notion two ways. Same integration token works for both — pick by what's available.
+Prefer the bundled script when you need a one-liner:
+
+```bash
+skill_script {"action":"run","name":"notion","script":"notion_api.py","args":["search","meeting notes"]}
+skill_script {"action":"run","name":"notion","script":"notion_api.py","args":["get-page","PAGE_ID"]}
+python3 scripts/notion_api.py create-page --parent PAGE_ID --title "Notes"
+```
+
+Talk to Notion two other ways. Same integration token works for both — pick by what's available.
 
 ◆ **`ntn` CLI** — Notion's official CLI. Shorter syntax, one-line file uploads, required for Workers. macOS + Linux only as of May 2026 (Windows support "coming soon"). **Default when installed.**
 ◆ **HTTP + curl** — works everywhere including Windows. **Default fallback** when `ntn` isn't installed.

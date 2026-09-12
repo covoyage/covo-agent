@@ -36,6 +36,7 @@ type ProcessSession struct {
 	exitCode     int
 	outputBuffer string
 	waitDone     chan struct{}
+	PTY          bool
 	mu           sync.Mutex
 }
 
@@ -109,7 +110,7 @@ func (s *ProcessStore) NextID() string {
 	return fmt.Sprintf("proc-%d", s.counter)
 }
 
-func (s *ProcessStore) Spawn(command string, cwd string) (*ProcessSession, error) {
+func (s *ProcessStore) Spawn(command string, cwd string, usePTY bool) (*ProcessSession, error) {
 	if command == "" {
 		return nil, fmt.Errorf("command is required")
 	}
@@ -137,38 +138,53 @@ func (s *ProcessStore) Spawn(command string, cwd string) (*ProcessSession, error
 		}
 	}
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("create stdout pipe: %w", err)
-	}
-	cmd.Stderr = cmd.Stdout
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("create stdin pipe: %w", err)
-	}
-
-	configureProcessGroup(cmd)
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start command: %w", err)
-	}
-
 	id := s.NextID()
 	session := &ProcessSession{
 		ID:        id,
 		Command:   command,
 		CWD:       resolvedCwd,
-		PID:       cmd.Process.Pid,
-		process:   cmd.Process,
-		stdin:     stdin,
 		startedAt: time.Now(),
 		waitDone:  make(chan struct{}),
+		PTY:       usePTY,
 	}
 
-	safego.SafeGo(func() {
-		s.readerLoop(session, cmd, stdout)
-	}, nil)
+	if usePTY {
+		ensurePTYTerm(cmd)
+		ptmx, err := startPTY(cmd)
+		if err != nil {
+			return nil, fmt.Errorf("start pty: %w", err)
+		}
+		session.PID = cmd.Process.Pid
+		session.process = cmd.Process
+		session.stdin = ptmx
+		safego.SafeGo(func() {
+			s.readerLoop(session, cmd, ptmx)
+			_ = ptmx.Close()
+		}, nil)
+	} else {
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, fmt.Errorf("create stdout pipe: %w", err)
+		}
+		cmd.Stderr = cmd.Stdout
+
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			return nil, fmt.Errorf("create stdin pipe: %w", err)
+		}
+
+		configureProcessGroup(cmd)
+
+		if err := cmd.Start(); err != nil {
+			return nil, fmt.Errorf("start command: %w", err)
+		}
+		session.PID = cmd.Process.Pid
+		session.process = cmd.Process
+		session.stdin = stdin
+		safego.SafeGo(func() {
+			s.readerLoop(session, cmd, stdout)
+		}, nil)
+	}
 
 	s.mu.Lock()
 	s.pruneIfNeeded()
@@ -176,6 +192,19 @@ func (s *ProcessStore) Spawn(command string, cwd string) (*ProcessSession, error
 	s.mu.Unlock()
 
 	return session, nil
+}
+
+func ensurePTYTerm(cmd *exec.Cmd) {
+	env := cmd.Env
+	if env == nil {
+		env = os.Environ()
+	}
+	for _, e := range env {
+		if strings.HasPrefix(e, "TERM=") {
+			return
+		}
+	}
+	cmd.Env = append(env, "TERM=xterm-256color")
 }
 
 func (s *ProcessStore) readerLoop(session *ProcessSession, cmd *exec.Cmd, stdout io.Reader) {
@@ -260,6 +289,7 @@ func (s *ProcessStore) sessionToMap(session *ProcessSession, now time.Time) map[
 		"started_at":     session.startedAt.Format(time.RFC3339),
 		"uptime_seconds": int(now.Sub(session.startedAt).Seconds()),
 		"status":         map[bool]string{true: "exited", false: "running"}[session.exited],
+		"pty":            session.PTY,
 	}
 	if session.exited {
 		entry["exit_code"] = session.exitCode
@@ -304,6 +334,7 @@ func (s *ProcessStore) Poll(id string) map[string]any {
 		"status":         map[bool]string{true: "exited", false: "running"}[exited],
 		"pid":            session.PID,
 		"uptime_seconds": int(time.Since(session.startedAt).Seconds()),
+		"pty":            session.PTY,
 		"output_preview": preview,
 	}
 	if exited {
@@ -456,6 +487,61 @@ func (s *ProcessStore) SubmitStdin(id string, data string) map[string]any {
 	return s.WriteStdin(id, data+"\n")
 }
 
+func (s *ProcessStore) SendKeys(id string, keys string) map[string]any {
+	session := s.Get(id)
+	if session == nil {
+		return notFoundResult(id)
+	}
+	tokens, payload, signals, err := parseSendKeys(keys)
+	if err != nil {
+		return map[string]any{"status": "error", "error": err.Error()}
+	}
+
+	session.mu.Lock()
+	if session.exited {
+		session.mu.Unlock()
+		return map[string]any{"status": "already_exited", "error": "Process has already finished"}
+	}
+	stdin := session.stdin
+	pid := session.PID
+	proc := session.process
+	usePTY := session.PTY
+	session.mu.Unlock()
+
+	var warnings []string
+	if len(payload) > 0 {
+		if stdin == nil {
+			warnings = append(warnings, "stdin not available")
+		} else if _, err := stdin.Write(payload); err != nil {
+			warnings = append(warnings, err.Error())
+		}
+	}
+	// Pipe stdin cannot deliver SIGINT/SIGTSTP; signal the process group.
+	// A PTY already received the control bytes (C-c / C-z), so skip extra signals.
+	if !usePTY {
+		for _, sig := range signals {
+			if err := signalProcess(pid, proc, sig); err != nil {
+				warnings = append(warnings, err.Error())
+			}
+		}
+	}
+	out := map[string]any{
+		"status": "ok",
+		"keys":   keys,
+		"tokens": tokens,
+	}
+	if len(payload) > 0 {
+		out["bytes_written"] = len(payload)
+	}
+	if len(signals) > 0 {
+		out["signals"] = signals
+	}
+	if len(warnings) > 0 {
+		out["warning"] = strings.Join(warnings, "; ")
+	}
+	return out
+}
+
 func (s *ProcessStore) CloseStdin(id string) map[string]any {
 	session := s.Get(id)
 	if session == nil {
@@ -516,7 +602,13 @@ func BuildProcessTool(store *ProcessStore) *agentcore.Tool {
 			"  'kill'  — Terminate a running process (sends SIGTERM, then SIGKILL)",
 			"  'write' — Send raw data to process stdin (no newline appended)",
 			"  'submit' — Send data + newline to process stdin (for answering prompts)",
+			"  'send_keys' — Send key tokens (C-c, Enter, Escape) and control signals",
 			"  'close' — Close stdin / send EOF",
+			"",
+			"Set pty=true on spawn for interactive TUI apps that need a real terminal.",
+			"send_keys tokens are space-separated: 'C-c', 'C-d', 'C-z', 'Enter', 'Escape', 'Tab',",
+			"or literal text. On a PTY, C-c/C-z are delivered as terminal bytes.",
+			"On a pipe, C-c also sends SIGINT to the process group.",
 			"",
 			"For long-running tasks like dev servers, build watchers, or data processing.",
 		}, "\n"),
@@ -525,7 +617,7 @@ func BuildProcessTool(store *ProcessStore) *agentcore.Tool {
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"list", "spawn", "poll", "log", "wait", "kill", "write", "submit", "close"},
+					"enum":        []string{"list", "spawn", "poll", "log", "wait", "kill", "write", "submit", "send_keys", "close"},
 					"description": "Action to perform.",
 				},
 				"session_id": map[string]any{
@@ -540,9 +632,17 @@ func BuildProcessTool(store *ProcessStore) *agentcore.Tool {
 					"type":        "string",
 					"description": "Working directory (for 'spawn' action). Defaults to current directory.",
 				},
+				"pty": map[string]any{
+					"type":        "boolean",
+					"description": "If true, spawn with a PTY (for interactive TUI apps). Unix only.",
+				},
 				"data": map[string]any{
 					"type":        "string",
 					"description": "Text to send to process stdin (for 'write' and 'submit' actions).",
+				},
+				"keys": map[string]any{
+					"type":        "string",
+					"description": "Key tokens for 'send_keys' (e.g. 'C-c', 'Enter', 'yes Enter').",
 				},
 				"timeout": map[string]any{
 					"type":        "integer",
@@ -565,10 +665,12 @@ func BuildProcessTool(store *ProcessStore) *agentcore.Tool {
 		Func: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var params struct {
 				Action    string `json:"action"`
+				Keys      string `json:"keys"`
 				SessionID string `json:"session_id"`
 				Command   string `json:"command"`
 				CWD       string `json:"cwd"`
 				Data      string `json:"data"`
+				PTY       bool   `json:"pty"`
 				Timeout   int    `json:"timeout"`
 				Offset    int    `json:"offset"`
 				Limit     int    `json:"limit"`
@@ -585,7 +687,7 @@ func BuildProcessTool(store *ProcessStore) *agentcore.Tool {
 				if params.Command == "" {
 					return nil, fmt.Errorf("command is required for spawn action")
 				}
-				session, err := store.Spawn(params.Command, params.CWD)
+				session, err := store.Spawn(params.Command, params.CWD, params.PTY)
 				if err != nil {
 					return nil, fmt.Errorf("spawn failed: %w", err)
 				}
@@ -594,6 +696,7 @@ func BuildProcessTool(store *ProcessStore) *agentcore.Tool {
 					"session_id": session.ID,
 					"pid":        session.PID,
 					"command":    session.Command,
+					"pty":        session.PTY,
 				}, nil
 
 			case "poll":
@@ -637,6 +740,15 @@ func BuildProcessTool(store *ProcessStore) *agentcore.Tool {
 				}
 				return store.SubmitStdin(params.SessionID, params.Data), nil
 
+			case "send_keys":
+				if params.SessionID == "" {
+					return nil, fmt.Errorf("session_id is required for send_keys action")
+				}
+				if strings.TrimSpace(params.Keys) == "" {
+					return nil, fmt.Errorf("keys is required for send_keys action")
+				}
+				return store.SendKeys(params.SessionID, params.Keys), nil
+
 			case "close":
 				if params.SessionID == "" {
 					return nil, fmt.Errorf("session_id is required for close action")
@@ -644,7 +756,7 @@ func BuildProcessTool(store *ProcessStore) *agentcore.Tool {
 				return store.CloseStdin(params.SessionID), nil
 
 			default:
-				return nil, fmt.Errorf("unknown action: %s (use: list, spawn, poll, log, wait, kill, write, submit, close)", params.Action)
+				return nil, fmt.Errorf("unknown action: %s (use: list, spawn, poll, log, wait, kill, write, submit, send_keys, close)", params.Action)
 			}
 		},
 	}

@@ -1,7 +1,7 @@
 ---
 name: coding-agent
-description: "Delegate coding tasks to Codex, Claude Code, OpenCode, or Pi agents via background shell processes."
-version: 1.0.0
+description: "Delegate coding tasks to Codex, Claude Code, OpenCode, or Pi via background process spawn (PTY when needed)."
+version: 1.1.0
 author: Covo Agent
 license: MIT
 platforms: [linux, macos]
@@ -13,172 +13,98 @@ metadata:
 
 # Coding Agent (always backgrounded)
 
-Use **shell** with **background:true** for all coding-agent work.
-Do not use a foreground one-shot path here.
-Start the agent, get the `sessionId`, monitor with `process`, and require the worker to notify the user directly when it finishes.
+Spawn workers with the **`process`** tool (`action=spawn`). Do not use a foreground one-shot path.
+There is no `shell` tool parameter named `pty` or `background`.
 
-## PTY Mode: Codex/Pi/OpenCode yes, Claude Code no
+- Codex / Pi / OpenCode: `process` `action=spawn` `pty=true`
+- Claude Code: `process` `action=spawn` without PTY, flags `--print --permission-mode bypassPermissions`
 
-For **Codex, Pi, and OpenCode**, PTY is required:
+Start the agent, keep the returned `session_id`, monitor with `process` `poll`/`log`, and require the worker to notify via `sessions_send` when it finishes.
 
-```bash
-# Correct for Codex/Pi/OpenCode
-shell pty:true background:true command:"codex exec 'Your prompt'"
+```
+process action=spawn pty=true cwd:~/project command:"codex exec 'Your prompt'"
+process action=spawn cwd:~/project command:"claude --permission-mode bypassPermissions --print 'Your task'"
 ```
 
-For **Claude Code** (`claude` CLI), use `--print --permission-mode bypassPermissions` instead.
-Do not use PTY for Claude Code here.
+Wrong: `shell pty:true background:true ...`
 
-```bash
-# Correct for Claude Code
-shell background:true command:"claude --permission-mode bypassPermissions --print 'Your task'"
+### Process tool
 
-# Wrong for Claude Code (PTY, wrong flags, no background)
-shell pty:true command:"claude --dangerously-skip-permissions 'task'"
-```
+| Action      | Description                                            |
+| ----------- | ------------------------------------------------------ |
+| `spawn`     | Start a background process; set `pty=true` for TUI CLIs |
+| `list`      | List running/recent sessions                           |
+| `poll`      | Status + recent output                                 |
+| `log`       | Full output with offset/limit                          |
+| `write`     | Raw stdin (no newline)                                 |
+| `submit`    | stdin + newline                                        |
+| `send_keys` | Key tokens (`C-c`, `Enter`, literal text)              |
+| `kill`      | SIGTERM then SIGKILL                                   |
 
-### Shell Tool Parameters
-
-| Parameter    | Type    | Description                                 |
-| ------------ | ------- | ------------------------------------------- |
-| `command`    | string  | The shell command to run                    |
-| `pty`        | boolean | Use for Codex/Pi/OpenCode                   |
-| `workdir`    | string  | Working directory                           |
-| `background` | boolean | **Always true for this skill**              |
-| `timeout`    | number  | Timeout in seconds                          |
-| `elevated`   | boolean | Run on host instead of sandbox (if allowed) |
-
-### Process Tool Actions
-
-| Action      | Description                                          |
-| ----------- | ---------------------------------------------------- |
-| `list`      | List all running/recent sessions                     |
-| `poll`      | Check if session is still running                    |
-| `log`       | Get session output (with optional offset/limit)      |
-| `write`     | Send raw data to stdin                               |
-| `submit`    | Send data + newline (like typing and pressing Enter) |
-| `send-keys` | Send key tokens or hex bytes                         |
-| `paste`     | Paste text (with optional bracketed mode)            |
-| `kill`      | Terminate the session                                |
+There is no `paste` action and no `send-keys` alias. Session id field is `session_id`.
 
 ---
 
 ## Mandatory Pattern
 
-Every coding-agent run follows this pattern:
+1. Capture a real `sessions_send` **target** (parent session id or routing key) before spawning.
+2. Spawn the coding CLI with `process` immediately (`pty=true` for Codex/Pi/OpenCode).
+3. Include that target in the worker prompt and require `sessions_send` on completion.
+4. Monitor with `process` `action=log` / `poll` and `session_id`.
+5. If the worker needs input or fails before notifying, handle that yourself. Do not rely on heartbeat.
 
-1. Capture the notification route from the current conversation before spawning:
-   - `notifyChannel`
-   - `notifyTarget`
-   - `notifyAccount` (if applicable)
-   - `notifyReplyTo` (if replying to a specific message is desired)
-   - `notifyThreadId` (Telegram topic / Slack thread when applicable)
-2. Start the coding CLI with `background:true` immediately.
-3. Include the notification route in the worker prompt and require the worker to call `sessions_send` on completion.
-4. Monitor with `process action:log` / `poll`.
-5. If the worker needs input or fails before notifying, handle that explicitly yourself. Do not rely on heartbeat.
-
-If you do not have a trustworthy notification route, say so and do not claim that completion will notify the user automatically.
+If you do not have a trustworthy notification target, say so and do not claim that completion will notify the user automatically.
 
 ### Multi-hour issue-to-PR builds
 
-For feature builds, bug fixes, or product work that may take a long time, use a
-GitHub issue as the durable spec before starting Codex:
-
 1. Create or reuse the issue with `gh issue create` / `gh issue view`.
-2. Start Codex in the background and include the issue URL, target repo, target
-   branch/base, expected PR output, required proof, and the notification route.
-3. Tell Codex to create a branch, implement, run the relevant checks, run Codex
-   review/auto-review until there are no accepted actionable findings, and open
-   a PR linked to the issue.
-4. Return the issue URL and background `sessionId` immediately. If a dashboard
-   task/flow URL exists, return that too.
-5. Monitor with `process`. Abort with `process kill` for raw background runs, or
-   `tasks.cancel` when the work is mirrored into the Task Registry.
+2. Spawn Codex in the background and include the issue URL, target repo, branch/base, expected PR output, required proof, and the `sessions_send` target.
+3. Tell Codex to create a branch, implement, run checks, review until clean, and open a PR linked to the issue.
+4. Return the issue URL and background `session_id` immediately.
+5. Monitor with `process`. Abort with `process` `action=kill`.
 
-Prefer a dashboard-backed issue-build/task-flow lane over a raw background
-process when available. Do not block the user on the issue creation or build
-loop; long-running work is expected.
+Do not block the user on the issue creation or build loop.
 
 ---
 
-## Notification Route
+## Notification
 
-Use a direct outbound completion message:
+`sessions_send` takes **`target`** and **`message`** only.
 
-```bash
-sessions_send channel:<channel> target:<target> message:"<text>"
+```
+sessions_send target:<parent-session-or-route> message:"Done: <brief summary>"
 ```
 
-Add optional routing flags only when they are real and applicable:
+There is no `channel`, `account`, `reply_to`, or `thread_id` argument.
 
-- `account:<id>`
-- `reply_to:<messageId>`
-- `thread_id:<threadId>`
-
-### Completion Prompt Snippet
-
-Append something like this to every worker prompt:
+Append this to every worker prompt:
 
 ```text
-Notification route for completion:
-- channel: <notifyChannel>
-- target: <notifyTarget>
-- account: <notifyAccount or omit>
-- reply_to: <notifyReplyTo or omit>
-- thread_id: <notifyThreadId or omit>
-
-When the task is completely finished, send exactly one completion message back to the user with sessions_send using that route.
-If the task fails fatally, send exactly one failure message back to the user with sessions_send using that route.
+When the task is completely finished, send exactly one completion message with sessions_send:
+  target: <notifyTarget>
+  message: Done: <brief summary>
+If the task fails fatally, send exactly one failure message the same way.
 Do not skip the completion/failure message.
-```
-
-### Completion Command Template
-
-```bash
-sessions_send channel:<notifyChannel> target:<notifyTarget> message:"Done: <brief summary>"
-```
-
-Optional additions:
-
-```bash
-sessions_send channel:<notifyChannel> target:<notifyTarget> message:"Done: <brief summary>" account:<notifyAccount> reply_to:<notifyReplyTo> thread_id:<notifyThreadId>
 ```
 
 ---
 
 ## Quick Start
 
-For scratch Codex work, create a temp git repo first, then start the worker in the background with the completion route injected into the prompt:
+Codex needs a trusted git directory.
 
-```bash
-SCRATCH=$(mktemp -d)
-cd "$SCRATCH" && git init
-
-shell pty:true workdir:$SCRATCH background:true command:"codex exec 'Your prompt here.
-
-Notification route for completion:
-- channel: <notifyChannel>
-- target: <notifyTarget>
-- account: <notifyAccount or omit>
-- reply_to: <notifyReplyTo or omit>
-- thread_id: <notifyThreadId or omit>
-
-When the task is completely finished, send exactly one completion message back to the user with sessions_send using that route.
-If the task fails fatally, send exactly one failure message back to the user with sessions_send using that route.
-Do not skip the completion/failure message.'"
+```
+SCRATCH=$(mktemp -d) && git -C "$SCRATCH" init
+process action=spawn pty=true cwd:$SCRATCH command:"codex exec 'Your prompt. When finished, sessions_send target:<notifyTarget> message:Done: <summary>.'"
 ```
 
-Codex refuses to run outside a trusted git directory.
-Reuse this same notify-route injection block in every example below; only the task-specific prompt body should change.
+Inject the completion snippet into every worker prompt; examples below omit it for brevity.
 
 ---
 
 ## Codex CLI
 
-**Model:** `gpt-5.2-codex` is the default (set in ~/.codex/config.toml)
-
-### Flags
+Default model comes from `~/.codex/config.toml`.
 
 | Flag            | Effect                                   |
 | --------------- | ---------------------------------------- |
@@ -186,164 +112,104 @@ Reuse this same notify-route injection block in every example below; only the ta
 | `--full-auto`   | Sandboxed but auto-approves in workspace |
 | `--yolo`        | No sandbox, no approvals                 |
 
-### Building/Creating
-
-```bash
-# Always background immediately
-shell pty:true workdir:~/project background:true command:"codex exec --full-auto 'Build a dark mode toggle'"
-
-# More autonomy
-shell pty:true workdir:~/project background:true command:"codex --yolo 'Refactor the auth module'"
+```
+process action=spawn pty=true cwd:~/project command:"codex exec --full-auto 'Build a dark mode toggle'"
+process action=spawn pty=true cwd:~/project command:"codex --yolo 'Refactor the auth module'"
 ```
 
 ### Reviewing PRs
 
-**Never review PRs in the project's own folder.**
-Clone to a temp folder or use a worktree.
+Never review PRs in the live project folder. Clone to a temp dir or use a worktree.
 
-```bash
+```
 REVIEW_DIR=$(mktemp -d)
 git clone https://github.com/user/repo.git $REVIEW_DIR
-cd $REVIEW_DIR && gh pr checkout 130
-
-shell pty:true workdir:$REVIEW_DIR background:true command:"codex review --base origin/main"
+git -C $REVIEW_DIR fetch origin pull/130/head:pr-130 && git -C $REVIEW_DIR checkout pr-130
+process action=spawn pty=true cwd:$REVIEW_DIR command:"codex review --base origin/main"
 ```
 
 Or:
 
-```bash
+```
 git worktree add /tmp/pr-130-review pr-130-branch
-shell pty:true workdir:/tmp/pr-130-review background:true command:"codex review --base main"
+process action=spawn pty=true cwd:/tmp/pr-130-review command:"codex review --base main"
 ```
 
-### Batch PR Reviews
+Batch:
 
-```bash
+```
 git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*'
-
-shell pty:true workdir:~/project background:true command:"codex exec 'Review PR #86. git diff origin/main...origin/pr/86'"
-shell pty:true workdir:~/project background:true command:"codex exec 'Review PR #87. git diff origin/main...origin/pr/87'"
-
-process action:list
-process action:log sessionId:XXX
+process action=spawn pty=true cwd:~/project command:"codex exec 'Review PR #86. git diff origin/main...origin/pr/86'"
+process action=spawn pty=true cwd:~/project command:"codex exec 'Review PR #87. git diff origin/main...origin/pr/87'"
+process action=list
+process action=log session_id:XXX
 ```
 
 ---
 
 ## Claude Code
 
-```bash
-shell workdir:~/project background:true command:"claude --permission-mode bypassPermissions --print 'Your task'"
 ```
+process action=spawn cwd:~/project command:"claude --permission-mode bypassPermissions --print 'Your task'"
+```
+
+Do not use PTY for Claude Code here.
 
 ---
 
 ## OpenCode
 
-```bash
-shell pty:true workdir:~/project background:true command:"opencode run 'Your task'"
+```
+process action=spawn pty=true cwd:~/project command:"opencode run 'Your task'"
 ```
 
 ---
 
 ## Pi Coding Agent
 
-```bash
+```
 # Install: npm install -g @earendil-works/pi-coding-agent
-shell pty:true workdir:~/project background:true command:"pi 'Your task'"
-
-# Non-interactive mode
-shell pty:true workdir:~/project background:true command:"pi -p 'Summarize src/'"
-
-# Different provider/model
-shell pty:true workdir:~/project background:true command:"pi --provider openai --model gpt-5.6 -p 'Your task'"
+process action=spawn pty=true cwd:~/project command:"pi 'Your task'"
+process action=spawn pty=true cwd:~/project command:"pi -p 'Summarize src/'"
+process action=spawn pty=true cwd:~/project command:"pi --provider openai --model gpt-5.6 -p 'Your task'"
 ```
 
 ---
 
-## Parallel Issue Fixing with git worktrees
+## Parallel issue fixing with git worktrees
 
-```bash
+```
 git worktree add -b fix/issue-78 /tmp/issue-78 main
 git worktree add -b fix/issue-99 /tmp/issue-99 main
-
-shell pty:true workdir:/tmp/issue-78 background:true command:"pnpm install && codex --yolo 'Fix issue #78: <description>. Commit and push after review. Send the completion message with sessions_send using the provided notify route.'"
-shell pty:true workdir:/tmp/issue-99 background:true command:"pnpm install && codex --yolo 'Fix issue #99 from the approved ticket summary. Implement only the in-scope edits. Send the completion message with sessions_send using the provided notify route.'"
-
-process action:list
-process action:log sessionId:XXX
+process action=spawn pty=true cwd:/tmp/issue-78 command:"pnpm install && codex --yolo 'Fix issue #78. Commit and push after review. sessions_send target:<notifyTarget> message:Done.'"
+process action=spawn pty=true cwd:/tmp/issue-99 command:"pnpm install && codex --yolo 'Fix issue #99. sessions_send target:<notifyTarget> message:Done.'"
+process action=list
 ```
 
 ---
 
 ## Rules
 
-1. **Use the right execution mode per agent**:
-   - Codex/Pi/OpenCode: `pty:true`
-   - Claude Code: `--print --permission-mode bypassPermissions` (no PTY required)
-2. **Respect tool choice** - if user asks for Codex, use Codex.
-   - Orchestrator mode: do NOT hand-code patches yourself.
-   - If an agent fails/hangs, respawn it or ask the user for direction, but don't silently take over.
-3. **Be patient** - don't kill sessions because they're "slow"
-4. **Monitor with process:log** - check progress without interfering
-5. **--full-auto for building** - auto-approves changes
-6. **vanilla for reviewing** - no special flags needed
-7. **Parallel is OK** - run many Codex processes at once for batch work
-8. **NEVER start Codex inside the agent state directory** (`~/.covo-agent`) - it'll read internal docs and get weird ideas!
-9. **NEVER checkout branches in the live project directory** - that's the LIVE instance!
-10. **Always inject the Completion Prompt Snippet** into the worker prompt before spawning. The simplified examples below omit it for brevity — never spawn a worker without it.
+1. Always spawn in the background with `process`. Never a foreground one-shot.
+2. Codex/Pi/OpenCode: `pty=true`. Claude Code: `--print --permission-mode bypassPermissions`, no PTY.
+3. If the user asked for Codex, use Codex. Do not silently hand-code the patch.
+4. Capture a real `sessions_send` target before spawn.
+5. Monitor with `process` `log`/`poll`. Do not kill sessions just because they are slow.
+6. Parallel is OK.
+7. Never start Codex inside `~/.covo-agent`.
+8. Never checkout review/fix branches in the live project directory.
+9. Always inject the completion snippet before spawning.
 
----
+## Progress updates
 
-## Progress Updates (Critical)
-
-When you spawn a coding agent in the background, keep the user in the loop.
-
-- Send 1 short message when you start: what is running and where.
-- Update only when something changes:
-  - a milestone completes
-  - the worker asks a question
-  - you hit an error or need user action
-  - the worker finishes
-- If you kill a session, immediately say you killed it and why.
-- If you are expecting the worker to self-notify with `sessions_send`, say that clearly in your start update.
-
-This prevents the user from seeing only a missing reply and having no idea what happened.
-
----
-
-## Rules Summary
-
-1. **Always background immediately.**
-   - Use `background:true` for every coding-agent launch.
-   - Do not use the foreground one-shot path in this skill.
-2. **Use the right execution mode per agent.**
-   - Codex/Pi/OpenCode: `pty:true`
-   - Claude Code: `--print --permission-mode bypassPermissions`
-3. **Respect tool choice.**
-   - If the user asked for Codex, use Codex.
-   - Orchestrator mode: do not hand-code the patch yourself instead of using the requested coding agent.
-4. **Capture notify routing before spawn.**
-   - Completion messaging must have a real route.
-5. **Use direct completion messaging.**
-   - Require `sessions_send`.
-6. **Do not silently take over.**
-   - If a worker fails or hangs, respawn it or ask for direction. Do not quietly switch to hand-editing.
-7. **Monitor with `process`.**
-   - `process action:log` is the default low-friction check.
-8. **Be patient.**
-   - Do not kill sessions just because they are slow.
-9. **Parallel is OK.**
-   - Many background Codex sessions can run at once.
-10. **Never start Codex in `~/.covo-agent/`.**
-11. **Never checkout branches in the live project directory.**
-
----
+- One short message when you start: what is running and the `session_id`.
+- Update only on milestone, question, error, or finish.
+- If you kill a session, say so immediately.
+- If the worker should self-notify with `sessions_send`, say that in the start update.
 
 ## Learnings
 
-- **PTY is essential** for Codex/Pi/OpenCode.
-- **Git repo required**: Codex needs a trusted git directory.
-- **Use `exec` under background orchestration**: short and long tasks follow the same path now.
-- **`submit` vs `write`**: use `submit` to send input plus Enter.
-- **Direct message send beats heartbeat for completion notification** when the user must be told immediately and heartbeat may be disabled.
+- PTY is required for Codex/Pi/OpenCode TUI CLIs.
+- Codex needs a trusted git directory.
+- `submit` sends input plus Enter; `write` does not.
+- `sessions_send` is `target` + `message` only.

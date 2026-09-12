@@ -50,8 +50,8 @@ var Toolsets = map[string]ToolsetDef{
 	},
 	"vision": {
 		Name:        "vision",
-		Description: "Image analysis and vision tools",
-		Tools:       []string{"vision_analyze"},
+		Description: "Image and video analysis",
+		Tools:       []string{"view_image", "video_analyze"},
 	},
 	"patch": {
 		Name:        "patch",

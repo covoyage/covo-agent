@@ -23,7 +23,8 @@ func BuildSearchFilesTool() *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "search_files",
 		Description: strings.Join([]string{
-			"Unified file search: find files by name pattern AND/OR search file contents.",
+			"Preferred workspace search: find files by name pattern AND/OR search file contents.",
+			"Use this instead of calling grep, glob, or find separately.",
 			"Combines glob (filename matching) and grep (content search) into one call.",
 			"",
 			"Parameters:",

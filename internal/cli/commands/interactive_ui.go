@@ -458,6 +458,21 @@ func (s *interactiveSession) pumpFooterStatus() {
 				}
 				return items
 			})
+			s.stickyFooter.SetPlanStore(func() []agentui.PlanItem {
+				ca := s.agentRuntime.Current()
+				if ca == nil {
+					return nil
+				}
+				steps, _ := ca.PlanStore().Read()
+				items := make([]agentui.PlanItem, 0, len(steps))
+				for _, step := range steps {
+					items = append(items, agentui.PlanItem{
+						Step:   step.Step,
+						Status: string(step.Status),
+					})
+				}
+				return items
+			})
 
 			ca := s.agentRuntime.Current()
 			if ca != nil {
@@ -574,23 +589,43 @@ func (s *interactiveSession) registerKeybindings() {
 // runs scheduled prompts through a throwaway agent.
 func (s *interactiveSession) buildCronScheduler() *tools.CronScheduler {
 	cronStore := tools.NewCronStore(s.homeDir)
-	return tools.NewCronScheduler(cronStore, func(ctx context.Context, jobID, prompt string) (string, error) {
+	return tools.NewCronScheduler(cronStore, func(ctx context.Context, job *tools.CronJob) (string, error) {
 		if s.busy.Load() {
-			return "", fmt.Errorf("busy — cron job %s skipped", jobID)
+			return "", tools.ErrCronBusy
 		}
 		runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
-		ca := s.createAgent(s.mode)
-		if ca == nil {
-			return "", fmt.Errorf("failed to create agent for cron job %s", jobID)
+		req := s.requestFor(s.mode, s.llm, s.providerType, s.model)
+		if job.Model != "" {
+			req.Model = job.Model
 		}
+		if len(job.ToolsAllow) > 0 {
+			allowed := make(map[string]bool, len(job.ToolsAllow))
+			for _, name := range job.ToolsAllow {
+				allowed[name] = true
+			}
+			req.ToolNameFilter = func(name string) bool { return allowed[name] }
+		}
+		if len(job.Skills) > 0 {
+			req.SystemPromptSuffix = fmt.Sprintf(
+				"Before handling the user's request, load and follow these skills via the skill tool: %s.",
+				strings.Join(job.Skills, ", "))
+		}
+		ca, err := s.agentFactory.New(req)
+		if err != nil || ca == nil {
+			if err == nil {
+				err = fmt.Errorf("failed to create agent for cron job %s", job.ID)
+			}
+			return "", err
+		}
+		s.prepareAgent(ca)
 		defer ca.Close()
 		// Flush this cron job's spans promptly; the interactive session keeps
 		// running in this process, so do not shut down the pipeline.
 		defer telemetry.FlushOtel(context.Background())
-		output, err := ca.RunDirectWithSession(runCtx, prompt, "cron-"+jobID)
+		output, err := ca.RunDirectWithSession(runCtx, job.Prompt, "cron-"+job.ID)
 		if err != nil {
-			return "", fmt.Errorf("cron job %s: %w", jobID, err)
+			return "", fmt.Errorf("cron job %s: %w", job.ID, err)
 		}
 		return output, nil
 	})

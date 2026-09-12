@@ -1,12 +1,14 @@
 package marketplace
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -165,5 +167,81 @@ func TestMarketplace_Install_NotFound(t *testing.T) {
 	expected := fmt.Sprintf("marketplace: plugin %q not found", "nonexistent")
 	if err.Error() != expected {
 		t.Errorf("got %q, want %q", err.Error(), expected)
+	}
+}
+
+// newTestMarketplaceWithPayload serves an index plus per-plugin payloads so
+// install flows (and digest pins) can be exercised end to end.
+func newTestMarketplaceWithPayload(t *testing.T, entries []PluginEntry, payload map[string][]byte) *Marketplace {
+	t.Helper()
+	data, _ := json.Marshal(entries)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/marketplace.json" {
+			w.Write(data)
+			return
+		}
+		if body, ok := payload[r.URL.Path]; ok {
+			w.Write(body)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(ts.Close)
+
+	m := New(t.TempDir(), ts.URL)
+	return m
+}
+
+// TestMarketplace_InstallDigestPinMismatch blocks installs whose payload
+// bytes do not match the registry's declared SHA-256 pin.
+func TestMarketplace_InstallDigestPinMismatch(t *testing.T) {
+	plugin := []byte(`{"name":"audited-agent","kind":"agent"}`)
+	entries := []PluginEntry{
+		{Name: "audited-agent", Type: PluginTypeAgent, SHA256: strings.Repeat("f", 64)},
+	}
+	m := newTestMarketplaceWithPayload(t, entries, map[string][]byte{
+		"/plugins/audited-agent.json": plugin,
+	})
+
+	if _, err := m.Install("audited-agent"); err == nil {
+		t.Fatal("expected pin mismatch to block install")
+	}
+	if m.IsInstalled("audited-agent", PluginTypeAgent) {
+		t.Fatal("blocked install must not leave files behind")
+	}
+}
+
+// TestMarketplace_InstallRecordsProvenance verifies that a successful
+// install persists a manifest record with the payload digest and source.
+func TestMarketplace_InstallRecordsProvenance(t *testing.T) {
+	plugin := []byte(`{"name":"audited-agent","kind":"agent"}`)
+	entries := []PluginEntry{
+		{Name: "audited-agent", Type: PluginTypeAgent, Version: "1.2.0"},
+	}
+	m := newTestMarketplaceWithPayload(t, entries, map[string][]byte{
+		"/plugins/audited-agent.json": plugin,
+	})
+
+	if _, err := m.Install("audited-agent"); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	record, ok := m.installedManifest()["audited-agent"]
+	if !ok {
+		t.Fatal("expected manifest record for installed plugin")
+	}
+	want := fmt.Sprintf("%x", sha256.Sum256(plugin))
+	if record.SHA256 != want {
+		t.Fatalf("manifest digest = %s, want %s", record.SHA256, want)
+	}
+	if record.Source == "" || record.InstalledAt == "" || record.Version != "1.2.0" {
+		t.Fatalf("manifest record incomplete: %+v", record)
+	}
+
+	if err := m.Uninstall("audited-agent"); err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+	if _, ok := m.installedManifest()["audited-agent"]; ok {
+		t.Fatal("uninstall should drop the manifest record")
 	}
 }

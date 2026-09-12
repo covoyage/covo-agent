@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/covoyage/covonaut/agentcore"
 	"github.com/covoyage/covo-agent/internal/visibility"
+	"github.com/covoyage/covonaut/agentcore"
 )
 
 type sessionEntry struct {
@@ -49,8 +49,8 @@ func BuildSessionSearchTool(sessionsDir string, fts *FTSSearcher) *agentcore.Too
 	return &agentcore.Tool{
 		Name: "session_search",
 		Description: strings.Join([]string{
-			"Search and browse past conversation sessions. Use this to recall previous work,",
-			"find code changes discussed earlier, or check what was done in past sessions.",
+			"Search past conversation sessions (not the workspace). For code/files use search_files.",
+			"Use this to recall previous work, find code changes discussed earlier, or check past sessions.",
 			"Also searches spill artifacts (text offloaded via the spill tool) and their metadata.",
 			"",
 			"Without a query: lists recent sessions with metadata (most recent first).",
@@ -162,6 +162,98 @@ func listRecentSessions(sessionsDir string, limit int) (any, error) {
 		"count":    len(results),
 		"sessions": results,
 	}, nil
+}
+
+// ListSessionSummaries returns recent session metadata for sessions_list.
+func ListSessionSummaries(sessionsDir string, limit int) []map[string]any {
+	if limit <= 0 {
+		limit = 20
+	}
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		return nil
+	}
+	var sessions []sessionMeta
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		id := strings.TrimSuffix(entry.Name(), ".jsonl")
+		meta, err := readSessionMeta(filepath.Join(sessionsDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		meta.id = id
+		sessions = append(sessions, meta)
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].timestamp.After(sessions[j].timestamp)
+	})
+	if len(sessions) > limit {
+		sessions = sessions[:limit]
+	}
+	out := make([]map[string]any, 0, len(sessions))
+	for _, s := range sessions {
+		item := map[string]any{
+			"session_id": s.id,
+			"msg_count":  s.msgCount,
+			"preview":    s.preview,
+		}
+		if !s.timestamp.IsZero() {
+			item["timestamp"] = s.timestamp.Format(time.RFC3339)
+		}
+		if s.name != "" {
+			item["name"] = s.name
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+// ReadSessionHistory returns redacted messages from a session JSONL file.
+func ReadSessionHistory(sessionsDir, sessionID string, limit int, includeTools bool) ([]map[string]any, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("no current session")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	path := filepath.Join(sessionsDir, sessionID+".jsonl")
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open session: %w", err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var msgs []map[string]any
+	for scanner.Scan() {
+		var entry sessionEntry
+		if json.Unmarshal(scanner.Bytes(), &entry) != nil || entry.Type != "message" {
+			continue
+		}
+		var msg sessionMessage
+		if json.Unmarshal(entry.Data, &msg) != nil {
+			continue
+		}
+		role := strings.ToLower(msg.Role)
+		if !includeTools && (role == "tool" || role == "function") {
+			continue
+		}
+		content := msg.Content
+		if len(content) > 4000 {
+			content = content[:4000] + "...[truncated]"
+		}
+		msgs = append(msgs, map[string]any{
+			"role":    msg.Role,
+			"content": content,
+		})
+	}
+	if len(msgs) > limit {
+		msgs = msgs[len(msgs)-limit:]
+	}
+	return msgs, nil
 }
 
 func readSessionMeta(path string) (meta sessionMeta, err error) {

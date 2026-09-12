@@ -78,6 +78,8 @@ var slashDispatch = map[string]slashHandler{
 	"dream":             handleDream,
 	"consolidate":       handleConsolidate,
 	"compact":           handleCompact,
+	"tools":             handleTools,
+	"context":           handleContext,
 	"retry":             handleRetry,
 	"undo":              handleRetry,
 	"status":            handleStatus,

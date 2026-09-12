@@ -62,6 +62,77 @@ func Truncate(s string, n int) string {
 	return string(runes[:n]) + "..."
 }
 
+func SkillExtraDirs(cfg *cli.Config) []string {
+	if cfg == nil || cfg.Skills == nil {
+		return nil
+	}
+	return append([]string(nil), cfg.Skills.AdditionalDirs...)
+}
+
+func SkillDisabled(cfg *cli.Config) []string {
+	if cfg == nil || cfg.Skills == nil {
+		return nil
+	}
+	return append([]string(nil), cfg.Skills.Disabled...)
+}
+
+func SkillConfigFns(cfg *cli.Config) (func() map[string]string, func(key, value string) error) {
+	get := func() map[string]string {
+		loaded, err := cli.LoadConfig()
+		if err != nil || loaded == nil || loaded.Skills == nil {
+			if cfg != nil && cfg.Skills != nil {
+				return cfg.Skills.Config
+			}
+			return nil
+		}
+		return loaded.Skills.Config
+	}
+	set := func(key, value string) error {
+		loaded, err := cli.LoadConfig()
+		if err != nil {
+			return err
+		}
+		if loaded.Skills == nil {
+			loaded.Skills = &cli.SkillsConfig{}
+		}
+		if loaded.Skills.Config == nil {
+			loaded.Skills.Config = make(map[string]string)
+		}
+		loaded.Skills.Config[key] = value
+		if cfg != nil {
+			if cfg.Skills == nil {
+				cfg.Skills = &cli.SkillsConfig{}
+			}
+			if cfg.Skills.Config == nil {
+				cfg.Skills.Config = make(map[string]string)
+			}
+			cfg.Skills.Config[key] = value
+		}
+		return cli.SaveConfig(loaded)
+	}
+	return get, set
+}
+
+// LeanToolsEnabled is true when long-tail tool schemas should be hidden.
+// Default (auto / unset): on when more than one MCP server is configured.
+func LeanToolsEnabled(cfg *cli.Config) bool {
+	mode := ""
+	if cfg != nil && cfg.Tools != nil {
+		mode = strings.ToLower(strings.TrimSpace(cfg.Tools.Lean))
+	}
+	if env := strings.ToLower(strings.TrimSpace(os.Getenv("COVO_TOOLS_LEAN"))); env != "" {
+		mode = env
+	}
+	switch mode {
+	case "on", "true", "1", "yes":
+		return true
+	case "off", "false", "0", "no":
+		return false
+	default:
+		return cfg != nil && len(cfg.MCPServers) > 1
+	}
+}
+
 func CuratorConfig(cfg *cli.Config) evolution.CuratorConfig {
 	if cfg.Curator != nil {
 		return evolution.CuratorConfig{

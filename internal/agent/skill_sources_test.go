@@ -5,21 +5,16 @@ import (
 	"testing"
 )
 
-func TestExternalSkillRoots(t *testing.T) {
-	home := filepath.FromSlash("/home/u")
-	work := filepath.FromSlash("/proj")
+func TestEcosystemSkillRoots(t *testing.T) {
+	base := filepath.FromSlash("/proj")
 
-	t.Run("default includes all ecosystems global+project", func(t *testing.T) {
-		roots := externalSkillRoots(home, work)
+	t.Run("default includes all ecosystems", func(t *testing.T) {
+		roots := ecosystemSkillRoots(base)
 		want := []string{
-			filepath.Join(home, ".claude", "skills"),
-			filepath.Join(work, ".claude", "skills"),
-			filepath.Join(home, ".codex", "skills"),
-			filepath.Join(work, ".codex", "skills"),
-			filepath.Join(home, ".agents", "skills"),
-			filepath.Join(work, ".agents", "skills"),
-			filepath.Join(home, ".opencode", "skills"),
-			filepath.Join(work, ".opencode", "skills"),
+			filepath.Join(base, ".agents", "skills"),
+			filepath.Join(base, ".claude", "skills"),
+			filepath.Join(base, ".codex", "skills"),
+			filepath.Join(base, ".opencode", "skills"),
 		}
 		if len(roots) != len(want) {
 			t.Fatalf("got %d roots, want %d: %v", len(roots), len(want), roots)
@@ -33,7 +28,7 @@ func TestExternalSkillRoots(t *testing.T) {
 
 	t.Run("master disable returns nil", func(t *testing.T) {
 		t.Setenv("COVO_DISABLE_EXTERNAL_SKILLS", "true")
-		if roots := externalSkillRoots(home, work); roots != nil {
+		if roots := ecosystemSkillRoots(base); roots != nil {
 			t.Errorf("expected nil when disabled, got %v", roots)
 		}
 	})
@@ -41,35 +36,62 @@ func TestExternalSkillRoots(t *testing.T) {
 	t.Run("per-source disable skips that ecosystem", func(t *testing.T) {
 		t.Setenv("COVO_DISABLE_CLAUDE_SKILLS", "true")
 		t.Setenv("COVO_DISABLE_OPENCODE_SKILLS", "1")
-		roots := externalSkillRoots(home, work)
+		roots := ecosystemSkillRoots(base)
 		for _, r := range roots {
-			if filepath.Base(filepath.Dir(r)) == ".claude" || filepath.Base(filepath.Dir(r)) == ".opencode" {
+			eco := filepath.Base(filepath.Dir(r))
+			if eco == ".claude" || eco == ".opencode" {
 				t.Errorf("disabled ecosystem leaked into roots: %q", r)
 			}
 		}
-		// The two enabled ecosystems should remain (two roots each).
-		if len(roots) != 4 {
-			t.Errorf("expected 4 roots after disabling claude+opencode, got %d: %v", len(roots), roots)
+		if len(roots) != 2 {
+			t.Errorf("expected 2 roots after disabling claude+opencode, got %d: %v", len(roots), roots)
 		}
 	})
 
-	t.Run("empty workdir omits project roots", func(t *testing.T) {
-		roots := externalSkillRoots(home, "")
-		for _, r := range roots {
-			if filepath.Dir(filepath.Dir(r)) != home {
-				t.Errorf("expected only global roots, got %q", r)
-			}
-		}
-		if len(roots) != 4 {
-			t.Errorf("expected 4 global roots, got %d", len(roots))
+	t.Run("empty base returns nil", func(t *testing.T) {
+		if roots := ecosystemSkillRoots(""); roots != nil {
+			t.Errorf("expected nil for empty base, got %v", roots)
 		}
 	})
 }
 
 func TestSkillLoadPathsOrder(t *testing.T) {
 	t.Setenv("COVO_DISABLE_EXTERNAL_SKILLS", "true")
-	paths := skillLoadPaths("/home/u/.covo-agent/skills", "/proj")
-	if len(paths) != 1 || paths[0] != "/home/u/.covo-agent/skills" {
-		t.Fatalf("expected only the covo skills dir first, got %v", paths)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := filepath.FromSlash("/proj")
+	covo := filepath.FromSlash("/home/u/.covo-agent/skills")
+	extra := filepath.FromSlash("/extra/skills")
+	paths := skillLoadPaths(covo, work, []string{extra})
+	want := []string{
+		filepath.Join(work, "skills"),
+		covo,
+		extra,
+	}
+	if len(paths) != len(want) {
+		t.Fatalf("got %d paths, want %d: %v", len(paths), len(want), paths)
+	}
+	for i := range want {
+		if paths[i] != want[i] {
+			t.Errorf("path[%d] = %q, want %q", i, paths[i], want[i])
+		}
+	}
+}
+
+func TestSkillLoadPathsWorkspaceBeatsManaged(t *testing.T) {
+	t.Setenv("COVO_DISABLE_EXTERNAL_SKILLS", "true")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := filepath.FromSlash("/repo")
+	covo := filepath.FromSlash("/managed/skills")
+	paths := skillLoadPaths(covo, work, nil)
+	if len(paths) < 2 {
+		t.Fatalf("expected workspace then managed, got %v", paths)
+	}
+	if paths[0] != filepath.Join(work, "skills") {
+		t.Errorf("workspace skills should win collisions, got first=%q", paths[0])
+	}
+	if paths[len(paths)-1] != covo {
+		t.Errorf("managed dir should be last among built-in roots, got %v", paths)
 	}
 }

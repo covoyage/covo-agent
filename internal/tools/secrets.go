@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/cli/keychain"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -69,6 +70,9 @@ func (s *SecretsStore) Set(key, value string) error {
 }
 
 func (s *SecretsStore) Get(key string) (string, bool) {
+	if v, err := keychain.Get(key, keychain.Auto); err == nil && v != "" {
+		return v, true
+	}
 	v, ok := s.data[key]
 	return v, ok
 }
@@ -90,20 +94,20 @@ func buildSecretsTool(store *SecretsStore) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "secrets",
 		Description: strings.Join([]string{
-			"Manage sensitive values securely during a session.",
-			"Supports local encrypted storage and Bitwarden CLI integration.",
+			"Resolve a named secret into the process environment without putting",
+			"the value into the conversation. Prefer this over reading .env files",
+			"or echoing tokens.",
 			"",
 			"Actions:",
+			"- get: Load a secret into the environment (value is never returned)",
+			"- list: List stored secret keys (values are never shown)",
 			"- set: Store a secret key-value pair",
-			"- get: Retrieve a stored secret (masked in logs)",
 			"- delete: Remove a stored secret",
-			"- list: List all stored secret keys (values are never shown)",
-			"- bw_get: Retrieve a secret from Bitwarden (requires 'bw' CLI)",
-			"- env: Load a secret into the environment for shell commands",
+			"- bw_get: Load a Bitwarden secret into the environment (requires 'bw')",
+			"- env: Same as get",
 			"",
-			"Use this for API tokens, connection strings, passwords, and other",
-			"sensitive values that should not appear in plaintext in agent output.",
-			"Bitwarden integration requires 'bw' CLI to be installed and unlocked.",
+			"Use this for API tokens, connection strings, and passwords.",
+			"Never print, quote, or write the secret value into files or replies.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -157,18 +161,7 @@ func buildSecretsTool(store *SecretsStore) *agentcore.Tool {
 				}, nil
 
 			case "get":
-				if strings.TrimSpace(params.Key) == "" {
-					return nil, fmt.Errorf("key is required for get")
-				}
-				val, ok := store.Get(params.Key)
-				if !ok {
-					return nil, fmt.Errorf("secret %q not found", params.Key)
-				}
-				return map[string]any{
-					"action": "get",
-					"key":    params.Key,
-					"value":  val,
-				}, nil
+				return exportSecret(store, params.Key)
 
 			case "delete":
 				if strings.TrimSpace(params.Key) == "" {
@@ -220,32 +213,44 @@ func buildSecretsTool(store *SecretsStore) *agentcore.Tool {
 					_ = store.Set(params.Key, val)
 				}
 
+				envKey := strings.ToUpper(strings.ReplaceAll(lookup, "-", "_"))
+				if err := os.Setenv(envKey, val); err != nil {
+					return nil, fmt.Errorf("export secret: %w", err)
+				}
 				return map[string]any{
-					"action": "bw_get",
-					"key":    params.Key,
-					"cached": params.Key != "",
+					"action":   "bw_get",
+					"key":      lookup,
+					"env_var":  envKey,
+					"exported": true,
+					"cached":   params.Key != "",
 				}, nil
 
 			case "env":
-				if strings.TrimSpace(params.Key) == "" {
-					return nil, fmt.Errorf("key is required for env")
-				}
-				val, ok := store.Get(params.Key)
-				if !ok {
-					return nil, fmt.Errorf("secret %q not found", params.Key)
-				}
-				envKey := strings.ToUpper(strings.ReplaceAll(params.Key, "-", "_"))
-				os.Setenv(envKey, val)
-				return map[string]any{
-					"action":   "env",
-					"key":      params.Key,
-					"env_var":  envKey,
-					"exported": true,
-				}, nil
+				return exportSecret(store, params.Key)
 
 			default:
 				return nil, fmt.Errorf("unknown action: %s", params.Action)
 			}
 		},
 	}
+}
+
+func exportSecret(store *SecretsStore, key string) (any, error) {
+	if strings.TrimSpace(key) == "" {
+		return nil, fmt.Errorf("key is required")
+	}
+	val, ok := store.Get(key)
+	if !ok {
+		return nil, fmt.Errorf("secret %q not found", key)
+	}
+	envKey := strings.ToUpper(strings.ReplaceAll(key, "-", "_"))
+	if err := os.Setenv(envKey, val); err != nil {
+		return nil, fmt.Errorf("export secret: %w", err)
+	}
+	return map[string]any{
+		"action":   "get",
+		"key":      key,
+		"env_var":  envKey,
+		"exported": true,
+	}, nil
 }

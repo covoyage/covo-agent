@@ -12,6 +12,7 @@ func TestIsUntrustedTool(t *testing.T) {
 	}{
 		{"web_search", true},
 		{"web_fetch", true},
+		{"video_analyze", true},
 		{"mcp", true},
 		{"browser_navigate", true},
 		{"browser_extract", true},

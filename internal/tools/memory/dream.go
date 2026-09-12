@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -150,15 +151,9 @@ func BuildMemoryExtractTool(dc *DreamCycle) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "memory_extract",
 		Description: strings.Join([]string{
-			"Extract structured facts from recent conversation turns.",
-			"Use this after significant work to extract:",
-			"- Key decisions and reasoning",
-			"- User preferences and conventions",
-			"- Technical details and file changes",
-			"- Open tasks and blockers",
-			"",
-			"Provide the recent conversation turns as input.",
-			"Store extracted facts with memory_semantic_store for later recall.",
+			"Extract structured facts from recent conversation turns and store them as insights.",
+			"Does not call another tool — facts are saved in the dream cycle immediately.",
+			"Use this after significant work to capture decisions, preferences, changes, and tasks.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -179,27 +174,29 @@ func BuildMemoryExtractTool(dc *DreamCycle) *agentcore.Tool {
 				return map[string]any{
 					"phase":   "idle",
 					"message": "no turns provided",
+					"count":   0,
 				}, nil
+			}
+
+			facts := extractFacts(params.Turns)
+			ids := make([]string, 0, len(facts))
+			for i, f := range facts {
+				id := fmt.Sprintf("extract-%d-%d", time.Now().UnixNano(), i)
+				dc.AddInsight(id, f, []string{"extract"})
+				ids = append(ids, id)
 			}
 
 			dc.mu.Lock()
 			dc.extractCount++
 			dc.lastExtract = time.Now()
+			dc.phase = PhaseExtract
 			dc.mu.Unlock()
 
 			return map[string]any{
 				"phase": "extract",
-				"turns": params.Turns,
-				"instructions": strings.Join([]string{
-					"Extract structured facts from the conversation above:",
-					"1. DECISIONS: What was decided and why",
-					"2. PREFERENCES: User conventions, tools, styles",
-					"3. CHANGES: Files created/modified, architectures chosen",
-					"4. TASKS: What's done, in-progress, blocked",
-					"",
-					"Output each fact as: [category] fact",
-					"Then call memory_semantic_store for each fact with source='extract'.",
-				}, "\n"),
+				"count": len(facts),
+				"ids":   ids,
+				"facts": facts,
 			}, nil
 		},
 	}
@@ -209,9 +206,9 @@ func BuildMemoryDreamTool(dc *DreamCycle) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "memory_dream",
 		Description: strings.Join([]string{
-			"Consolidate scattered memory entries into higher-level insights.",
-			"Use this to synthesize related facts into coherent knowledge.",
-			"Input: list of memory entries (from memory_semantic_search or memory_extract).",
+			"Consolidate scattered memory entries into higher-level insights and store them.",
+			"Does not ask the model to call another tool — insights are saved immediately.",
+			"Input: list of memory entries (from memory_extract or prior notes).",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -234,34 +231,38 @@ func BuildMemoryDreamTool(dc *DreamCycle) *agentcore.Tool {
 				return map[string]any{
 					"phase":   "idle",
 					"message": "no memories to consolidate",
+					"count":   0,
 				}, nil
 			}
 
-			// Build a context for consolidation
 			var sources []string
 			var contents []string
 			for _, m := range params.Memories {
-				if id, ok := m["id"].(string); ok {
+				if id, ok := m["id"].(string); ok && id != "" {
 					sources = append(sources, id)
 				}
-				if content, ok := m["content"].(string); ok {
-					contents = append(contents, content)
+				if content, ok := m["content"].(string); ok && strings.TrimSpace(content) != "" {
+					contents = append(contents, strings.TrimSpace(content))
 				}
 			}
+			if len(contents) == 0 {
+				return map[string]any{
+					"phase":   "idle",
+					"message": "no memory content to consolidate",
+					"count":   0,
+				}, nil
+			}
+
+			insight := consolidateMemories(contents)
+			id := fmt.Sprintf("dream-%d", time.Now().UnixNano())
+			dc.AddInsight(id, insight, sources)
 
 			return map[string]any{
-				"phase":    "dream",
-				"sources":  sources,
-				"snapshot": strings.Join(contents, "\n---\n"),
-				"instructions": strings.Join([]string{
-					"Consolidate the memory entries above. For each cluster of related facts:",
-					"1. Identify the core insight or pattern",
-					"2. Note conflicting or evolving information",
-					"3. Write the consolidated insight as a concise summary",
-					"",
-					"Then call memory_semantic_store for each consolidated insight",
-					"with source='dream'.",
-				}, "\n"),
+				"phase":   "dream",
+				"id":      id,
+				"insight": insight,
+				"sources": sources,
+				"count":   1,
 			}, nil
 		},
 	}
@@ -276,4 +277,61 @@ func BuildMemoryDreamStatsTool(dc *DreamCycle) *agentcore.Tool {
 			return dc.Stats(), nil
 		},
 	}
+}
+
+func extractFacts(turns string) []string {
+	var facts []string
+	seen := map[string]bool{}
+	for _, raw := range strings.Split(turns, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || line == "---" {
+			continue
+		}
+		line = strings.TrimLeft(line, "-*•")
+		line = strings.TrimSpace(line)
+		if len(line) < 12 {
+			continue
+		}
+		key := strings.ToLower(line)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		facts = append(facts, line)
+		if len(facts) >= 20 {
+			break
+		}
+	}
+	if len(facts) == 0 && strings.TrimSpace(turns) != "" {
+		snippet := strings.Join(strings.Fields(turns), " ")
+		if len(snippet) > 400 {
+			snippet = snippet[:400] + "..."
+		}
+		facts = append(facts, snippet)
+	}
+	return facts
+}
+
+func consolidateMemories(contents []string) string {
+	var parts []string
+	seen := map[string]bool{}
+	for _, c := range contents {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		key := strings.ToLower(c)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		parts = append(parts, c)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return fmt.Sprintf("Consolidated %d notes:\n- %s", len(parts), strings.Join(parts, "\n- "))
 }

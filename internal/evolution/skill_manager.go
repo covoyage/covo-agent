@@ -50,8 +50,9 @@ type SkillFrontmatter struct {
 }
 
 type SkillManager struct {
-	skillsDir string
-	usage     *SkillUsageTracker
+	skillsDir  string
+	usage      *SkillUsageTracker
+	extraRoots []string
 }
 
 func NewSkillManager(skillsDir string, usage *SkillUsageTracker) *SkillManager {
@@ -59,6 +60,12 @@ func NewSkillManager(skillsDir string, usage *SkillUsageTracker) *SkillManager {
 		skillsDir: skillsDir,
 		usage:     usage,
 	}
+}
+
+// SetExtraRoots sets additional skill roots searched before skillsDir
+// (first match wins). Writes still target skillsDir only.
+func (sm *SkillManager) SetExtraRoots(roots []string) {
+	sm.extraRoots = append([]string(nil), roots...)
 }
 
 func (sm *SkillManager) Init() error {
@@ -199,32 +206,54 @@ func (sm *SkillManager) Read(name string) (string, error) {
 	return string(data), nil
 }
 
-// resolveSkillDir returns the on-disk directory for a skill identified by its
-// bare name. Skills may live either directly under skillsDir (agent-created,
-// flat layout) or one level deep inside a category subdirectory
-// (skillsDir/<category>/<name>, used by bundled skills like
-// github/codebase-inspection). It prefers the flat location, then scans
-// category subdirectories. If the skill is not found anywhere, it returns the
-// flat path so callers emit a sensible "not found" error.
-func (sm *SkillManager) resolveSkillDir(name string) string {
-	flat := filepath.Join(sm.skillsDir, name)
+// lookupRoots returns extra roots first (workspace / ecosystems), then the
+// managed skillsDir. First match wins, matching skill.Load.
+func (sm *SkillManager) lookupRoots() []string {
+	roots := make([]string, 0, 1+len(sm.extraRoots))
+	seen := map[string]bool{}
+	add := func(root string) {
+		root = strings.TrimSpace(root)
+		if root == "" || seen[root] {
+			return
+		}
+		seen[root] = true
+		roots = append(roots, root)
+	}
+	for _, root := range sm.extraRoots {
+		add(root)
+	}
+	add(sm.skillsDir)
+	return roots
+}
+
+func findSkillDirInRoot(root, name string) string {
+	flat := filepath.Join(root, name)
 	if _, err := os.Stat(filepath.Join(flat, "SKILL.md")); err == nil {
 		return flat
 	}
-	entries, err := os.ReadDir(sm.skillsDir)
+	entries, err := os.ReadDir(root)
 	if err != nil {
-		return flat
+		return ""
 	}
 	for _, e := range entries {
 		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		cand := filepath.Join(sm.skillsDir, e.Name(), name)
+		cand := filepath.Join(root, e.Name(), name)
 		if _, err := os.Stat(filepath.Join(cand, "SKILL.md")); err == nil {
 			return cand
 		}
 	}
-	return flat
+	return ""
+}
+
+func (sm *SkillManager) resolveSkillDir(name string) string {
+	for _, root := range sm.lookupRoots() {
+		if dir := findSkillDirInRoot(root, name); dir != "" {
+			return dir
+		}
+	}
+	return filepath.Join(sm.skillsDir, name)
 }
 
 func (sm *SkillManager) resolveSkillDirForRead(idOrName string) (string, error) {
@@ -236,11 +265,13 @@ func (sm *SkillManager) resolveSkillDirForRead(idOrName string) (string, error) 
 		if _, err := validateSkillName(name); err != nil {
 			return "", err
 		}
-		dir := filepath.Join(sm.skillsDir, category, name)
-		if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
-			return "", fmt.Errorf("skill %q not found: %w", idOrName, err)
+		for _, root := range sm.lookupRoots() {
+			dir := filepath.Join(root, category, name)
+			if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err == nil {
+				return dir, nil
+			}
 		}
-		return dir, nil
+		return "", fmt.Errorf("skill %q not found", idOrName)
 	}
 	name, err := validateSkillName(idOrName)
 	if err != nil {
@@ -532,46 +563,57 @@ type SkillInfo struct {
 
 func (sm *SkillManager) List() ([]SkillInfo, error) {
 	var result []SkillInfo
-	entries, err := os.ReadDir(sm.skillsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
+	seen := map[string]bool{}
+	for _, root := range sm.lookupRoots() {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("read skills dir: %w", err)
 		}
-		return nil, fmt.Errorf("read skills dir: %w", err)
-	}
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		catDir := filepath.Join(sm.skillsDir, e.Name())
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			catDir := filepath.Join(root, e.Name())
 
-		// Check if this entry itself has a SKILL.md (flat skill)
-		if _, err := os.Stat(filepath.Join(catDir, "SKILL.md")); err == nil {
-			info, loadErr := sm.loadSkillInfoFromDir(catDir, "", e.Name())
-			if loadErr == nil {
+			// Check if this entry itself has a SKILL.md (flat skill)
+			if _, err := os.Stat(filepath.Join(catDir, "SKILL.md")); err == nil {
+				if seen[e.Name()] {
+					continue
+				}
+				info, loadErr := sm.loadSkillInfoFromDir(catDir, "", e.Name())
+				if loadErr == nil {
+					seen[e.Name()] = true
+					result = append(result, info)
+				}
+				continue
+			}
+
+			// Otherwise, treat as category dir with nested skills
+			catEntries, readErr := os.ReadDir(catDir)
+			if readErr != nil {
+				continue
+			}
+			for _, ce := range catEntries {
+				if !ce.IsDir() || strings.HasPrefix(ce.Name(), ".") {
+					continue
+				}
+				skillDir := filepath.Join(catDir, ce.Name())
+				if _, statErr := os.Stat(filepath.Join(skillDir, "SKILL.md")); statErr != nil {
+					continue
+				}
+				if seen[ce.Name()] {
+					continue
+				}
+				info, loadErr := sm.loadSkillInfoFromDir(skillDir, e.Name(), ce.Name())
+				if loadErr != nil {
+					continue
+				}
+				seen[ce.Name()] = true
 				result = append(result, info)
 			}
-			continue
-		}
-
-		// Otherwise, treat as category dir with nested skills
-		catEntries, readErr := os.ReadDir(catDir)
-		if readErr != nil {
-			continue
-		}
-		for _, ce := range catEntries {
-			if !ce.IsDir() || strings.HasPrefix(ce.Name(), ".") {
-				continue
-			}
-			skillDir := filepath.Join(catDir, ce.Name())
-			if _, statErr := os.Stat(filepath.Join(skillDir, "SKILL.md")); statErr != nil {
-				continue
-			}
-			info, loadErr := sm.loadSkillInfoFromDir(skillDir, e.Name(), ce.Name())
-			if loadErr != nil {
-				continue
-			}
-			result = append(result, info)
 		}
 	}
 	return result, nil

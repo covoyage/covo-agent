@@ -1,7 +1,7 @@
 ---
 name: arxiv
 description: "Search arXiv papers by keyword, author, category, or paper ID."
-version: 1.0.0
+version: 1.1.0
 author: Covo Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -9,74 +9,35 @@ prerequisites:
   commands: [python3]
 metadata:
   tags: [arxiv, paper, research, academic, search]
-  related_skills: [duckduckgo-search]
+  related_skills: [duckduckgo-search, grounded-citations]
 ---
 
 # arXiv — Paper Search
 
-Search the arXiv repository for academic papers.
+Search the arXiv repository for academic papers. Prefer the bundled stdlib script (no pip).
 
-## Installation
+## Script
 
 ```bash
-pip install arxiv
+skill_script {"action":"run","name":"arxiv","script":"search_arxiv.py","args":["search","attention mechanism","--max","10"]}
+skill_script {"action":"run","name":"arxiv","script":"search_arxiv.py","args":["id","1706.03762"]}
 ```
 
-## Usage
+Or via python3:
 
-### Search by Keyword
-```python
-import arxiv
-
-search = arxiv.Search(
-    query="attention mechanism transformer",
-    max_results=10,
-    sort_by=arxiv.SortCriterion.Relevance,
-)
-
-for paper in search.results():
-    print(f"{paper.title}")
-    print(f"  Authors: {', '.join(a.name for a in paper.authors[:3])}")
-    print(f"  Date: {paper.published.date()}")
-    print(f"  URL: {paper.entry_id}")
-    print(f"  PDF: {paper.pdf_url}")
-    print(f"  Summary: {paper.summary[:200]}...\n")
+```bash
+python3 scripts/search_arxiv.py search "attention mechanism" --max 10
+python3 scripts/search_arxiv.py id 1706.03762
+python3 scripts/search_arxiv.py search 'ti:"reinforcement learning" AND au:silver'
 ```
 
-### Specific Paper by ID
-```python
-paper = next(arxiv.Search(id_list=["1706.03762"]).results())
-print(paper.title)  # "Attention Is All You Need"
-```
+JSON on stdout. No `pip install arxiv`.
 
-### Filter by Category
-```python
-# cs.AI = AI, cs.CL = NLP, cs.LG = ML, stat.ML = stats ML
-search = arxiv.Search(
-    query="diffusion models",
-    max_results=5,
-    sort_by=arxiv.SortCriterion.SubmittedDate,
-)
+Query language (Atom API `search_query`):
 
-# Filter by category
-papers = [p for p in search.results() 
-          if any(c.startswith("cs.") for c in p.categories)]
-```
-
-### Advanced Query
-```python
-# Search title and abstract
-search = arxiv.Search(
-    query='ti:"reinforcement learning" AND au:"silver"',
-    max_results=5,
-)
-```
-
-### Download PDF
-```python
-paper = next(search.results())
-paper.download_pdf(dirpath="./papers", filename=f"{paper.get_short_id()}.pdf")
-```
+- `all:transformer`
+- `ti:"reinforcement learning" AND au:silver`
+- `cat:cs.LG`
 
 ## Categories
 

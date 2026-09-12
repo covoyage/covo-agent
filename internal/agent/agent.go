@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -87,6 +88,9 @@ type CovoAgent struct {
 	skillMgr                *evolution.SkillManager
 	bundleMgr               *evolution.BundleManager
 	skillUsage              *evolution.SkillUsageTracker
+	loadedSkills            []skill.Skill
+	skillDiags              []skill.Diagnostic
+	workshopStore           *evolution.WorkshopStore
 	curator                 *evolution.Curator
 	curatorCancel           context.CancelFunc
 	personaMgr              *evolution.PersonaManager
@@ -186,6 +190,11 @@ type CovoAgentConfig struct {
 
 	ThinkingMode             string // "collapsed" / "truncated" / "full"
 	SkillURLs                []string
+	SkillExtraDirs           []string                 // extra skill roots from config, lowest priority
+	SkillDisabled            []string                 // skill names excluded from the model catalog
+	SkillConfigGet           func() map[string]string // current skills.config values
+	SkillConfigSet           func(key, value string) error
+	LeanTools                bool                     // hide long-tail schemas; keep them via tool_search
 	SystemPrompt             string                   // replaces SOUL.md in context tier
 	AppendSystemPrompt       string                   // appended to context tier
 	WorkspaceOnly            bool                     // when true, file tools restricted to workspace directory
@@ -201,6 +210,25 @@ type CovoAgentConfig struct {
 	// ParentRolloutID links this agent's rollout to the rollout of the agent
 	// that spawned it. Only meaningful for subagents when COVO_ROLLOUT=true.
 	ParentRolloutID string
+}
+
+type skillConfigStore struct {
+	get func() map[string]string
+	set func(key, value string) error
+}
+
+func (s skillConfigStore) Get() map[string]string {
+	if s.get == nil {
+		return nil
+	}
+	return s.get()
+}
+
+func (s skillConfigStore) Set(key, value string) error {
+	if s.set == nil {
+		return fmt.Errorf("skill config store is not available")
+	}
+	return s.set(key, value)
 }
 
 // repetitionRecoveryConfig builds the localized soft repetition-loop
@@ -530,6 +558,8 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 				// use the same auxiliary models for title/review/judge tasks.
 				Auxiliary:                cfg.Auxiliary,
 				AuxiliaryProviderBuilder: cfg.AuxiliaryProviderBuilder,
+				SkillConfigGet:           cfg.SkillConfigGet,
+				SkillConfigSet:           cfg.SkillConfigSet,
 				// Link the child's rollout to the parent agent's rollout when
 				// rollout tracing is enabled.
 				ParentRolloutID: parentRolloutID,
@@ -625,6 +655,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 		skillMgr:         skillMgr,
 		bundleMgr:        bundleMgr,
 		skillUsage:       skillUsage,
+		workshopStore:    workshopStore,
 		personaMgr:       personaMgr,
 		promptBuilder:    promptBuilder,
 		sessionMgr:       sessionMgr,
@@ -755,6 +786,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 		// Link curator to memory for nudge operations
 		ca.curator.SetMemory(memory)
 		ca.curator.SetSkillManager(skillMgr)
+		ca.curator.SetWorkshopStore(workshopStore)
 
 		// Enable extraction and nudges if configured
 		if cfg.CuratorCfg.EnableSkillExtraction {
@@ -818,6 +850,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	// configured providers/models when available, falling back to the main
 	// provider otherwise.
 	ca.auxClient = NewAuxiliaryClient(ca.compressionSwitch, cfg.Model, cfg.Auxiliary, cfg.AuxiliaryProviderBuilder, cfg.Logger)
+	ca.agentTools.SetImageAnalyzer(ca.auxClient.DescribeImage)
 
 	// Route auxiliary LLM calls (title/review/judge and calls to dedicated
 	// auxiliary providers) through the rollout recorder when tracing is
@@ -1036,20 +1069,33 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		ComputerUse: computerUse,
 	})
 
-	skillPaths := skillLoadPaths(cfg.HomeDir+"/skills", cfg.WorkingDir)
+	skillPaths := skillLoadPaths(cfg.HomeDir+"/skills", cfg.WorkingDir, cfg.SkillExtraDirs)
 	if len(cfg.SkillURLs) > 0 {
 		syncer := evolution.NewSkillURLSyncer(
 			evolution.UrlSkillCacheDefault(cfg.HomeDir), logger)
 		skillPaths = append(skillPaths, syncer.Sync(cfg.SkillURLs)...)
 	}
+	if ca.skillMgr != nil {
+		ca.skillMgr.SetExtraRoots(skillPaths)
+	}
 	loadedSkills, skillDiags, _ := skill.Load(skillPaths...)
 	for _, d := range skillDiags {
 		logger.Info("skill diagnostic", "path", d.Path, "message", d.Message)
 	}
+	ca.loadedSkills = loadedSkills
+	ca.skillDiags = skillDiags
+	loadedSkills = filterLoadedSkills(loadedSkills, cfg.SkillDisabled, runtime.GOOS)
 
 	skillExt := agentcore.NewSkillExtension(loadedSkills, nil)
 
 	evolutionExt := evolution.NewEvolutionExtension(ca.memory, ca.skillMgr, ca.bundleMgr, ca.skillUsage, func() string { return ca.sessionMgr.CurrentID() })
+	evolutionExt.SetWorkshopStore(ca.workshopStore)
+	if cfg.SkillConfigGet != nil || cfg.SkillConfigSet != nil {
+		evolutionExt.SetSkillConfigStore(skillConfigStore{
+			get: cfg.SkillConfigGet,
+			set: cfg.SkillConfigSet,
+		})
+	}
 
 	systemPrompt := ca.promptBuilder.Build(cfg.Mode)
 
@@ -1089,6 +1135,7 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		},
 		PlatformName:    func() string { return platform },
 		PlanModeChecker: func() bool { return ca.IsPlanMode() },
+		LeanMode:        cfg.LeanTools,
 		Logger:          logger,
 	})
 	ca.toolsetFilter = toolsetFilter
@@ -1282,6 +1329,13 @@ func (ca *CovoAgent) registerToolChecks(avail *toolset.ToolAvailability) {
 			return "", true
 		}
 		return "no transcription backend available (install whisper.cpp, openai-whisper, or set OPENAI_API_KEY)", false
+	})
+
+	avail.RegisterCheck("video_analyze", func() (string, bool) {
+		if _, err := lookPathSafe("ffmpeg"); err == nil {
+			return "", true
+		}
+		return "ffmpeg not installed", false
 	})
 
 	// sandbox requires docker, ssh, or falls back to local

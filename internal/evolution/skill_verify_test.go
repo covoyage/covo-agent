@@ -50,27 +50,51 @@ func TestSkillCapabilityEndToEnd(t *testing.T) {
 		t.Logf("ReadPreprocessed(%s) OK", skills[0].Name)
 	}
 
-	// 4. skill_manage 工具全动作(临时目录,不碰真实技能)
+	// 4. skill_manage 写入走提案,不直接改 live SKILL.md
 	tmp := t.TempDir()
 	skMgr := NewSkillManager(tmp, NewSkillUsageTracker(tmp))
 	usage := NewSkillUsageTracker(tmp)
+	store := NewWorkshopStore(tmp)
+	if err := store.Init(); err != nil {
+		t.Fatal(err)
+	}
 	ext := NewEvolutionExtension(nil, skMgr, nil, usage, func() string { return "verify-session" })
+	ext.SetWorkshopStore(store)
 	manage := ext.buildSkillManageTool()
-	call := func(params map[string]any) {
+	call := func(params map[string]any) any {
 		raw, err := json.Marshal(params)
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
-		if _, err := manage.Func(context.Background(), raw); err != nil {
+		out, err := manage.Func(context.Background(), raw)
+		if err != nil {
 			t.Fatalf("action %v: %v", params["action"], err)
 		}
+		return out
 	}
-	call(map[string]any{"action": "create", "name": "verify-skill", "description": "verify", "body": "session=${COVO_SESSION_ID}\n# steps\n1. do it"})
-	if _, err := os.Stat(filepath.Join(tmp, "verify-skill", "SKILL.md")); err != nil {
-		t.Fatalf("create 未落盘: %v", err)
+	created := call(map[string]any{"action": "create", "name": "verify-new", "description": "verify", "body": "session=${COVO_SESSION_ID}\n# steps\n1. do it"})
+	if m, ok := created.(map[string]any); !ok || m["status"] != "proposed" {
+		t.Fatalf("create should propose, got %#v", created)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "verify-new", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatal("create must not write live SKILL.md")
+	}
+
+	if _, err := skMgr.Create("verify-skill", "verify", "session=${COVO_SESSION_ID}\n# steps\n1. do it"); err != nil {
+		t.Fatalf("seed live skill: %v", err)
 	}
 	call(map[string]any{"action": "read", "name": "verify-skill"})
-	call(map[string]any{"action": "patch", "name": "verify-skill", "find_str": "do it", "replace_str": "done"})
+	patched := call(map[string]any{"action": "patch", "name": "verify-skill", "find_str": "do it", "replace_str": "done"})
+	if m, ok := patched.(map[string]any); !ok || m["status"] != "proposed" {
+		t.Fatalf("patch should propose, got %#v", patched)
+	}
+	live, err := skMgr.Read("verify-skill")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(live, "done") {
+		t.Fatal("patch must not mutate live skill")
+	}
 	call(map[string]any{"action": "improve", "name": "verify-skill", "improvement_summary": "test"})
 	skillTool := ext.buildSkillTool()
 	loadRaw, _ := json.Marshal(map[string]any{"name": "verify-skill"})
@@ -82,7 +106,7 @@ func TestSkillCapabilityEndToEnd(t *testing.T) {
 		t.Fatalf("skill 加载返回类型异常: %v", loadRes)
 	} else {
 		content := m["content"].(string)
-		if !strings.Contains(content, "done") {
+		if !strings.Contains(content, "do it") {
 			t.Fatalf("skill 加载内容不含预期正文: %v", content)
 		}
 		if !strings.Contains(content, "session=verify-session") {
@@ -94,9 +118,12 @@ func TestSkillCapabilityEndToEnd(t *testing.T) {
 	}
 	t.Log("skill 工具加载 + 未知名报错 通过")
 
-	call(map[string]any{"action": "delete", "name": "verify-skill"})
-	if _, err := os.Stat(filepath.Join(tmp, "verify-skill")); !os.IsNotExist(err) {
-		t.Log("delete 归档处理:", err)
+	deleted := call(map[string]any{"action": "delete", "name": "verify-other"})
+	if m, ok := deleted.(map[string]any); !ok || m["status"] != "proposed" {
+		t.Fatalf("delete should propose, got %#v", deleted)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "verify-skill", "SKILL.md")); err != nil {
+		t.Fatalf("delete proposal must leave live skill: %v", err)
 	}
 	t.Log("skill_manage create/read/patch/improve/delete 全部通过")
 }

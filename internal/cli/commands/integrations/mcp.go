@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/covoyage/covo-agent/internal/agent"
+	"github.com/covoyage/covo-agent/internal/evolution"
 	"github.com/covoyage/covo-agent/internal/logutil"
 	mcpserver "github.com/covoyage/covo-agent/internal/mcpserver"
 	"github.com/covoyage/covo-agent/internal/plugin"
@@ -117,6 +118,10 @@ func cmdMCP(args []string) {
 func testMCPConnection(homeDir, command string, args []string) {
 	_ = homeDir
 	fmt.Printf("  Testing MCP server: %s %v\n", command, args)
+	if err := evolution.CheckMCPCommandMalware(command, args); err != nil {
+		fmt.Fprintf(os.Stderr, "  ✗ %v\n", err)
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -160,6 +165,10 @@ func testMCPConnection(homeDir, command string, args []string) {
 }
 
 func addMCPServer(homeDir, name, command string, args []string) {
+	if err := evolution.CheckMCPCommandMalware(command, args); err != nil {
+		fmt.Fprintf(os.Stderr, "  ✗ %v\n", err)
+		return
+	}
 	cfg, err := cli.LoadConfigFrom(homeDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
@@ -264,6 +273,7 @@ func cmdMCPServe() {
 	}
 
 	pluginHooks := agent.ConvertPluginHooks(pluginSystem.LifecycleHooks())
+	skillCfgGet, skillCfgSet := shared.SkillConfigFns(cfg)
 
 	agentCfg := agent.CovoAgentConfig{
 		Mode:                     agent.ModeGeneral,
@@ -277,6 +287,8 @@ func cmdMCPServe() {
 		LifecycleHooks:           pluginHooks,
 		Auxiliary:                shared.AuxiliaryConfigFromCLI(cfg),
 		AuxiliaryProviderBuilder: cli.ResolveAuxiliaryProviderBuilder(),
+		SkillConfigGet:           skillCfgGet,
+		SkillConfigSet:           skillCfgSet,
 	}
 
 	if cli.HasProviderConfigured() {

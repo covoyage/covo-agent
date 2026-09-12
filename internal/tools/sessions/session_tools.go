@@ -6,28 +6,63 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/covoyage/covo-agent/internal/tools/subagent"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
-// YieldFunc is a callback triggered by sessions_yield to pause the current turn.
-type YieldFunc func()
-
-func BuildSessionsYieldTool(yieldFn YieldFunc) *agentcore.Tool {
+func BuildSessionsYieldTool(registry *subagent.SubagentRegistry) *agentcore.Tool {
 	return &agentcore.Tool{
-		Name:        "sessions_yield",
-		Description: "End the current turn after spawning subagents. The agent will wait for subagent results to arrive before the next turn. Call this when you've started parallel subagents and want to pause instead of advancing further.",
+		Name: "sessions_yield",
+		Description: strings.Join([]string{
+			"End the current turn after background sessions_spawn calls.",
+			"Requires at least one still-running child started with background=true in this turn.",
+			"Child results arrive via inbox on the next user message. Does not cancel children.",
+			"Use sessions_wait to block in the same turn instead.",
+		}, "\n"),
 		Parameters: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
+			"type": "object",
+			"properties": map[string]any{
+				"message": map[string]any{
+					"type":        "string",
+					"description": "Private note for the next turn after children complete.",
+				},
+				"acknowledgment": map[string]any{
+					"type":        "string",
+					"description": "Optional one-line status shown to the user for this turn.",
+				},
+			},
 		},
 		Func: func(ctx context.Context, args json.RawMessage) (any, error) {
-			if yieldFn != nil {
-				yieldFn()
+			var params struct {
+				Message        string `json:"message"`
+				Acknowledgment string `json:"acknowledgment"`
+			}
+			_ = json.Unmarshal(args, &params)
+			if registry == nil {
+				return nil, fmt.Errorf("no pending child completion owned by this turn")
+			}
+			ids, err := registry.ClaimYield()
+			if err != nil {
+				return nil, err
+			}
+			ack := strings.TrimSpace(params.Acknowledgment)
+			if ack == "" {
+				ack = fmt.Sprintf("Waiting for %d background child session(s).", len(ids))
+			}
+			note := "Turn ended. Results from subagents will arrive in the next turn."
+			if strings.TrimSpace(params.Message) != "" {
+				note = params.Message
 			}
 			return map[string]any{
-				"status": "yielded",
-				"note":   "Turn ended. Results from subagents will arrive in the next turn.",
-			}, nil
+					"status":         "yielded",
+					"child_ids":      ids,
+					"message":        note,
+					"acknowledgment": ack,
+				}, agentcore.NewInterruptErrorWithData(ack, map[string]any{
+					"status":    "yielded",
+					"child_ids": ids,
+					"message":   note,
+				})
 		},
 	}
 }
@@ -99,7 +134,7 @@ func BuildSessionsSendTool(sendFn func(ctx context.Context, target, msg string) 
 					"description": "The message to send.",
 				},
 			},
-			"required": []string{"message"},
+			"required": []string{"target", "message"},
 		},
 		Func: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var params struct {
@@ -112,14 +147,17 @@ func BuildSessionsSendTool(sendFn func(ctx context.Context, target, msg string) 
 			if strings.TrimSpace(params.Message) == "" {
 				return nil, fmt.Errorf("message is required")
 			}
-			if sendFn != nil {
-				status, err := sendFn(ctx, params.Target, params.Message)
-				if err != nil {
-					return nil, fmt.Errorf("send: %w", err)
-				}
-				return map[string]any{"status": "sent", "detail": status}, nil
+			if sendFn == nil {
+				return nil, fmt.Errorf("sessions_send is not available (no inbox)")
 			}
-			return map[string]any{"status": "acknowledged", "note": "message recorded"}, nil
+			if strings.TrimSpace(params.Target) == "" {
+				return nil, fmt.Errorf("target is required")
+			}
+			status, err := sendFn(ctx, params.Target, params.Message)
+			if err != nil {
+				return nil, fmt.Errorf("send: %w", err)
+			}
+			return map[string]any{"status": "sent", "detail": status}, nil
 		},
 	}
 }

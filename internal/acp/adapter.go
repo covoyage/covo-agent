@@ -14,6 +14,7 @@ import (
 
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
 )
 
 type covoAgentInstance struct {
@@ -97,16 +98,19 @@ func (f *covoAgentFactory) CreateAgent(ctx context.Context, sessionID, cwd, mode
 		agentMode = agent.ModeGeneral
 	}
 
+	skillCfgGet, skillCfgSet := shared.SkillConfigFns(cfg)
 	ca, err := agent.NewCovoAgent(agent.CovoAgentConfig{
-		Mode:                    agentMode,
-		Provider:                llm,
-		ProviderName:            providerType,
-		Model:                   model,
-		WorkingDir:              cwd,
-		HomeDir:                 f.homeDir,
-		Logger:                  f.logger,
-		Auxiliary:               convertAuxiliary(cfg),
+		Mode:                     agentMode,
+		Provider:                 llm,
+		ProviderName:             providerType,
+		Model:                    model,
+		WorkingDir:               cwd,
+		HomeDir:                  f.homeDir,
+		Logger:                   f.logger,
+		Auxiliary:                convertAuxiliary(cfg),
 		AuxiliaryProviderBuilder: cli.ResolveAuxiliaryProviderBuilder(),
+		SkillConfigGet:           skillCfgGet,
+		SkillConfigSet:           skillCfgSet,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)

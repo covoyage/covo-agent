@@ -6,8 +6,9 @@ author: Covo Agent
 license: MIT
 platforms: [linux, macos, windows]
 prerequisites:
+  env: [LINEAR_API_KEY]
   env_vars: [LINEAR_API_KEY]
-  commands: [curl]
+  commands: [python3]
 metadata:
   tags: [Linear, Project Management, Issues, GraphQL, API, Productivity]
 ---

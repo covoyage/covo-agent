@@ -23,6 +23,7 @@ func BuildTranscribeTool() *agentcore.Tool {
 		Description: strings.Join([]string{
 			"Transcribe speech from audio or video files to text.",
 			"Supports MP3, WAV, M4A, OGG, FLAC, MP4, WEBM, and more.",
+			"For visual content (scenes, on-screen text, UI), use video_analyze instead.",
 			"",
 			"Backends (auto-detected in order):",
 			"  1. whisper-cli (local, via whisper.cpp) - fastest, offline",

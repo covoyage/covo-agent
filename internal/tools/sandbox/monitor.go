@@ -129,7 +129,7 @@ func handleMonitorStart(ctx context.Context, req monitorRequest, store *ProcessS
 		req.IdleTimeout = 300
 	}
 
-	proc, err := store.Spawn(req.Command, "")
+	proc, err := store.Spawn(req.Command, "", false)
 	if err != nil {
 		return nil, fmt.Errorf("spawn monitor: %w", err)
 	}

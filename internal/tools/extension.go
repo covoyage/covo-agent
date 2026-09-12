@@ -2,10 +2,13 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	"github.com/covoyage/covo-agent/internal/audit"
 	"github.com/covoyage/covo-agent/internal/evolution"
@@ -88,9 +91,11 @@ type Extension struct {
 	webFetchTransport http.RoundTripper
 	tools             []*agentcore.Tool
 	toolProfile       string
+	workDir           string
 	parentMessages    func() []agentcore.Message
 	phaseTransition   toolsplanning.PhaseTransitioner
 	externalAgents    *externalagent.Registry
+	imageAnalyzer     toolsmedia.ImageAnalyzer
 }
 
 // ExtensionConfig configures the agent tools extension.
@@ -236,6 +241,7 @@ func NewExtension(cfg ExtensionConfig) *Extension {
 		logger:            logger,
 		webFetchTransport: cfg.WebFetchTransport,
 		toolProfile:       cfg.ToolProfile,
+		workDir:           cfg.WorkDir,
 		parentMessages:    cfg.ParentMessages,
 		phaseTransition:   cfg.PhaseTransitioner,
 		externalAgents:    externalagent.NewRegistry(cfg.WorkDir, os.Getenv("COVO_EXTERNAL_AGENTS")),
@@ -286,6 +292,22 @@ func (e *Extension) SetGoalStore(gs *goal.Store, sessionIDFn func() string) {
 	e.sessionIDFn = sessionIDFn
 }
 
+func (e *Extension) sessionSend(ctx context.Context, target, msg string) (string, error) {
+	_ = ctx
+	if e.inboxStore == nil {
+		return "", fmt.Errorf("inbox store is unavailable")
+	}
+	from := ""
+	if e.sessionIDFn != nil {
+		from = e.sessionIDFn()
+	}
+	id, err := e.inboxStore.Send(target, from, msg)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("inbox message %d", id), nil
+}
+
 // SetParentMessages wires the parent agent's message provider, used by
 // "state" and "full" context modes in sessions_spawn / sessions_spawn_batch.
 // Late-bound: the parent agent's core may not exist when the extension is
@@ -310,9 +332,38 @@ func (e *Extension) SetInboxStore(s *inbox.Store) {
 	e.inboxStore = s
 }
 
+// SetImageAnalyzer wires the vision callback used by view_image and video_analyze.
+func (e *Extension) SetImageAnalyzer(fn toolsmedia.ImageAnalyzer) {
+	e.imageAnalyzer = fn
+}
+
 // InboxStore returns the inbox store for agent-layer integration (e.g.
 // auto-drain on turn start). May be nil if construction failed.
 func (e *Extension) InboxStore() *inbox.Store { return e.inboxStore }
+
+func (e *Extension) onSpawnComplete(childID, task, output string, err error) {
+	if e.inboxStore == nil {
+		return
+	}
+	parent := ""
+	if e.sessionIDFn != nil {
+		parent = e.sessionIDFn()
+	}
+	if parent == "" {
+		return
+	}
+	status := "completed"
+	body := output
+	if err != nil {
+		status = "failed"
+		body = err.Error()
+	}
+	if len(body) > 4000 {
+		body = body[:4000] + "…"
+	}
+	msg := fmt.Sprintf("subagent %s %s: %s\n%s", childID, status, task, body)
+	_, _ = e.inboxStore.Send(parent, childID, msg)
+}
 
 // AuditStore returns the audit log store for agent-layer integration
 // (e.g. the audit lifecycle hook). May be nil if construction failed.
@@ -367,24 +418,28 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 	e.tools = []*agentcore.Tool{
 		// Batch 1: session_search, todo, clarify, send_message, moa
 		toolssessions.BuildSessionSearchTool(e.sessionsDir, e.ftsSearcher),
+		toolssessions.BuildSessionsListTool(func() []map[string]any {
+			return toolssessions.ListSessionSummaries(e.sessionsDir, 20)
+		}),
+		toolssessions.BuildSessionsHistoryTool(func(ctx context.Context, limit int, includeTools bool) ([]map[string]any, error) {
+			_ = ctx
+			id := ""
+			if e.sessionIDFn != nil {
+				id = e.sessionIDFn()
+			}
+			return toolssessions.ReadSessionHistory(e.sessionsDir, id, limit, includeTools)
+		}),
 		toolsplanning.BuildTodoTool(e.todoStore),
-		toolsplanning.BuildClarifyTool(),
+		toolsplanning.BuildClarifyTool(toolsplanning.AskFunc(e.askUserCallback)),
 		buildSendMessageTool(),
 		buildMoATool(MoAConfig{Provider: provider, DefaultModel: model}),
-		// Batch 2: cronjob, tts, image_generate
+		// Batch 2: cronjob (media tools registered below when backends exist)
 		buildCronjobTool(e.cronStore),
-		toolsmedia.BuildTtsTool(),
-		toolsmedia.BuildImageGenerateTool(),
-		// Batch 3: pdf, update_plan, exit_plan_mode, video_generate, music_generate, transcribe
+		// Batch 3: pdf, update_plan, exit_plan_mode, transcribe
 		toolsmedia.BuildPdfTool(),
 		toolsplanning.BuildUpdatePlanTool(e.planStore),
 		toolsplanning.BuildExitPlanModeTool(e.planStore, e.phaseTransition),
-		toolsmedia.BuildVideoGenerateTool(),
-		toolsmedia.BuildMusicGenerateTool(),
 		toolsmedia.BuildTranscribeTool(),
-		// Voice interaction: wake word listening + push-to-talk
-		toolsmedia.BuildVoiceListenTool(),
-		toolsmedia.BuildVoiceRecordTool(),
 		// Batch 4: diffs, sessions_spawn, sessions_spawn_batch, edit_block
 		fileops.BuildDiffsTool(),
 		toolssubagent.BuildSessionsSpawnTool(e.spawnRunner, e.subagentRunner, func() []string {
@@ -394,7 +449,7 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 				return nil
 			}
 			return e.parentMessages()
-		}),
+		}, e.subagentReg, e.onSpawnComplete),
 		toolssubagent.BuildSessionsSpawnBatchTool(e.spawnRunner, e.subagentRunner, func() []string {
 			return agent.ToolNames()
 		}, func() []agentcore.Message {
@@ -408,6 +463,8 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		buildMCPTool(e.mcpStore),
 		// Batch 6: process, monitor, sandbox, swarm, swarm_orchestrate, secrets
 		toolssandbox.BuildProcessTool(e.processStore),
+		toolsmedia.BuildViewImageToolWithTransport(e.workDir, e.imageAnalyzer, e.webFetchTransport),
+		toolsmedia.BuildVideoAnalyzeToolWithTransport(e.workDir, e.imageAnalyzer, e.webFetchTransport),
 		toolssandbox.BuildMonitorTool(e.processStore),
 		toolssandbox.BuildSandboxTool(e.sandbox),
 		toolswarm.BuildSwarmTool(e.swarmBoard),
@@ -478,9 +535,8 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		buildInboxCheckTool(e.inboxStore, e.sessionIDFn),
 		buildAuditQueryTool(e.auditStore, e.sessionIDFn),
 
-		// Batch 13: session tools (sessions_yield, sessions_send)
-		toolssessions.BuildSessionsYieldTool(nil), // yieldFn wired post-init
-		toolssessions.BuildSessionsSendTool(nil),  // sendFn wired post-init
+		// Batch 13: sessions_send delivers via the persistent inbox.
+		toolssessions.BuildSessionsSendTool(e.sessionSend),
 
 		// Batch 14: memory enhancement (memory_recall, memory_store, memory_forget)
 		toolsmemory.BuildMemoryRecallTool(e.memoryStore),
@@ -496,15 +552,7 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		// Batch 15: subagent introspection
 		toolssubagent.BuildSubagentsTool(e.subagentReg),
 
-		// Batch 16: feishu/lark integration (doc, wiki, bitable, drive)
-		toolsfeishu.BuildFeishuDocReadTool(e.feishuClient),
-		toolsfeishu.BuildFeishuDocCreateTool(e.feishuClient),
-		toolsfeishu.BuildFeishuWikiListTool(e.feishuClient),
-		toolsfeishu.BuildFeishuWikiNodesTool(e.feishuClient),
-		toolsfeishu.BuildFeishuBitableListTool(e.feishuClient),
-		toolsfeishu.BuildFeishuBitableRecordsTool(e.feishuClient),
-		toolsfeishu.BuildFeishuDriveListTool(e.feishuClient),
-		toolsfeishu.BuildFeishuDriveDownloadTool(e.feishuClient),
+		// Batch 16: feishu/lark (registered below only when credentials exist)
 
 		// Batch 17: canvas (HTML/SVG/Mermaid/PlantUML visualization)
 		toolscanvas.BuildCanvasTool(),
@@ -539,17 +587,14 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		toolsworktree.BuildExitWorktreeTool(e.worktreeMgr),
 		buildComputerUseTool(),
 
-		// Batch 21: hardware (i2c, spi, serial)
-		toolshardware.BuildI2CTool(),
-		toolshardware.BuildSPITool(),
-		toolshardware.BuildSerialTool(),
+		// Batch 21: hardware (registered below on Linux)
 		toolssubagent.BuildInterruptAgentTool(e.subagentReg),
 		toolssubagent.BuildSessionsWaitTool(e.subagentReg),
+		toolssessions.BuildSessionsYieldTool(e.subagentReg),
 		toolssubagent.BuildCloseAgentTool(e.subagentReg),
 		toolssubagent.BuildSendInputTool(e.subagentReg),
 
-		// Batch 22: tmux integration
-		toolssandbox.BuildTmuxTool(),
+		// Batch 22: tmux (registered below when tmux is installed)
 
 		// Batch 23: test generation
 		buildGenerateTestsTool(),
@@ -564,17 +609,53 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		fileops.BuildSearchFilesTool(),
 
 		// Batch 27: code graph (Go package dependency analysis)
-		toolscodegraph.BuildCodeGraphTool(),
+		toolscodegraph.BuildCodeGraphTool(e.workDir),
 
 		// Batch 29: run_code (Code Mode — execute Go programs with tool SDK)
-		BuildRunCodeToolWithRegistry(func(name string) (*agentcore.Tool, bool) {
-			return agent.GetTool(name)
-		}, func() []string {
-			return agent.ToolNames()
-		}),
+		BuildRunCodeToolWithRegistry(agent),
 	}
 
-	// Batch 28: external coding agents (Claude Code, Codex, opencode).
+	if os.Getenv("FAL_KEY") != "" {
+		e.tools = append(e.tools,
+			toolsmedia.BuildImageGenerateTool(),
+			toolsmedia.BuildVideoGenerateTool(),
+			toolsmedia.BuildMusicGenerateTool(),
+		)
+	}
+	if toolsmedia.EdgeTTSAvailable() {
+		e.tools = append(e.tools, toolsmedia.BuildTtsTool())
+	}
+	if os.Getenv("COVO_VOICE") == "1" {
+		e.tools = append(e.tools,
+			toolsmedia.BuildVoiceListenTool(),
+			toolsmedia.BuildVoiceRecordTool(),
+		)
+	}
+	if _, err := exec.LookPath("tmux"); err == nil {
+		e.tools = append(e.tools, toolssandbox.BuildTmuxTool())
+	}
+
+	if e.feishuClient != nil && e.feishuClient.Enabled() {
+		e.tools = append(e.tools,
+			toolsfeishu.BuildFeishuDocReadTool(e.feishuClient),
+			toolsfeishu.BuildFeishuDocCreateTool(e.feishuClient),
+			toolsfeishu.BuildFeishuWikiListTool(e.feishuClient),
+			toolsfeishu.BuildFeishuWikiNodesTool(e.feishuClient),
+			toolsfeishu.BuildFeishuBitableListTool(e.feishuClient),
+			toolsfeishu.BuildFeishuBitableRecordsTool(e.feishuClient),
+			toolsfeishu.BuildFeishuDriveListTool(e.feishuClient),
+			toolsfeishu.BuildFeishuDriveDownloadTool(e.feishuClient),
+		)
+	}
+	if runtime.GOOS == "linux" {
+		e.tools = append(e.tools,
+			toolshardware.BuildI2CTool(),
+			toolshardware.BuildSPITool(),
+		)
+	}
+	e.tools = append(e.tools, toolshardware.BuildSerialTool())
+
+	// Batch 28: external coding agents.
 	// Only exposed when COVO_EXTERNAL_AGENTS enables at least one provider.
 	if e.externalAgents != nil && e.externalAgents.AnyEnabled() {
 		e.tools = append(e.tools, externalagent.BuildExternalAgentTool(e.externalAgents))

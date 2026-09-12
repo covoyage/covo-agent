@@ -46,7 +46,6 @@ func GenerateTestsForFile(srcPath string) (*GenerateTestsResult, error) {
 				Status:   "exists",
 			}, nil
 		}
-		// Use gotests if available, otherwise create skeleton
 		if cmd, err := exec.LookPath("gotests"); err == nil {
 			out, err := exec.Command(cmd, "-all", "-w", srcPath).CombinedOutput()
 			if err == nil {
@@ -58,24 +57,11 @@ func GenerateTestsForFile(srcPath string) (*GenerateTestsResult, error) {
 			}
 			_ = out
 		}
-		// Fallback: create skeleton test file
-		content := fmt.Sprintf(`package %s
-
-import (
-	"testing"
-)
-
-func Test%s(t *testing.T) {
-	// TODO: implement
-}
-`, detectGoPackage(dir), toTitle(base))
-		if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-			return nil, fmt.Errorf("write test file: %w", err)
-		}
 		return &GenerateTestsResult{
 			TestFile: testFile,
 			Language: "go",
-			Status:   "skeleton",
+			Status:   "suggested",
+			Error:    "no test file yet; write real tests to " + testFile + " (gotests not available)",
 		}, nil
 
 	case ".py":
@@ -87,21 +73,11 @@ func Test%s(t *testing.T) {
 				Status:   "exists",
 			}, nil
 		}
-		content := fmt.Sprintf(`"""Tests for %s."""
-import pytest
-from %s import %s
-
-
-def test_%s():
-    assert True
-`, filepath.Base(srcPath), strings.ReplaceAll(dir, string(os.PathSeparator), "."), toTitle(base), base)
-		if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-			return nil, fmt.Errorf("write test file: %w", err)
-		}
 		return &GenerateTestsResult{
 			TestFile: testFile,
 			Language: "python",
-			Status:   "skeleton",
+			Status:   "suggested",
+			Error:    "no test file yet; write real tests to " + testFile,
 		}, nil
 
 	case ".js", ".jsx", ".ts", ".tsx":
@@ -114,22 +90,11 @@ def test_%s():
 				Status:   "exists",
 			}, nil
 		}
-		framework := "describe"
-		content := fmt.Sprintf(`import { %s, it, expect } from 'vitest';
-
-%s('%s', () => {
-  it('should work', () => {
-    expect(true).toBe(true);
-  });
-});
-`, framework, framework, base)
-		if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-			return nil, fmt.Errorf("write test file: %w", err)
-		}
 		return &GenerateTestsResult{
 			TestFile: testFile,
 			Language: "javascript",
-			Status:   "skeleton",
+			Status:   "suggested",
+			Error:    "no test file yet; write real tests to " + testFile,
 		}, nil
 
 	default:
@@ -144,7 +109,7 @@ def test_%s():
 func buildGenerateTestsTool() *agentcore.Tool {
 	return &agentcore.Tool{
 		Name:        "generate_tests",
-		Description: "Generate a test file for a given source file. Detects language and creates an appropriate test skeleton.",
+		Description: "Suggest the conventional test file path for a source file. Runs gotests for Go when available; otherwise reports the path without writing a placeholder skeleton. Does not invent test bodies.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

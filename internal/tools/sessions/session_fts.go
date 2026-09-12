@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	_ "modernc.org/sqlite"
 )
@@ -390,11 +391,53 @@ func (s *FTSSearcher) Search(ctx context.Context, query string, limit int) ([]se
 		results = append(results, r)
 	}
 
+	// The trigram index cannot match 1-2 rune CJK terms ("记忆"), which are
+	// common in Chinese queries. Supplement FTS hits with a substring scan
+	// over the session files, which handles those terms correctly.
+	if hasShortCJKTerm(query) {
+		if extra, err := searchSessions(s.sessionsDir, query, limit); err == nil {
+			if m, ok := extra.(map[string]any); ok {
+				if list, ok := m["results"].([]sessionResult); ok {
+					seen := make(map[string]bool, len(results))
+					for _, r := range results {
+						seen[r.SessionID] = true
+					}
+					for _, r := range list {
+						if !seen[r.SessionID] {
+							results = append(results, r)
+						}
+					}
+				}
+			}
+		}
+		if len(results) > limit {
+			results = results[:limit]
+		}
+	}
+
 	if len(results) == 0 {
 		return nil, nil
 	}
 
 	return results, nil
+}
+
+// hasShortCJKTerm reports whether the query contains a 1-2 rune CJK term
+// that the trigram tokenizer cannot index.
+func hasShortCJKTerm(query string) bool {
+	for _, w := range ftsTokenRe.FindAllString(strings.TrimSpace(query), -1) {
+		runes := []rune(w)
+		if len(runes) == 0 || len(runes) > 2 {
+			continue
+		}
+		for _, r := range runes {
+			if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) ||
+				unicode.Is(unicode.Katakana, r) || unicode.Is(unicode.Hangul, r) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *FTSSearcher) listRecent(limit int) ([]sessionResult, error) {

@@ -1,1 +1,1 @@
-Skills for coding, debugging, code review, planning, and software engineering workflows.
+Skills for coding, debugging, code review, planning, AST search, and software engineering workflows.

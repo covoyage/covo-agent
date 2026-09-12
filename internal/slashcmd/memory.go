@@ -77,9 +77,20 @@ func handleDistill(sctx *SlashContext, parts []string) bool {
 		if created {
 			sctx.UI.App.PrintSystem(fmt.Sprintf("✓ distilled new skill %q (confidence %.0f%%): %s",
 				candidate.Name, candidate.Confidence*100, candidate.Description))
-		} else {
-			sctx.UI.App.PrintSystem(fmt.Sprintf("distill: candidate %q identified but not saved", candidate.Name))
+			return
 		}
+		pending := []evolution.SkillProposal{}
+		if store := covoAgent.WorkshopStore(); store != nil {
+			pending = store.ListPending()
+		}
+		for _, p := range pending {
+			if p.SkillName == candidate.Name {
+				sctx.UI.App.PrintSystem(i18n.T("system.distill_proposed",
+					"name", candidate.Name, "id", p.ID))
+				return
+			}
+		}
+		sctx.UI.App.PrintSystem(fmt.Sprintf("distill: candidate %q identified but not saved", candidate.Name))
 	}, nil)
 	return true
 }
@@ -183,29 +194,27 @@ func handleSkill(sctx *SlashContext, parts []string) bool {
 		sctx.UI.App.PrintSystem(i18n.T("system.no_active_agent"))
 		return true
 	}
-	// /skill with no args: list all skills
+	if len(parts) >= 2 {
+		switch strings.ToLower(parts[1]) {
+		case "propose", "proposals", "pending":
+			return handleSkillProposals(sctx)
+		case "apply":
+			if len(parts) < 3 {
+				sctx.UI.App.PrintSystem(i18n.T("system.skill_apply_usage"))
+				return true
+			}
+			return handleSkillApply(sctx, parts[2])
+		case "reject":
+			if len(parts) < 3 {
+				sctx.UI.App.PrintSystem(i18n.T("system.skill_reject_usage"))
+				return true
+			}
+			return handleSkillReject(sctx, parts[2])
+		}
+	}
+	// /skill or /skills with no args: catalog with source and gate reasons
 	if len(parts) < 2 {
-		records := covoAgent.SkillUsage().AllRecords()
-		if len(records) == 0 {
-			sctx.UI.App.PrintSystem(i18n.T("system.no_skills"))
-			return true
-		}
-		sctx.UI.App.PrintSystem(fmt.Sprintf("── Skills (%d total) ──", len(records)))
-		for _, rec := range records {
-			stateIcon := "●"
-			switch rec.State {
-			case evolution.StateStale:
-				stateIcon = "◐"
-			case evolution.StateArchived:
-				stateIcon = "○"
-			}
-			label := rec.Name
-			if rec.ID != "" {
-				label = rec.ID
-			}
-			sctx.UI.App.PrintSystem(fmt.Sprintf("  %s %s [%s] uses=%d provenance=%s",
-				stateIcon, label, rec.State, rec.UseCount, rec.Provenance))
-		}
+		sctx.UI.App.PrintSystem(formatSkillInspect(covoAgent.InspectSkills()))
 		return true
 	}
 	// /skill <name>: view specific skill
@@ -223,5 +232,68 @@ func handleSkill(sctx *SlashContext, parts []string) bool {
 	sctx.UI.App.PrintSystem(fmt.Sprintf("── Skill: %s ──", name))
 	sctx.UI.App.PrintSystem(fmt.Sprintf("  State: %s | Uses: %d | Provenance: %s",
 		rec.State, rec.UseCount, rec.Provenance))
+	return true
+}
+
+func handleSkillProposals(sctx *SlashContext) bool {
+	covoAgent := sctx.Runtime.Agents.Current()
+	if covoAgent == nil {
+		sctx.UI.App.PrintSystem(i18n.T("system.no_active_agent"))
+		return true
+	}
+	store := covoAgent.WorkshopStore()
+	if store == nil {
+		sctx.UI.App.PrintSystem(i18n.T("system.skill_workshop_disabled"))
+		return true
+	}
+	pending := store.ListPending()
+	if len(pending) == 0 {
+		sctx.UI.App.PrintSystem(i18n.T("system.skill_no_proposals"))
+		return true
+	}
+	sctx.UI.App.PrintSystem(i18n.T("system.skill_proposals_header", "count", fmt.Sprintf("%d", len(pending))))
+	for _, p := range pending {
+		rationale := p.Rationale
+		if rationale == "" {
+			rationale = "-"
+		}
+		sctx.UI.App.PrintSystem(fmt.Sprintf("  • %s  %s [%s]  %s", p.ID, p.SkillName, p.Kind, rationale))
+	}
+	sctx.UI.App.PrintSystem(i18n.T("system.skill_propose_hint"))
+	return true
+}
+
+func handleSkillApply(sctx *SlashContext, id string) bool {
+	covoAgent := sctx.Runtime.Agents.Current()
+	if covoAgent == nil {
+		sctx.UI.App.PrintSystem(i18n.T("system.no_active_agent"))
+		return true
+	}
+	prop, err := covoAgent.ApplySkillProposal(id)
+	if err != nil {
+		sctx.UI.App.PrintError(fmt.Errorf("apply proposal: %w", err))
+		return true
+	}
+	sctx.UI.App.PrintSystem(i18n.T("system.skill_applied", "id", prop.ID, "name", prop.SkillName))
+	return true
+}
+
+func handleSkillReject(sctx *SlashContext, id string) bool {
+	covoAgent := sctx.Runtime.Agents.Current()
+	if covoAgent == nil {
+		sctx.UI.App.PrintSystem(i18n.T("system.no_active_agent"))
+		return true
+	}
+	store := covoAgent.WorkshopStore()
+	if store == nil {
+		sctx.UI.App.PrintSystem(i18n.T("system.skill_workshop_disabled"))
+		return true
+	}
+	prop, err := store.Reject(id)
+	if err != nil {
+		sctx.UI.App.PrintError(fmt.Errorf("reject proposal: %w", err))
+		return true
+	}
+	sctx.UI.App.PrintSystem(i18n.T("system.skill_rejected", "id", prop.ID, "name", prop.SkillName))
 	return true
 }

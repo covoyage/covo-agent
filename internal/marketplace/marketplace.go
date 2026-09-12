@@ -6,6 +6,7 @@
 package marketplace
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,7 +46,22 @@ type PluginEntry struct {
 	Homepage    string     `json:"homepage,omitempty"`
 	Tags        []string   `json:"tags,omitempty"`
 	InstallURL  string     `json:"install_url,omitempty"`
-	Installed   bool       `json:"installed,omitempty"`
+	// SHA256 optionally pins the content digest. When present, installs whose
+	// payload does not match the pin are rejected — a registry-side defense
+	// against content/substitution attacks behind the registry URL.
+	SHA256    string `json:"sha256,omitempty"`
+	Installed bool   `json:"installed,omitempty"`
+}
+
+// InstalledRecord is the provenance of one installed plugin, persisted to
+// <homeDir>/marketplace/installed.json.
+type InstalledRecord struct {
+	Name        string     `json:"name"`
+	Type        PluginType `json:"type"`
+	SHA256      string     `json:"sha256,omitempty"`
+	Source      string     `json:"source"`
+	Version     string     `json:"version,omitempty"`
+	InstalledAt string     `json:"installed_at"`
 }
 
 // Marketplace provides browsing and installation of plugins from a registry.
@@ -165,7 +181,7 @@ func (m *Marketplace) Install(name string) (string, error) {
 
 	switch entry.Type {
 	case PluginTypeSkill:
-		return m.installSkill(name)
+		return m.installSkill(entry)
 	case PluginTypeMCP:
 		return m.installMCP(entry)
 	case PluginTypeCommand, PluginTypeAgent, PluginTypeHook:
@@ -180,19 +196,31 @@ func (m *Marketplace) Uninstall(name string) error {
 	// Try skill first
 	skillPath := filepath.Join(m.homeDir, "skills", name)
 	if _, err := os.Stat(skillPath); err == nil {
-		return os.RemoveAll(skillPath)
+		if err := os.RemoveAll(skillPath); err != nil {
+			return err
+		}
+		m.removeInstallRecord(name)
+		return nil
 	}
 
 	// Try MCP config
 	mcpPath := filepath.Join(m.homeDir, "mcp-servers", name+".json")
 	if _, err := os.Stat(mcpPath); err == nil {
-		return os.Remove(mcpPath)
+		if err := os.Remove(mcpPath); err != nil {
+			return err
+		}
+		m.removeInstallRecord(name)
+		return nil
 	}
 
 	// Try generic plugin
 	genericPath := filepath.Join(m.homeDir, "plugins", name)
 	if _, err := os.Stat(genericPath); err == nil {
-		return os.RemoveAll(genericPath)
+		if err := os.RemoveAll(genericPath); err != nil {
+			return err
+		}
+		m.removeInstallRecord(name)
+		return nil
 	}
 
 	return fmt.Errorf("marketplace: plugin %q not installed", name)
@@ -286,34 +314,118 @@ func (m *Marketplace) markInstalled(entries []PluginEntry) {
 	}
 }
 
-func (m *Marketplace) installSkill(name string) (string, error) {
-	path, err := m.skillHub.Install(name)
-	if err != nil {
-		return "", fmt.Errorf("marketplace: install skill %q: %w", name, err)
+// installPayload fetches the plugin body for an entry and enforces the
+// registry content pin when one is declared.
+func (m *Marketplace) installPayload(entry *PluginEntry, defaultPath string) ([]byte, error) {
+	url := entry.InstallURL
+	if url == "" {
+		url = m.registryURL + defaultPath
 	}
+
+	resp, err := m.client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("registry returned %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if entry.SHA256 != "" {
+		digest := fmt.Sprintf("%x", sha256.Sum256(body))
+		if !strings.EqualFold(entry.SHA256, digest) {
+			return nil, fmt.Errorf(
+				"content digest %s does not match registry pin %s — install blocked",
+				digest, entry.SHA256)
+		}
+	}
+	return body, nil
+}
+
+// recordInstall writes an InstalledRecord into the installed manifest.
+func (m *Marketplace) recordInstall(entry *PluginEntry, digest, source string) {
+	manifest := m.installedManifest()
+	manifest[entry.Name] = InstalledRecord{
+		Name:        entry.Name,
+		Type:        entry.Type,
+		SHA256:      digest,
+		Source:      source,
+		Version:     entry.Version,
+		InstalledAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := os.MkdirAll(filepath.Dir(m.manifestPath()), 0755); err != nil {
+		return
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(m.manifestPath(), data, 0644)
+}
+
+// removeInstallRecord drops a plugin's record from the installed manifest.
+func (m *Marketplace) removeInstallRecord(name string) {
+	manifest := m.installedManifest()
+	if _, ok := manifest[name]; !ok {
+		return
+	}
+	delete(manifest, name)
+	if err := os.MkdirAll(filepath.Dir(m.manifestPath()), 0755); err != nil {
+		return
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(m.manifestPath(), data, 0644)
+}
+
+func (m *Marketplace) manifestPath() string {
+	return filepath.Join(m.homeDir, "marketplace", "installed.json")
+}
+
+func (m *Marketplace) installedManifest() map[string]InstalledRecord {
+	data, err := os.ReadFile(m.manifestPath())
+	if err != nil {
+		return make(map[string]InstalledRecord)
+	}
+	var manifest map[string]InstalledRecord
+	if json.Unmarshal(data, &manifest) != nil || manifest == nil {
+		return make(map[string]InstalledRecord)
+	}
+	return manifest
+}
+
+func (m *Marketplace) installSkill(entry *PluginEntry) (string, error) {
+	path, err := m.skillHub.Install(entry.Name)
+	if err != nil {
+		return "", fmt.Errorf("marketplace: install skill %q: %w", entry.Name, err)
+	}
+	// Record provenance in the marketplace manifest; the digest comes from
+	// the freshly installed SKILL.md (skillhub already verified any pin).
+	digest := ""
+	if body, err := os.ReadFile(path); err == nil {
+		digest = fmt.Sprintf("%x", sha256.Sum256(body))
+	}
+	source := entry.InstallURL
+	if source == "" {
+		source = m.registryURL + "/skills/" + entry.Name + "/SKILL.md"
+	}
+	m.recordInstall(entry, digest, source)
 	return path, nil
 }
 
 func (m *Marketplace) installMCP(entry *PluginEntry) (string, error) {
 	// Fetch MCP server config
-	url := entry.InstallURL
-	if url == "" {
-		url = m.registryURL + "/mcp/" + entry.Name + ".json"
-	}
-
-	resp, err := m.client.Get(url)
+	body, err := m.installPayload(entry, "/mcp/"+entry.Name+".json")
 	if err != nil {
 		return "", fmt.Errorf("marketplace: fetch MCP config: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("marketplace: MCP config returned %s", resp.Status)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("marketplace: read MCP config: %w", err)
 	}
 
 	// Security scan
@@ -335,28 +447,20 @@ func (m *Marketplace) installMCP(entry *PluginEntry) (string, error) {
 		return "", fmt.Errorf("marketplace: write MCP config: %w", err)
 	}
 
+	source := entry.InstallURL
+	if source == "" {
+		source = m.registryURL + "/mcp/" + entry.Name + ".json"
+	}
+	m.recordInstall(entry, fmt.Sprintf("%x", sha256.Sum256(body)), source)
+
 	return path, nil
 }
 
 func (m *Marketplace) installGeneric(entry *PluginEntry) (string, error) {
-	url := entry.InstallURL
-	if url == "" {
-		url = m.registryURL + "/plugins/" + entry.Name + ".json"
-	}
-
-	resp, err := m.client.Get(url)
+	// Fetch plugin config
+	body, err := m.installPayload(entry, "/plugins/"+entry.Name+".json")
 	if err != nil {
 		return "", fmt.Errorf("marketplace: fetch plugin: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("marketplace: plugin returned %s", resp.Status)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("marketplace: read plugin: %w", err)
 	}
 
 	// Security scan
@@ -377,6 +481,12 @@ func (m *Marketplace) installGeneric(entry *PluginEntry) (string, error) {
 	if err := os.WriteFile(path, body, 0644); err != nil {
 		return "", fmt.Errorf("marketplace: write plugin: %w", err)
 	}
+
+	source := entry.InstallURL
+	if source == "" {
+		source = m.registryURL + "/plugins/" + entry.Name + ".json"
+	}
+	m.recordInstall(entry, fmt.Sprintf("%x", sha256.Sum256(body)), source)
 
 	return path, nil
 }

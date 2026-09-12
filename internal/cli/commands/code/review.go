@@ -115,6 +115,7 @@ Be direct and focus on meaningful problems.`)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelError)}))
 	workingDir, _ := os.Getwd()
+	skillCfgGet, skillCfgSet := shared.SkillConfigFns(cfg)
 
 	covoAgent, err := agent.NewCovoAgent(agent.CovoAgentConfig{
 		Mode:                     mode,
@@ -133,6 +134,8 @@ Be direct and focus on meaningful problems.`)
 		AppendSystemPrompt:       "You are an expert code reviewer. Analyze the provided diff carefully and produce a structured, actionable review. Focus on correctness, security, and performance. Be concise and direct.",
 		Auxiliary:                shared.AuxiliaryConfigFromCLI(cfg),
 		AuxiliaryProviderBuilder: cli.ResolveAuxiliaryProviderBuilder(),
+		SkillConfigGet:           skillCfgGet,
+		SkillConfigSet:           skillCfgSet,
 	})
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)

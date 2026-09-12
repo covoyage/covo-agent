@@ -207,7 +207,7 @@ func TestSessionsSpawn_IsolatedMode_NoParentContext(t *testing.T) {
 		return []agentcore.Message{{Role: agentcore.RoleUser, Content: "parent context"}}
 	}
 
-	tool := BuildSessionsSpawnTool(runner, nil, nil, parentMsgs)
+	tool := BuildSessionsSpawnTool(runner, nil, nil, parentMsgs, nil, nil)
 
 	args, _ := json.Marshal(map[string]any{
 		"task":         "do something",
@@ -250,7 +250,7 @@ func TestSessionsSpawn_StateMode_AugmentsTask(t *testing.T) {
 		}
 	}
 
-	tool := BuildSessionsSpawnTool(runner, nil, nil, parentMsgs)
+	tool := BuildSessionsSpawnTool(runner, nil, nil, parentMsgs, nil, nil)
 
 	args, _ := json.Marshal(map[string]any{
 		"task":         "write tests for auth",
@@ -291,7 +291,7 @@ func TestSessionsSpawn_StateMode_NilParentMessages(t *testing.T) {
 	}
 
 	// No parent messages provider
-	tool := BuildSessionsSpawnTool(runner, nil, nil, nil)
+	tool := BuildSessionsSpawnTool(runner, nil, nil, nil, nil, nil)
 
 	args, _ := json.Marshal(map[string]any{
 		"task":         "do something",
@@ -324,7 +324,7 @@ func TestSessionsSpawn_FullMode_SetsContext(t *testing.T) {
 		}
 	}
 
-	tool := BuildSessionsSpawnTool(runner, nil, nil, parentMsgs)
+	tool := BuildSessionsSpawnTool(runner, nil, nil, parentMsgs, nil, nil)
 
 	args, _ := json.Marshal(map[string]any{
 		"task":         "continue the work",
@@ -360,7 +360,7 @@ func TestSessionsSpawn_DefaultContextMode_Isolated(t *testing.T) {
 		return []agentcore.Message{{Role: agentcore.RoleUser, Content: "should not appear"}}
 	}
 
-	tool := BuildSessionsSpawnTool(runner, nil, nil, parentMsgs)
+	tool := BuildSessionsSpawnTool(runner, nil, nil, parentMsgs, nil, nil)
 
 	// No context_mode specified — should default to isolated
 	args, _ := json.Marshal(map[string]any{
@@ -377,6 +377,53 @@ func TestSessionsSpawn_DefaultContextMode_Isolated(t *testing.T) {
 	}
 	if msgs := ParentMessagesFromContext(capturedCtx); msgs != nil {
 		t.Errorf("expected no parent messages in default mode, got %v", msgs)
+	}
+}
+
+func TestSessionsSpawnBackgroundAndYield(t *testing.T) {
+	reg := NewSubagentRegistry()
+	started := make(chan struct{})
+	unblock := make(chan struct{})
+	runner := func(ctx context.Context, task string, toolsets []string, maxTurns int) (string, error) {
+		close(started)
+		<-unblock
+		return "child-done", nil
+	}
+	tool := BuildSessionsSpawnTool(runner, nil, nil, nil, reg, nil)
+	got, err := tool.Func(context.Background(), json.RawMessage(`{"task":"bg work","background":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := got.(map[string]any)
+	if m["status"] != "started" {
+		t.Fatalf("status=%v", m["status"])
+	}
+	id, _ := m["id"].(string)
+	if id == "" {
+		t.Fatal("missing id")
+	}
+	<-started
+	if run, ok := reg.Get(id); !ok || run.Status != "running" {
+		t.Fatalf("expected running child, got %+v ok=%v", run, ok)
+	}
+
+	ids, err := reg.ClaimYield()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != id {
+		t.Fatalf("claim=%v", ids)
+	}
+	if _, err := reg.ClaimYield(); err == nil {
+		t.Fatal("second yield should fail")
+	}
+	close(unblock)
+}
+
+func TestSessionsYieldRequiresPendingChild(t *testing.T) {
+	reg := NewSubagentRegistry()
+	if _, err := reg.ClaimYield(); err == nil {
+		t.Fatal("expected error with no children")
 	}
 }
 

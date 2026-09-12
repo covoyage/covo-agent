@@ -20,7 +20,8 @@ func buildDeployTool() *agentcore.Tool {
 		Name: "deploy",
 		Description: strings.Join([]string{
 			"Deploy a static site or application to a target environment.",
-			"Supports CloudStudio sandbox, SCP to remote hosts, or local preview server.",
+			"Supports rsync to a remote host or a local preview server.",
+			"Remote host/user/path may be passed as arguments or fall back to DEPLOY_HOST / DEPLOY_USER / DEPLOY_PATH.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -31,8 +32,20 @@ func buildDeployTool() *agentcore.Tool {
 				},
 				"target": map[string]any{
 					"type":        "string",
-					"description": "Deploy target: 'cloudstudio', 'remote', or 'preview' (default).",
-					"enum":        []string{"cloudstudio", "remote", "preview"},
+					"description": "Deploy target: 'remote' or 'preview' (default).",
+					"enum":        []string{"remote", "preview"},
+				},
+				"host": map[string]any{
+					"type":        "string",
+					"description": "Remote host or user@host for rsync (default: DEPLOY_HOST).",
+				},
+				"user": map[string]any{
+					"type":        "string",
+					"description": "Remote user (default: DEPLOY_USER).",
+				},
+				"remote_path": map[string]any{
+					"type":        "string",
+					"description": "Remote destination path (default: DEPLOY_PATH or /var/www/html).",
 				},
 				"entry": map[string]any{
 					"type":        "string",
@@ -47,10 +60,13 @@ func buildDeployTool() *agentcore.Tool {
 		},
 		Func: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var params struct {
-				Directory string `json:"directory"`
-				Target    string `json:"target"`
-				Entry     string `json:"entry"`
-				Port      int    `json:"port"`
+				Directory  string `json:"directory"`
+				Target     string `json:"target"`
+				Host       string `json:"host"`
+				User       string `json:"user"`
+				RemotePath string `json:"remote_path"`
+				Entry      string `json:"entry"`
+				Port       int    `json:"port"`
 			}
 			json.Unmarshal(args, &params)
 			if params.Target == "" {
@@ -63,7 +79,6 @@ func buildDeployTool() *agentcore.Tool {
 				params.Port = 3000
 			}
 
-			// Validate directory exists
 			absDir, err := filepath.Abs(params.Directory)
 			if err != nil {
 				return nil, fmt.Errorf("invalid directory: %w", err)
@@ -74,23 +89,29 @@ func buildDeployTool() *agentcore.Tool {
 
 			switch params.Target {
 			case "cloudstudio":
-				return map[string]any{
-					"status":  "not_implemented",
-					"message": "CloudStudio deploy requires the cloudstudio-deploy tool",
-				}, nil
+				return nil, fmt.Errorf("cloudstudio deploy is not supported; use target=remote or target=preview")
 
 			case "remote":
-				host := os.Getenv("DEPLOY_HOST")
+				host := strings.TrimSpace(params.Host)
 				if host == "" {
-					return nil, fmt.Errorf("DEPLOY_HOST not set")
+					host = os.Getenv("DEPLOY_HOST")
 				}
-				user := os.Getenv("DEPLOY_USER")
-				remotePath := os.Getenv("DEPLOY_PATH")
+				if host == "" {
+					return nil, fmt.Errorf("host is required (pass host= or set DEPLOY_HOST)")
+				}
+				user := strings.TrimSpace(params.User)
+				if user == "" {
+					user = os.Getenv("DEPLOY_USER")
+				}
+				remotePath := strings.TrimSpace(params.RemotePath)
+				if remotePath == "" {
+					remotePath = os.Getenv("DEPLOY_PATH")
+				}
 				if remotePath == "" {
 					remotePath = "/var/www/html"
 				}
 				target := host
-				if user != "" {
+				if user != "" && !strings.Contains(host, "@") {
 					target = user + "@" + host
 				}
 				cmd := exec.CommandContext(ctx, "rsync", "-avz", absDir+"/", target+":"+remotePath)
@@ -105,17 +126,23 @@ func buildDeployTool() *agentcore.Tool {
 					"protocol": "rsync",
 				}, nil
 
-			default: // preview
+			default:
 				cmd := exec.CommandContext(ctx, "python3", "-m", "http.server",
 					strconv.Itoa(params.Port), "--directory", absDir)
 				if err := cmd.Start(); err != nil {
 					return nil, fmt.Errorf("preview failed: %w", err)
 				}
 				url := fmt.Sprintf("http://localhost:%d/%s", params.Port, params.Entry)
+				pid := 0
+				if cmd.Process != nil {
+					pid = cmd.Process.Pid
+				}
 				return map[string]any{
 					"status": "preview",
 					"url":    url,
 					"port":   params.Port,
+					"pid":    pid,
+					"note":   "preview server left running; stop it with the returned pid",
 				}, nil
 			}
 		},
@@ -161,7 +188,6 @@ func buildParseDurationTool() *agentcore.Tool {
 				return nil, fmt.Errorf("text is required")
 			}
 
-			// Try Go's native duration parser first
 			if d, err := time.ParseDuration(text); err == nil {
 				return map[string]any{
 					"ms":          d.Milliseconds(),
@@ -171,7 +197,6 @@ func buildParseDurationTool() *agentcore.Tool {
 				}, nil
 			}
 
-			// Custom human-readable parser
 			matches := durationPattern.FindAllStringSubmatch(strings.ToLower(text), -1)
 			if len(matches) == 0 {
 				return nil, fmt.Errorf("could not parse duration: %s", text)
@@ -205,9 +230,9 @@ func buildStructuredOutputTool() *agentcore.Tool {
 		Name: "structured_output",
 		Description: strings.Join([]string{
 			"Return a final, structured answer when the task is complete.",
+			"Writes the result to disk and marks the turn as finished.",
 			"Use this at the END of a session to deliver a clean, organized result",
 			"with headline, summary, and actionable next steps.",
-			"This signals that the agent has finished its work.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -258,13 +283,28 @@ func buildStructuredOutputTool() *agentcore.Tool {
 				return nil, fmt.Errorf("headline and summary are required")
 			}
 
-			return map[string]any{
+			dir := filepath.Join(os.TempDir(), "covo-structured-output")
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return nil, fmt.Errorf("create output dir: %w", err)
+			}
+			path := filepath.Join(dir, fmt.Sprintf("result-%d.json", time.Now().UnixNano()))
+			payload := map[string]any{
 				"headline":     params.Headline,
 				"summary":      params.Summary,
 				"action_items": params.ActionItems,
 				"deliverables": params.Deliverables,
 				"completed":    true,
-			}, nil
+				"written_at":   time.Now().UTC().Format(time.RFC3339),
+			}
+			data, err := json.MarshalIndent(payload, "", "  ")
+			if err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(path, data, 0644); err != nil {
+				return nil, fmt.Errorf("write result: %w", err)
+			}
+			payload["path"] = path
+			return payload, nil
 		},
 	}
 }

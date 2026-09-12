@@ -2,6 +2,7 @@ package tui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -25,6 +26,21 @@ func TestStickyFooterSnapshot(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Snapshot() = %+v, want %+v", got, want)
+	}
+}
+
+func TestStickyFooterRendersPlan(t *testing.T) {
+	footer := NewStickyFooter()
+	footer.SetPlanStore(func() []PlanItem {
+		return []PlanItem{
+			{Step: "inspect", Status: "completed"},
+			{Step: "repair session owner", Status: "in_progress"},
+			{Step: "verify", Status: "pending"},
+		}
+	})
+	lines := footer.Render(80)
+	if len(lines) == 0 || !strings.Contains(lines[0], "PLAN 1/3") || !strings.Contains(lines[0], "repair session owner") {
+		t.Fatalf("lines=%v", lines)
 	}
 }
 

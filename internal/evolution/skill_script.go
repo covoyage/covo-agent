@@ -19,19 +19,16 @@ const (
 // ExecuteScript runs a script file from a skill's scripts/ directory.
 // Only allows files under skills/<name>/scripts/.
 func (sm *SkillManager) ExecuteScript(name, scriptRelPath string, args []string) (string, error) {
-	var err error
-	name, err = validateSkillName(name)
-	if err != nil {
-		return "", err
-	}
-
 	relPath, err := validateSkillRelPath(scriptRelPath)
 	if err != nil {
 		return "", err
 	}
 
-	skillDir := filepath.Join(sm.skillsDir, name)
-	if _, err := os.Stat(skillDir); os.IsNotExist(err) {
+	skillDir, err := sm.resolveSkillDirForRead(name)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
 		return "", fmt.Errorf("skill %q not found", name)
 	}
 
@@ -60,13 +57,11 @@ func (sm *SkillManager) ExecuteScript(name, scriptRelPath string, args []string)
 
 // ListScripts returns the names of all executable files in a skill's scripts/ directory.
 func (sm *SkillManager) ListScripts(name string) ([]string, error) {
-	var err error
-	name, err = validateSkillName(name)
+	skillDir, err := sm.resolveSkillDirForRead(name)
 	if err != nil {
 		return nil, err
 	}
-
-	scriptsDir := filepath.Join(sm.skillsDir, name, "scripts")
+	scriptsDir := filepath.Join(skillDir, "scripts")
 	if _, err := os.Stat(scriptsDir); os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -86,11 +81,36 @@ func (sm *SkillManager) ListScripts(name string) ([]string, error) {
 	return scripts, nil
 }
 
+func scriptCommand(ctx context.Context, scriptPath string, args []string) *exec.Cmd {
+	ext := strings.ToLower(filepath.Ext(scriptPath))
+	switch ext {
+	case ".py", ".pyw":
+		if py, err := exec.LookPath("python3"); err == nil {
+			return exec.CommandContext(ctx, py, append([]string{scriptPath}, args...)...)
+		}
+		if py, err := exec.LookPath("python"); err == nil {
+			return exec.CommandContext(ctx, py, append([]string{scriptPath}, args...)...)
+		}
+	case ".js", ".mjs", ".cjs":
+		if node, err := exec.LookPath("node"); err == nil {
+			return exec.CommandContext(ctx, node, append([]string{scriptPath}, args...)...)
+		}
+	case ".sh", ".bash":
+		if sh, err := exec.LookPath("bash"); err == nil {
+			return exec.CommandContext(ctx, sh, append([]string{scriptPath}, args...)...)
+		}
+		if sh, err := exec.LookPath("sh"); err == nil {
+			return exec.CommandContext(ctx, sh, append([]string{scriptPath}, args...)...)
+		}
+	}
+	return exec.CommandContext(ctx, scriptPath, args...)
+}
+
 func runScript(scriptPath string, args []string, workDir string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), scriptTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, scriptPath, args...)
+	cmd := scriptCommand(ctx, scriptPath, args)
 	cmd.Dir = workDir
 	cmd.Env = os.Environ()
 

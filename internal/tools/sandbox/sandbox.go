@@ -15,9 +15,10 @@ func BuildSandboxTool(sb sandbox.Sandbox) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "sandbox",
 		Description: strings.Join([]string{
-			"Run shell commands in an isolated sandbox environment.",
+			"Run shell commands in the configured sandbox.",
+			"Default is the local host (not Docker isolation) unless a docker/ssh sandbox is wired.",
 			"",
-			"Sandbox types (configured via environment):",
+			"Sandbox types (configured via environment / agent config):",
 			"  - local: Run on the host machine (default)",
 			"  - docker: Run in an ephemeral Docker container (set DOCKER_IMAGE or SANDBOX_IMAGE)",
 			"  - ssh: Run on a remote machine via SSH (set SSH_HOST, SSH_USER, SSH_KEY)",

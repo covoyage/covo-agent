@@ -435,6 +435,7 @@ func startGateway(pidFile string) {
 	suspendStore := gateway.NewSessionSuspendStore()
 
 	// Agent factory — creates a new agent per channel
+	skillCfgGet, skillCfgSet := shared.SkillConfigFns(cfg)
 	factory := func(ctx context.Context) (gateway.Agent, error) {
 		ca, err := agent.NewCovoAgent(agent.CovoAgentConfig{
 			Mode:                     agent.ModeGeneral,
@@ -448,6 +449,8 @@ func startGateway(pidFile string) {
 			Auxiliary:                shared.AuxiliaryConfigFromCLI(cfg),
 			AuxiliaryProviderBuilder: cli.ResolveAuxiliaryProviderBuilder(),
 			SessionSuspendFunc:       suspendStore.Suspend,
+			SkillConfigGet:           skillCfgGet,
+			SkillConfigSet:           skillCfgSet,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("create agent: %w", err)

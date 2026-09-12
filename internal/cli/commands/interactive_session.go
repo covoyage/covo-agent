@@ -325,6 +325,7 @@ func (s *interactiveSession) run() {
 		}
 	}
 
+	skillCfgGet, skillCfgSet := shared.SkillConfigFns(s.cfg)
 	s.agentFactory = runtimeapp.NewAgentFactory(agent.CovoAgentConfig{
 		WorkingDir:               s.workingDir,
 		HomeDir:                  s.homeDir,
@@ -342,6 +343,11 @@ func (s *interactiveSession) run() {
 		ShowReasoning:            s.showReasoning,
 		ThinkingMode:             s.thinkingMode,
 		SkillURLs:                skillURLs,
+		SkillExtraDirs:           shared.SkillExtraDirs(s.cfg),
+		SkillDisabled:            shared.SkillDisabled(s.cfg),
+		SkillConfigGet:           skillCfgGet,
+		SkillConfigSet:           skillCfgSet,
+		LeanTools:                shared.LeanToolsEnabled(s.cfg),
 		SystemPrompt:             s.opts.SystemPrompt,
 		AppendSystemPrompt:       s.opts.AppendSystemPrompt,
 		WorkspaceOnly:            shared.WorkspaceOnlyFromConfig(s.cfg),

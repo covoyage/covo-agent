@@ -7,8 +7,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/covoyage/covo-agent/internal/safego"
 	"github.com/covoyage/covonaut/agentcore"
 )
+
+// SpawnCompleteFunc is called when a background child finishes.
+type SpawnCompleteFunc func(childID, task, output string, err error)
 
 // SpawnRunner is the function signature for running a spawned session.
 type SpawnRunner func(ctx context.Context, task string, toolsetNames []string, maxTurns int) (string, error)
@@ -53,7 +57,7 @@ func (s *SpawnStore) Get(id string) (*SpawnResult, bool) {
 	return r, ok
 }
 
-func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, parentToolsets func() []string, parentMessages func() []agentcore.Message) *agentcore.Tool {
+func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, parentToolsets func() []string, parentMessages func() []agentcore.Message, registry *SubagentRegistry, onComplete SpawnCompleteFunc) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "sessions_spawn",
 		Description: strings.Join([]string{
@@ -64,6 +68,9 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 			"- Parallel independent subtasks",
 			"- Isolated operations that shouldn't pollute the main conversation",
 			"- Long-running searches or analysis",
+			"",
+			"By default spawn blocks until the child finishes. Set background=true to return",
+			"immediately with a child id, then call sessions_yield to end the turn.",
 			"",
 			"The child inherits a filtered subset of the parent's tools (no clarify, no nested spawn).",
 			"",
@@ -86,6 +93,7 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 			"    Injects tone/format/focus guidance as a system-reminder. Use 'list' to see available personas.",
 			"- isolation: Workspace isolation. 'shared' (default) uses the parent working directory;",
 			"    'worktree' runs the child in a detached git worktree so its file edits stay isolated.",
+			"- background: If true, return immediately with status=started and an id. Default false.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -136,6 +144,10 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 					"type":        "string",
 					"description": "Workspace isolation: 'shared' (default, same working directory as parent) or 'worktree' (detached git worktree).",
 					"enum":        []string{"shared", "worktree"},
+					"background": map[string]any{
+						"type":        "boolean",
+						"description": "If true, start the child and return immediately. Pair with sessions_yield.",
+					},
 				},
 			},
 			"required": []string{"task"},
@@ -148,6 +160,7 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 				MaxTurns       int      `json:"max_turns"`
 				ContextMode    string   `json:"context_mode"`
 				Role           string   `json:"role"`
+				Background     bool     `json:"background"`
 				Persona        string   `json:"persona"`
 				Provider       string   `json:"provider"`
 				Model          string   `json:"model"`
@@ -252,6 +265,48 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 					}
 				}
 				childToolsets = safeToolsets
+			}
+			if params.Background {
+				if registry == nil {
+					return nil, fmt.Errorf("sessions_spawn: background requires a subagent registry")
+				}
+				if runner == nil {
+					return nil, fmt.Errorf("sessions_spawn: no runner configured")
+				}
+				if params.Provider != "" {
+					ctx = WithSubagentProvider(ctx, params.Provider)
+				}
+				if params.Model != "" {
+					ctx = WithSubagentModel(ctx, params.Model)
+				}
+				if params.Isolation != "" {
+					ctx = WithSubagentIsolation(ctx, params.Isolation)
+				}
+				runCtx, id := registry.StartBackground(ctx, params.Task, currentDepth+1)
+				var timeoutCancel context.CancelFunc
+				if subagentRunner != nil && subagentRunner.cfg.DefaultTimeout > 0 {
+					runCtx, timeoutCancel = context.WithTimeout(runCtx, subagentRunner.cfg.DefaultTimeout)
+				}
+				spawnTask := task
+				spawnToolsets := append([]string(nil), childToolsets...)
+				maxTurns := params.MaxTurns
+				safego.SafeGo(func() {
+					if timeoutCancel != nil {
+						defer timeoutCancel()
+					}
+					output, err := runner(runCtx, spawnTask, spawnToolsets, maxTurns)
+					registry.Complete(id, err != nil)
+					if onComplete != nil {
+						onComplete(id, params.Task, output, err)
+					}
+				}, nil)
+				return map[string]any{
+					"status":   "started",
+					"id":       id,
+					"task":     params.Task,
+					"toolsets": childToolsets,
+					"role":     params.Role,
+				}, nil
 			}
 
 			// Run through SubagentRunner if configured (adds timeout, heartbeat, diagnostics)

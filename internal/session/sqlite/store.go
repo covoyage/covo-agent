@@ -5,9 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/covoyage/covo-agent/internal/session/sqlitefs"
 	"github.com/covoyage/covonaut/agentcore"
@@ -23,7 +27,17 @@ type Store struct {
 	mu  sync.RWMutex
 	db  *sql.DB
 	dir string
+
+	// ftsLegacy is set when the messages_fts index predates the trigram
+	// tokenizer and is too large to rebuild at open time. CJK queries then
+	// fall back to LIKE scans (unicode61 cannot segment CJK at all).
+	ftsLegacy bool
 }
+
+// ftsSyncMigrateMaxRowid caps the message volume that may be re-indexed
+// synchronously at open time. The measured rebuild rate is ~560 rows/s on a
+// large store, so 2000 rows bounds the one-time migration to a few seconds.
+var ftsSyncMigrateMaxRowid int64 = 2000
 
 // NewStore opens (or creates) a SQLite database at the given directory.
 func NewStore(dir string) (*Store, error) {
@@ -94,10 +108,15 @@ func (s *Store) migrate() error {
 			created_at  INTEGER DEFAULT (unixepoch())
 		);
 
-		-- FTS5 full-text search across all message content
+		-- FTS5 full-text search across all message content.
+		-- The trigram tokenizer indexes overlapping 3-character sequences, which
+		-- handles CJK text correctly (unicode61 merges consecutive CJK characters
+		-- into a single token, making Chinese search impossible). Queries shorter
+		-- than 3 characters fall back to a LIKE scan in SearchSessions.
 		CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 			content, session_id UNINDEXED, role UNINDEXED,
-			content='messages', content_rowid='rowid'
+			content='messages', content_rowid='rowid',
+			tokenize='trigram'
 		);
 
 		-- Triggers to keep FTS index in sync
@@ -141,7 +160,96 @@ func (s *Store) migrate() error {
 	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN label TEXT DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN summary TEXT DEFAULT ''`)
 
+	if err := s.migrateFTSTrigram(); err != nil {
+		return fmt.Errorf("migrate fts to trigram: %w", err)
+	}
+
 	return nil
+}
+
+// migrateFTSTrigram rebuilds messages_fts with the trigram tokenizer when it
+// was created by an older schema using the default unicode61 tokenizer, which
+// cannot segment CJK text. The FTS table is a derived index, so dropping and
+// repopulating it is lossless.
+//
+// The rebuild cost scales with total message volume (~560 rows/s on a 1GB
+// store), so it must stay off the startup critical path for large databases:
+// legacy stores above ftsSyncMigrateMaxRowid keep their unicode61 index and
+// SearchSessions routes CJK terms through a LIKE scan instead (see ftsLegacy).
+func (s *Store) migrateFTSTrigram() error {
+	var createSQL string
+	err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='messages_fts'`).Scan(&createSQL)
+	if err == sql.ErrNoRows {
+		return nil // no FTS table yet; migrate() will create it with trigram
+	}
+	if err != nil {
+		return err
+	}
+	if strings.Contains(createSQL, "trigram") {
+		return nil // already on trigram
+	}
+
+	var maxRowid int64
+	_ = s.db.QueryRow(`SELECT COALESCE(MAX(rowid), 0) FROM messages`).Scan(&maxRowid)
+	if maxRowid > ftsSyncMigrateMaxRowid {
+		// Too large to rebuild inline: keep serving the legacy index. CJK
+		// queries degrade to substring LIKE scans until the index is rebuilt.
+		s.ftsLegacy = true
+		slog.Debug("fts: legacy unicode61 index kept (too large for inline trigram rebuild)",
+			"max_rowid", maxRowid, "threshold", ftsSyncMigrateMaxRowid)
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Dropping the table also drops its triggers; migrate() recreates them
+	// with IF NOT EXISTS on the next open, but recreate them here so the
+	// store stays consistent within this migration.
+	for _, trg := range []string{"messages_ai", "messages_ad", "messages_au"} {
+		if _, err := tx.Exec(`DROP TRIGGER IF EXISTS ` + trg); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`DROP TABLE messages_fts`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		CREATE VIRTUAL TABLE messages_fts USING fts5(
+			content, session_id UNINDEXED, role UNINDEXED,
+			content='messages', content_rowid='rowid',
+			tokenize='trigram'
+		)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO messages_fts(rowid, content, session_id, role)
+		SELECT rowid, content, session_id, role FROM messages`); err != nil {
+		return err
+	}
+	for _, trg := range []string{`
+		CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN
+			INSERT INTO messages_fts(rowid, content, session_id, role)
+			VALUES (new.rowid, new.content, new.session_id, new.role);
+		END`, `
+		CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
+			INSERT INTO messages_fts(messages_fts, rowid, content, session_id, role)
+			VALUES ('delete', old.rowid, old.content, old.session_id, old.role);
+		END`, `
+		CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
+			INSERT INTO messages_fts(messages_fts, rowid, content, session_id, role)
+			VALUES ('delete', old.rowid, old.content, old.session_id, old.role);
+			INSERT INTO messages_fts(rowid, content, session_id, role)
+			VALUES (new.rowid, new.content, new.session_id, new.role);
+		END`} {
+		if _, err := tx.Exec(trg); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ---------------------------------------------------------------------------
@@ -442,16 +550,95 @@ type SearchResult struct {
 	Snippet   string
 }
 
+// ftsTokenRe splits a query into terms using a Unicode-aware pattern that
+// covers CJK and mixed Latin/CJK input (e.g. "db索引").
+var ftsTokenRe = regexp.MustCompile(`[\p{L}\p{N}_]+`)
+
 // SearchSessions performs FTS5 full-text search across all session messages.
 // Returns up to limit results with highlighted snippets.
+//
+// Two index layouts are supported:
+//   - trigram (current): matches terms of 3+ characters; shorter CJK terms
+//     fall back to a LIKE scan.
+//   - unicode61 (legacy, kept when the store is too large to re-index at
+//     open time): cannot segment CJK at all, so every CJK term goes through
+//     a LIKE scan; Latin terms still use the FTS index.
 func (s *Store) SearchSessions(ctx context.Context, query string, limit int) ([]SearchResult, error) {
 	if limit <= 0 {
 		limit = 20
 	}
+
+	results, err := s.searchFTS(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(results))
+	for _, r := range results {
+		seen[r.SessionID+"\x00"+r.Snippet] = true
+	}
+
+	for _, term := range s.likeFallbackTerms(query) {
+		likeResults, err := s.searchLike(ctx, term, limit)
+		if err != nil {
+			continue // LIKE is best-effort; keep FTS results on failure
+		}
+		for _, r := range likeResults {
+			key := r.SessionID + "\x00" + r.Snippet
+			if !seen[key] {
+				seen[key] = true
+				results = append(results, r)
+			}
+		}
+		if len(results) >= limit {
+			break
+		}
+	}
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	return results, nil
+}
+
+// likeFallbackTerms returns the query terms the FTS index cannot answer and
+// that need a LIKE scan: under trigram that is 1-2 rune CJK terms; under the
+// legacy unicode61 index it is every CJK term.
+func (s *Store) likeFallbackTerms(query string) []string {
+	all := cjkSearchTerms(query)
+	if s.ftsLegacy {
+		return all
+	}
+	var short []string
+	for _, w := range all {
+		if utf8.RuneCountInString(w) <= 2 {
+			short = append(short, w)
+		}
+	}
+	return short
+}
+
+// searchFTS runs a sanitized MATCH query. Under trigram, terms shorter than
+// 3 characters are skipped (trigram cannot index them). Under legacy
+// unicode61, CJK terms are skipped entirely (they are single merged tokens
+// that substring queries can never match); Latin terms of any length work.
+func (s *Store) searchFTS(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+	var parts []string
+	for _, w := range ftsTokenRe.FindAllString(strings.TrimSpace(query), -1) {
+		if !s.ftsLegacy {
+			if utf8.RuneCountInString(w) < 3 {
+				continue
+			}
+		} else if hasCJK([]rune(w)) {
+			continue
+		}
+		parts = append(parts, `"`+strings.ReplaceAll(w, `"`, `""`)+`"`)
+	}
+	if len(parts) == 0 {
+		return nil, nil
+	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT session_id, role, snippet(messages_fts, 1, '<b>', '</b>', '...', 40) AS snippet
+		SELECT session_id, role, snippet(messages_fts, 0, '<b>', '</b>', '...', 40) AS snippet
 		FROM messages_fts WHERE messages_fts MATCH ? ORDER BY rank LIMIT ?
-	`, query, limit)
+	`, strings.Join(parts, " OR "), limit)
 	if err != nil {
 		return nil, fmt.Errorf("fts search: %w", err)
 	}
@@ -466,6 +653,90 @@ func (s *Store) SearchSessions(ctx context.Context, query string, limit int) ([]
 		results = append(results, r)
 	}
 	return results, rows.Err()
+}
+
+// searchLike scans the messages table for a short term (1-2 CJK runes) that
+// the trigram index cannot match.
+func (s *Store) searchLike(ctx context.Context, term string, limit int) ([]SearchResult, error) {
+	pattern := "%" + likeEscape(term) + "%"
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT session_id, role, content FROM messages
+		WHERE content LIKE ? ESCAPE '\'
+		ORDER BY created_at DESC LIMIT ?
+	`, pattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var role, content string
+		var r SearchResult
+		if err := rows.Scan(&r.SessionID, &role, &content); err != nil {
+			continue
+		}
+		r.Role = role
+		r.Snippet = likeSnippet(content, term, 120)
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func likeEscape(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
+// likeSnippet builds a plain-text window around the first occurrence of term.
+func likeSnippet(content, term string, contextLen int) string {
+	idx := strings.Index(content, term)
+	if idx < 0 {
+		if len(content) > contextLen*2 {
+			return content[:contextLen*2] + "..."
+		}
+		return content
+	}
+	start := idx - contextLen
+	if start < 0 {
+		start = 0
+	}
+	end := idx + len(term) + contextLen
+	if end > len(content) {
+		end = len(content)
+	}
+	snippet := content[start:end]
+	if start > 0 {
+		snippet = "..." + snippet
+	}
+	if end < len(content) {
+		snippet += "..."
+	}
+	return snippet
+}
+
+// cjkSearchTerms returns the distinct query terms that contain CJK
+// characters (Han, Hiragana, Katakana, or Hangul).
+func cjkSearchTerms(query string) []string {
+	var out []string
+	seen := make(map[string]bool)
+	for _, w := range ftsTokenRe.FindAllString(strings.TrimSpace(query), -1) {
+		if !seen[w] && hasCJK([]rune(w)) {
+			seen[w] = true
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+func hasCJK(runes []rune) bool {
+	for _, r := range runes {
+		if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) ||
+			unicode.Is(unicode.Katakana, r) || unicode.Is(unicode.Hangul, r) {
+			return true
+		}
+	}
+	return false
 }
 
 // ExportSession returns all messages for a session as formatted text.

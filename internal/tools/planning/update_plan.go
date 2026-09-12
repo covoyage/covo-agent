@@ -118,15 +118,17 @@ func BuildUpdatePlanTool(store *PlanStore) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "update_plan",
 		Description: strings.Join([]string{
-			"Update a structured plan with ordered steps and their statuses. Use this for",
-			"complex multi-step tasks where you want to track progress visibly.",
+			"Ordered plan for the current task (not a durable tracker; use todo for this turn, kanban/goal to persist).",
+			"Update a structured plan with ordered steps and their statuses. The TUI footer shows PLAN n/m plus the in-progress step.",
 			"",
 			"Each step has a status: pending, in_progress, or completed.",
 			"At most ONE step can be in_progress at a time.",
-			"Steps should be ordered from first to last.",
+			"At most 50 steps. Steps should be ordered from first to last.",
+			"Use only for substantial work with at least two sequential steps.",
 			"",
 			"Call without 'plan' to read the current plan.",
 			"Call with 'plan' to update the plan (replaces the entire plan).",
+			"Call with an empty plan array to clear.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -165,8 +167,8 @@ func BuildUpdatePlanTool(store *PlanStore) *agentcore.Tool {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
 			}
 
-			if len(params.Plan) == 0 {
-				// Read mode
+			if params.Plan == nil {
+				// Read mode (plan omitted)
 				steps, explanation := store.Read()
 				p, ip, c := store.Summary()
 				result := map[string]any{
@@ -177,6 +179,10 @@ func BuildUpdatePlanTool(store *PlanStore) *agentcore.Tool {
 					result["explanation"] = explanation
 				}
 				return result, nil
+			}
+
+			if len(params.Plan) > 50 {
+				return nil, fmt.Errorf("plan has at most 50 steps")
 			}
 
 			// Validate

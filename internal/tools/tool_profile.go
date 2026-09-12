@@ -5,12 +5,14 @@ import "github.com/covoyage/covonaut/agentcore"
 // profileCategories maps tool names to the profiles where they're available.
 var profileCategories = map[string][]string{
 	// --- minimal: core tools available in every profile ---
-	"session_search": {"minimal", "coding", "messaging"},
-	"send_message":   {"minimal", "coding", "messaging"},
-	"todo":           {"minimal", "coding", "messaging"},
-	"update_plan":    {"minimal", "coding", "messaging"},
-	"exit_plan_mode": {"minimal", "coding", "messaging"},
-	"clarify":        {"minimal", "coding", "messaging"},
+	"session_search":   {"minimal", "coding", "messaging"},
+	"sessions_list":    {"minimal", "coding", "messaging"},
+	"sessions_history": {"minimal", "coding", "messaging"},
+	"send_message":     {"minimal", "coding", "messaging"},
+	"todo":             {"minimal", "coding", "messaging"},
+	"update_plan":      {"minimal", "coding", "messaging"},
+	"exit_plan_mode":   {"minimal", "coding", "messaging"},
+	"clarify":          {"minimal", "coding", "messaging"},
 
 	// --- coding: code-editing, execution, debugging ---
 	"diffs":                  {"coding"},
@@ -22,7 +24,6 @@ var profileCategories = map[string][]string{
 	"sandbox":                {"coding"},
 	"sessions_spawn":         {"coding"},
 	"sessions_spawn_batch":   {"coding"},
-	"sessions_yield":         {"coding"},
 	"sessions_send":          {"coding"},
 	"pdf":                    {"coding"},
 	"transcribe":             {"coding"},
@@ -83,9 +84,11 @@ var profileCategories = map[string][]string{
 	"parse_duration":    {"coding"},
 
 	// --- web ---
-	"web_fetch":   {"coding"},
-	"reaction":    {"coding", "messaging"},
-	"append_file": {"coding"},
+	"web_fetch":     {"coding"},
+	"view_image":    {"coding", "messaging"},
+	"video_analyze": {"coding", "messaging"},
+	"reaction":      {"coding", "messaging"},
+	"append_file":   {"coding"},
 
 	// --- context compression ---
 	"context_compress":        {"coding"},

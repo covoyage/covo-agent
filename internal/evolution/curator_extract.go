@@ -399,10 +399,17 @@ func (e *TrajectorySkillExtractor) parseExtractionResponse(response string) (*ex
 	return &resp, nil
 }
 
+// compactTrajectoryBudget caps the compacted trajectory handed to the LLM.
+// compaction keeps the head (task statement) and tail (resolution) and drops
+// middle tool steps to fit — see CompressTrajectory.
+const compactTrajectoryBudget = 8000
+
 // compactTrajectory builds a compact text representation of the conversation
-// suitable for LLM analysis (max ~8000 chars).
+// suitable for LLM analysis. Rather than truncating linearly (which throws
+// away the resolution), it protects the head and tail of the conversation and
+// drops whole middle tool-call steps to fit the budget.
 func (e *TrajectorySkillExtractor) compactTrajectory(trajectory []map[string]any) string {
-	var b strings.Builder
+	var msgs []trajMessage
 	toolCallCount := 0
 
 	for _, msg := range trajectory {
@@ -415,31 +422,25 @@ func (e *TrajectorySkillExtractor) compactTrajectory(trajectory []map[string]any
 		switch role {
 		case "user":
 			// Keep user messages
-			b.WriteString(fmt.Sprintf("User: %s\n", truncateStr(content, 500)))
+			msgs = append(msgs, trajMessage{Role: role, Content: fmt.Sprintf("User: %s", truncateStr(content, 500))})
 		case "assistant":
 			// Count tool calls in assistant messages
 			if strings.Contains(content, "tool_calls") || strings.Contains(content, "tool_call") {
 				toolCallCount++
-				b.WriteString("[Assistant invoked tools]\n")
+				msgs = append(msgs, trajMessage{Role: role, Content: "[Assistant invoked tools]", ToolStep: true})
 			} else if len(content) < 200 {
 				// Short assistant responses
-				b.WriteString(fmt.Sprintf("Assistant: %s\n", content))
+				msgs = append(msgs, trajMessage{Role: role, Content: fmt.Sprintf("Assistant: %s", content)})
 			} else {
-				b.WriteString(fmt.Sprintf("Assistant: %s\n", truncateStr(content, 300)))
+				msgs = append(msgs, trajMessage{Role: role, Content: fmt.Sprintf("Assistant: %s", truncateStr(content, 300))})
 			}
 		case "tool":
 			// Summarize tool results
-			b.WriteString(fmt.Sprintf("[Tool result: %s]\n", truncateStr(content, 200)))
+			msgs = append(msgs, trajMessage{Role: role, Content: fmt.Sprintf("[Tool result: %s]", truncateStr(content, 200))})
 		case "system":
 			if len(content) < 100 {
-				b.WriteString(fmt.Sprintf("System: %s\n", content))
+				msgs = append(msgs, trajMessage{Role: role, Content: fmt.Sprintf("System: %s", content)})
 			}
-		}
-
-		// Limit output size
-		if b.Len() > 8000 {
-			b.WriteString("... [trajectory truncated]\n")
-			break
 		}
 	}
 
@@ -447,7 +448,14 @@ func (e *TrajectorySkillExtractor) compactTrajectory(trajectory []map[string]any
 		return "" // Don't bother analyzing trivial sessions
 	}
 
-	return b.String()
+	kept, _ := CompressTrajectory(msgs, compactTrajectoryBudget, 2, 4)
+
+	var b strings.Builder
+	for _, m := range kept {
+		b.WriteString(m.Content)
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // min returns the smaller of two ints.

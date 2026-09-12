@@ -9,9 +9,10 @@ import (
 
 // untrustedToolNames are tools whose output is attacker-controllable.
 var untrustedToolNames = map[string]bool{
-	"web_search": true,
-	"web_fetch":  true,
-	"mcp":        true, // MCP tool dispatches to external servers
+	"web_search":    true,
+	"web_fetch":     true,
+	"video_analyze": true, // remote video and on-screen text are attacker-controllable
+	"mcp":           true, // MCP tool dispatches to external servers
 }
 
 // untrustedToolPrefixes match by prefix (e.g. browser_*).

@@ -19,8 +19,8 @@ func BuildRemoteExecTool() *agentcore.Tool {
 			"Execute commands on a remote machine via SSH. Useful for administering",
 			"remote servers, deploying applications, or debugging production issues.",
 			"",
-			"Connection is read from REMOTE_HOST / REMOTE_USER / REMOTE_KEY env vars.",
-			"Set REMOTE_HOST=user@host or individually: REMOTE_USER + REMOTE_HOST.",
+			"Host/user/key may be passed as arguments, or fall back to REMOTE_HOST /",
+			"REMOTE_USER / REMOTE_KEY environment variables.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -28,6 +28,18 @@ func BuildRemoteExecTool() *agentcore.Tool {
 				"command": map[string]any{
 					"type":        "string",
 					"description": "Command to run on the remote machine.",
+				},
+				"host": map[string]any{
+					"type":        "string",
+					"description": "SSH host or user@host (default: REMOTE_HOST).",
+				},
+				"user": map[string]any{
+					"type":        "string",
+					"description": "SSH user (default: REMOTE_USER).",
+				},
+				"key": map[string]any{
+					"type":        "string",
+					"description": "Path to SSH private key (default: REMOTE_KEY).",
 				},
 				"workdir": map[string]any{
 					"type":        "string",
@@ -39,6 +51,9 @@ func BuildRemoteExecTool() *agentcore.Tool {
 		Func: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var params struct {
 				Command string `json:"command"`
+				Host    string `json:"host"`
+				User    string `json:"user"`
+				Key     string `json:"key"`
 				WorkDir string `json:"workdir"`
 			}
 			json.Unmarshal(args, &params)
@@ -46,12 +61,21 @@ func BuildRemoteExecTool() *agentcore.Tool {
 				return nil, fmt.Errorf("command is required")
 			}
 
-			host := os.Getenv("REMOTE_HOST")
-			user := os.Getenv("REMOTE_USER")
-			keyPath := os.Getenv("REMOTE_KEY")
+			host := strings.TrimSpace(params.Host)
+			if host == "" {
+				host = os.Getenv("REMOTE_HOST")
+			}
+			user := strings.TrimSpace(params.User)
+			if user == "" {
+				user = os.Getenv("REMOTE_USER")
+			}
+			keyPath := strings.TrimSpace(params.Key)
+			if keyPath == "" {
+				keyPath = os.Getenv("REMOTE_KEY")
+			}
 
 			if host == "" {
-				return nil, fmt.Errorf("REMOTE_HOST not set (use user@host or set REMOTE_USER + REMOTE_HOST)")
+				return nil, fmt.Errorf("host is required (pass host= or set REMOTE_HOST)")
 			}
 
 			// Build SSH command
@@ -71,7 +95,7 @@ func BuildRemoteExecTool() *agentcore.Tool {
 			sshArgs = append(sshArgs, target)
 
 			if params.WorkDir != "" {
-				params.Command = fmt.Sprintf("cd %s && %s", params.WorkDir, params.Command)
+				params.Command = "cd " + shellQuote(params.WorkDir) + " && " + params.Command
 			}
 			sshArgs = append(sshArgs, params.Command)
 
@@ -98,6 +122,10 @@ func BuildRemoteExecTool() *agentcore.Tool {
 			return result, nil
 		},
 	}
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func BuildAuditReadTool() *agentcore.Tool {

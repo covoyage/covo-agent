@@ -1,11 +1,14 @@
 package skillhub
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -190,4 +193,57 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestHubInstallDigestPin verifies that a registry content pin blocks
+// installs whose SKILL.md bytes do not match, and that a matching install
+// records a provenance sidecar.
+func TestHubInstallDigestPin(t *testing.T) {
+	body := "---\nname: pinned-skill\ndescription: A pinned skill\n---\n\nPinned body"
+	goodPin := fmt.Sprintf("%x", sha256.Sum256([]byte(body)))
+
+	for _, tc := range []struct {
+		pin    string
+		wantOK bool
+	}{
+		{pin: goodPin, wantOK: true},
+		{pin: strings.Repeat("0", 64), wantOK: false},
+	} {
+		skills := []SkillInfo{{Name: "pinned-skill", Description: "A pinned skill", SHA256: tc.pin}}
+		mux := http.NewServeMux()
+		mux.HandleFunc("/index.json", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(skills)
+		})
+		mux.HandleFunc("/skills/pinned-skill/SKILL.md", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(body))
+		})
+		ts := httptest.NewServer(mux)
+
+		homeDir := t.TempDir()
+		hub := &Hub{
+			registryURL: ts.URL,
+			client:      ts.Client(),
+			skillsDir:   filepath.Join(homeDir, "skills"),
+		}
+
+		path, err := hub.Install("pinned-skill")
+		if tc.wantOK {
+			if err != nil {
+				t.Fatalf("pin %s: unexpected error: %v", tc.pin[:12], err)
+			}
+			prov, ok := ReadProvenance(filepath.Dir(path))
+			if !ok {
+				t.Fatal("expected provenance sidecar after install")
+			}
+			if prov.SHA256 != goodPin {
+				t.Fatalf("provenance digest = %s, want %s", prov.SHA256, goodPin)
+			}
+			if prov.Source == "" || prov.InstalledAt == "" {
+				t.Fatalf("provenance missing source/installed_at: %+v", prov)
+			}
+		} else if err == nil {
+			t.Fatalf("pin %s: expected digest-mismatch block, got success", tc.pin[:12])
+		}
+		ts.Close()
+	}
 }

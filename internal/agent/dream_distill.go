@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/covoyage/covonaut/agentcore"
@@ -68,8 +69,9 @@ func trajectoryToMaps(entries []TrajectoryEntry) []map[string]any {
 }
 
 // DistillNow runs on-demand skill extraction over the current session's
-// trajectory (the same pipeline normally run at session end) and persists a
-// skill if a worthwhile candidate is found.
+// trajectory (the same pipeline normally run at session end). A worthwhile
+// candidate is stored as a pending workshop proposal when a workshop is
+// attached; otherwise it is written as a live skill.
 func (ca *CovoAgent) DistillNow(ctx context.Context) (*evolution.ExtractionCandidate, bool, error) {
 	cur := ca.Curator()
 	if cur == nil {
@@ -77,6 +79,45 @@ func (ca *CovoAgent) DistillNow(ctx context.Context) (*evolution.ExtractionCandi
 	}
 	traj := trajectoryToMaps(ca.Trajectory().Snapshot())
 	return cur.Distill(ctx, traj, ca.auxLLMCall())
+}
+
+// ApplySkillProposal writes a pending workshop proposal as a live skill.
+func (ca *CovoAgent) ApplySkillProposal(id string) (*evolution.SkillProposal, error) {
+	store := ca.workshopStore
+	if store == nil {
+		return nil, fmt.Errorf("skill workshop is not enabled")
+	}
+	if ca.skillMgr == nil {
+		return nil, fmt.Errorf("skill manager is not available")
+	}
+	return store.Apply(id, func(pr evolution.SkillProposal) error {
+		fm, skillBody, err := evolution.ParseSkillFrontmatter(pr.Body)
+		if err != nil {
+			return fmt.Errorf("parse skill body frontmatter: %w", err)
+		}
+		description := pr.Rationale
+		if fm != nil && fm.Description != "" {
+			description = fm.Description
+		}
+		if description == "" {
+			description = fmt.Sprintf("Skill created from workshop proposal %s", pr.ID)
+		}
+		body := skillBody
+		if body == "" {
+			body = pr.Body
+		}
+		switch pr.Kind {
+		case evolution.ProposalCreate:
+			_, err := ca.skillMgr.CreateWithMeta(pr.SkillName, description, "", nil, body)
+			return err
+		case evolution.ProposalUpdate:
+			return ca.skillMgr.Edit(pr.SkillName, body)
+		case evolution.ProposalDelete:
+			return ca.skillMgr.Delete(pr.SkillName)
+		default:
+			return fmt.Errorf("unknown proposal kind: %s", pr.Kind)
+		}
+	})
 }
 
 // DreamNow audits the memory system for stale/contradictory/bloated entries and

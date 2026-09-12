@@ -9,7 +9,7 @@ prerequisites:
   commands: [python3]
 metadata:
   tags: [search, duckduckgo, web, free, news]
-  related_skills: [web_search, arxiv]
+  related_skills: [web_search, arxiv, grounded-citations]
 ---
 
 # DuckDuckGo Search — Free Web Search

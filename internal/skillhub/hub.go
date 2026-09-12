@@ -1,6 +1,7 @@
 package skillhub
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +23,10 @@ type SkillInfo struct {
 	Author      string `json:"author,omitempty"`
 	URL         string `json:"url,omitempty"`
 	UpdatedAt   string `json:"updated_at,omitempty"`
+	// SHA256 optionally pins the SKILL.md content digest. When present, the
+	// registry declares exactly which bytes are trusted; installs whose
+	// content does not match are rejected.
+	SHA256 string `json:"sha256,omitempty"`
 }
 
 type Hub struct {
@@ -152,6 +157,18 @@ func (h *Hub) Install(name string) (string, error) {
 		return "", fmt.Errorf("read skill %q: %w", name, err)
 	}
 
+	// Verify the registry content pin when the index declares one. A pin
+	// mismatch means the index and the skill content disagree — treat that
+	// as a supply-chain signal and refuse the install.
+	digest := fmt.Sprintf("%x", sha256.Sum256(body))
+	if entry, err := h.findIndexEntry(name); err == nil && entry != nil && entry.SHA256 != "" {
+		if !strings.EqualFold(entry.SHA256, digest) {
+			return "", fmt.Errorf(
+				"skill %q blocked: content digest %s does not match registry pin %s",
+				name, digest, entry.SHA256)
+		}
+	}
+
 	// --- Security scan on skill content before writing to disk ---
 	bodyStr := string(body)
 	findings := evolution.ScanContent(bodyStr, "SKILL.md")
@@ -181,5 +198,28 @@ func (h *Hub) Install(name string) (string, error) {
 		return "", fmt.Errorf("write SKILL.md: %w", err)
 	}
 
+	writeProvenance(skillDir, Provenance{
+		Name:        name,
+		Source:      h.registryURL + "/skills/" + url.PathEscape(name) + "/SKILL.md",
+		SHA256:      digest,
+		InstalledAt: time.Now().UTC().Format(time.RFC3339),
+	})
+
 	return path, nil
+}
+
+// findIndexEntry looks up a skill in the registry index. Errors (including
+// an unreachable registry) are returned to the caller, which decides whether
+// a missing pin is acceptable.
+func (h *Hub) findIndexEntry(name string) (*SkillInfo, error) {
+	skills, err := h.List()
+	if err != nil {
+		return nil, err
+	}
+	for i := range skills {
+		if skills[i].Name == name {
+			return &skills[i], nil
+		}
+	}
+	return nil, nil
 }

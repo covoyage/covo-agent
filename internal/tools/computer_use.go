@@ -2,22 +2,73 @@ package tools
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/covoyage/covonaut/agentcore"
 )
+
+const computerUseFrameTTL = 30 * time.Second
+
+type computerFrame struct {
+	ID       string
+	Path     string
+	Width    int
+	Height   int
+	Captured time.Time
+}
+
+type computerFrameStore struct {
+	mu    sync.Mutex
+	frame *computerFrame
+}
+
+func (s *computerFrameStore) set(f computerFrame) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.frame = &f
+}
+
+func (s *computerFrameStore) require(frameID string) (*computerFrame, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.frame == nil {
+		return nil, fmt.Errorf("screenshot first")
+	}
+	if frameID != "" && frameID != s.frame.ID {
+		return nil, fmt.Errorf("unknown frame_id %q; screenshot again", frameID)
+	}
+	if time.Since(s.frame.Captured) > computerUseFrameTTL {
+		return nil, fmt.Errorf("frame stale; screenshot again")
+	}
+	return s.frame, nil
+}
+
+var computerFrames = &computerFrameStore{}
+var computerFrameSeq atomic.Uint64
+
+// captureScreenshotFn is replaced in tests.
+var captureScreenshotFn = captureScreenshotDefault
 
 func buildComputerUseTool() *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "computer_use",
 		Description: strings.Join([]string{
 			"Control desktop applications via accessibility APIs.",
-			"Actions: list_apps, get_app_state, click, scroll, drag, type_text,",
-			"press_key, set_value, secondary_action.",
+			"Actions: screenshot, wait, list_apps, get_app_state, click, scroll, drag,",
+			"type_text, press_key, set_value, secondary_action.",
+			"",
+			"Call screenshot before click/drag/secondary_action. Coordinates are pixels",
+			"in that screenshot (top-left origin). Frames expire after 30s.",
 			"",
 			"macOS: osascript/applescript. Linux: xdotool/wmctrl. Windows: PowerShell/user32.",
 		}, "\n"),
@@ -27,41 +78,51 @@ func buildComputerUseTool() *agentcore.Tool {
 				"action": map[string]any{
 					"type": "string",
 					"enum": []string{
+						"screenshot", "wait",
 						"list_apps", "get_app_state", "click",
 						"scroll", "drag", "type_text", "press_key",
 						"set_value", "secondary_action",
 					},
 				},
-				"app":    map[string]any{"type": "string", "description": "App name."},
-				"x":      map[string]any{"type": "integer", "description": "X coordinate."},
-				"y":      map[string]any{"type": "integer", "description": "Y coordinate."},
-				"text":   map[string]any{"type": "string", "description": "Text to type."},
-				"key":    map[string]any{"type": "string", "description": "Key name."},
-				"value":  map[string]any{"type": "string", "description": "Value to set."},
-				"dx":     map[string]any{"type": "integer", "description": "Drag delta X."},
-				"dy":     map[string]any{"type": "integer", "description": "Drag delta Y."},
-				"amount": map[string]any{"type": "integer", "description": "Scroll amount."},
+				"app":      map[string]any{"type": "string", "description": "App name."},
+				"x":        map[string]any{"type": "integer", "description": "X coordinate in the last screenshot."},
+				"y":        map[string]any{"type": "integer", "description": "Y coordinate in the last screenshot."},
+				"text":     map[string]any{"type": "string", "description": "Text to type."},
+				"key":      map[string]any{"type": "string", "description": "Key name."},
+				"value":    map[string]any{"type": "string", "description": "Value to set."},
+				"dx":       map[string]any{"type": "integer", "description": "Drag delta X."},
+				"dy":       map[string]any{"type": "integer", "description": "Drag delta Y."},
+				"amount":   map[string]any{"type": "integer", "description": "Scroll amount."},
+				"frame_id": map[string]any{"type": "string", "description": "Screenshot frame this action refers to."},
+				"ms":       map[string]any{"type": "integer", "description": "Wait duration in milliseconds (action=wait, max 10000)."},
 			},
 			"required": []string{"action"},
 		},
 		Func: func(ctx context.Context, args json.RawMessage) (any, error) {
-			var p struct {
-				Action               string `json:"action"`
-				App                  string `json:"app"`
-				X, Y, DX, DY, Amount int
-				Text, Key, Value     string
+			p, err := parseComputerUseArgs(args)
+			if err != nil {
+				return nil, err
 			}
-			json.Unmarshal(args, &p)
 			switch p.Action {
+			case "screenshot":
+				return takeScreenshot()
+			case "wait":
+				return computerWait(p.MS)
 			case "list_apps":
 				return listApps()
 			case "get_app_state":
 				return getAppState(p.App)
 			case "click":
+				if _, err := computerFrames.require(p.FrameID); err != nil {
+					return nil, err
+				}
 				return click(p.X, p.Y)
 			case "scroll":
 				return scroll(p.Amount)
 			case "drag":
+				if _, err := computerFrames.require(p.FrameID); err != nil {
+					return nil, err
+				}
 				return drag(p.X, p.Y, p.DX, p.DY)
 			case "type_text":
 				return typeTxt(p.Text)
@@ -70,6 +131,9 @@ func buildComputerUseTool() *agentcore.Tool {
 			case "set_value":
 				return setVal(p.Value)
 			case "secondary_action":
+				if _, err := computerFrames.require(p.FrameID); err != nil {
+					return nil, err
+				}
 				return rightClick(p.X, p.Y)
 			default:
 				return nil, fmt.Errorf("unknown action: %s", p.Action)
@@ -78,16 +142,150 @@ func buildComputerUseTool() *agentcore.Tool {
 	}
 }
 
+type computerUseArgs struct {
+	Action  string `json:"action"`
+	App     string `json:"app"`
+	X       int    `json:"x"`
+	Y       int    `json:"y"`
+	DX      int    `json:"dx"`
+	DY      int    `json:"dy"`
+	Amount  int    `json:"amount"`
+	Text    string `json:"text"`
+	Key     string `json:"key"`
+	Value   string `json:"value"`
+	FrameID string `json:"frame_id"`
+	MS      int    `json:"ms"`
+}
+
+func parseComputerUseArgs(args json.RawMessage) (computerUseArgs, error) {
+	var p computerUseArgs
+	if err := json.Unmarshal(args, &p); err != nil {
+		return p, fmt.Errorf("invalid arguments: %w", err)
+	}
+	if strings.TrimSpace(p.Action) == "" {
+		return p, fmt.Errorf("action is required")
+	}
+	return p, nil
+}
+
+func takeScreenshot() (any, error) {
+	dir := filepath.Join(os.TempDir(), "covo-computer")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("screenshot dir: %w", err)
+	}
+	id := fmt.Sprintf("f%d", computerFrameSeq.Add(1))
+	path := filepath.Join(dir, "frame-"+id+".png")
+	w, h, err := captureScreenshotFn(path)
+	if err != nil {
+		return nil, err
+	}
+	computerFrames.set(computerFrame{
+		ID:       id,
+		Path:     path,
+		Width:    w,
+		Height:   h,
+		Captured: time.Now(),
+	})
+	return map[string]any{
+		"action":   "screenshot",
+		"path":     path,
+		"width":    w,
+		"height":   h,
+		"frame_id": id,
+		"note":     "click/drag coordinates are pixels in this image (top-left origin). Inspect the PNG before clicking.",
+	}, nil
+}
+
+func computerWait(ms int) (any, error) {
+	if ms <= 0 {
+		ms = 500
+	}
+	if ms > 10000 {
+		return nil, fmt.Errorf("wait max is 10000ms")
+	}
+	time.Sleep(time.Duration(ms) * time.Millisecond)
+	return map[string]any{"waited_ms": ms}, nil
+}
+
+func captureScreenshotDefault(path string) (width, height int, err error) {
+	switch runtime.GOOS {
+	case "darwin":
+		if err := runDesktop("screencapture", "-x", path); err != nil {
+			return 0, 0, err
+		}
+	case "linux":
+		if lookPath("grim") {
+			err = runDesktop("grim", path)
+		} else if lookPath("import") {
+			err = runDesktop("import", "-window", "root", path)
+		} else {
+			return 0, 0, fmt.Errorf("screenshot: install grim or ImageMagick import")
+		}
+		if err != nil {
+			return 0, 0, err
+		}
+	case "windows":
+		script := fmt.Sprintf(`Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp=New-Object Drawing.Bitmap $b.Width,$b.Height; $g=[Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Location,[Drawing.Point]::Empty,$b.Size); $bmp.Save('%s',[Drawing.Imaging.ImageFormat]::Png)`, strings.ReplaceAll(path, `'`, `''`))
+		if err := runDesktop("powershell", "-NoProfile", "-Command", script); err != nil {
+			return 0, 0, err
+		}
+	default:
+		return 0, 0, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+	return pngSize(path)
+}
+
+func lookPath(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+func pngSize(path string) (int, int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, 0, fmt.Errorf("read screenshot: %w", err)
+	}
+	defer f.Close()
+	var hdr [24]byte
+	if _, err := f.Read(hdr[:]); err != nil {
+		return 0, 0, fmt.Errorf("read screenshot header: %w", err)
+	}
+	if string(hdr[1:4]) != "PNG" {
+		return 0, 0, fmt.Errorf("screenshot is not a PNG")
+	}
+	w := int(binary.BigEndian.Uint32(hdr[16:20]))
+	h := int(binary.BigEndian.Uint32(hdr[20:24]))
+	return w, h, nil
+}
+
+func runDesktop(name string, args ...string) error {
+	out, err := exec.Command(name, args...).CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg != "" {
+			return fmt.Errorf("%s: %w: %s", name, err, msg)
+		}
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	return nil
+}
+
 func listApps() (any, error) {
 	switch runtime.GOOS {
 	case "darwin":
-		out, _ := exec.Command("osascript", "-e", `tell application "System Events" to get name of every process whose background only is false`).Output()
+		out, err := exec.Command("osascript", "-e", `tell application "System Events" to get name of every process whose background only is false`).CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("osascript: %w: %s", err, strings.TrimSpace(string(out)))
+		}
 		apps := strings.Split(strings.TrimSpace(string(out)), ", ")
 		return map[string]any{"apps": apps, "count": len(apps)}, nil
 	case "linux":
-		out, err := exec.Command("wmctrl", "-l").Output()
+		out, err := exec.Command("wmctrl", "-l").CombinedOutput()
 		if err != nil {
-			out, _ = exec.Command("xdotool", "search", "--name", ".").Output()
+			out, err = exec.Command("xdotool", "search", "--name", ".").CombinedOutput()
+			if err != nil {
+				return nil, fmt.Errorf("wmctrl/xdotool: %w: %s", err, strings.TrimSpace(string(out)))
+			}
 			ids := strings.Fields(string(out))
 			var names []string
 			for _, id := range ids {
@@ -111,8 +309,11 @@ func listApps() (any, error) {
 		}
 		return map[string]any{"apps": apps, "count": len(apps)}, nil
 	case "windows":
-		out, _ := exec.Command("powershell", "-NoProfile", "-Command",
-			`Get-Process|Where{$_.MainWindowTitle}|Select-ExpandProperty MainWindowTitle|Sort -Unique`).Output()
+		out, err := exec.Command("powershell", "-NoProfile", "-Command",
+			`Get-Process|Where{$_.MainWindowTitle}|Select-ExpandProperty MainWindowTitle|Sort -Unique`).CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("powershell: %w: %s", err, strings.TrimSpace(string(out)))
+		}
 		var apps []string
 		for _, line := range strings.Split(string(out), "\n") {
 			if s := strings.TrimSpace(line); s != "" {
@@ -121,7 +322,7 @@ func listApps() (any, error) {
 		}
 		return map[string]any{"apps": apps, "count": len(apps)}, nil
 	}
-	return map[string]any{"note": "unsupported OS"}, nil
+	return nil, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 }
 
 func getAppState(app string) (any, error) {
@@ -130,7 +331,10 @@ func getAppState(app string) (any, error) {
 		cmd := exec.Command("osascript", "-e", fmt.Sprintf(
 			`tell app "System Events" to set p to first process whose name is "%s"
 return "frontmost="&frontmost of p&"|windows="&count of windows of p`, escapeAppleScriptString(app)))
-		out, _ := cmd.Output()
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("osascript: %w: %s", err, strings.TrimSpace(string(out)))
+		}
 		return map[string]any{"app": app, "state": strings.TrimSpace(string(out))}, nil
 	case "linux":
 		out, _ := exec.Command("wmctrl", "-l").Output()
@@ -164,109 +368,153 @@ return "frontmost="&frontmost of p&"|windows="&count of windows of p`, escapeApp
 }
 
 func click(x, y int) (any, error) {
+	var err error
 	switch runtime.GOOS {
 	case "darwin":
-		exec.Command("osascript", "-e", fmt.Sprintf(`tell app "System Events" to click at {%d, %d}`, x, y)).Run()
+		err = runDesktop("osascript", "-e", fmt.Sprintf(`tell app "System Events" to click at {%d, %d}`, x, y))
 	case "linux":
-		exec.Command("xdotool", "mousemove", its(x), its(y), "click", "1").Run()
+		err = runDesktop("xdotool", "mousemove", its(x), its(y), "click", "1")
 	case "windows":
-		exec.Command("powershell", "-NoProfile", "-Command", fmt.Sprintf(
-			`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position=New-Object Drawing.Point(%d,%d); Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern void mouse_event(int f,int x,int y,int d,int ei);' -Name W -Namespace S; [S.W]::mouse_event(2,0,0,0,0); [S.W]::mouse_event(4,0,0,0,0)`, x, y)).Run()
+		err = runDesktop("powershell", "-NoProfile", "-Command", fmt.Sprintf(
+			`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position=New-Object Drawing.Point(%d,%d); Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern void mouse_event(int f,int x,int y,int d,int ei);' -Name W -Namespace S; [S.W]::mouse_event(2,0,0,0,0); [S.W]::mouse_event(4,0,0,0,0)`, x, y))
+	default:
+		return nil, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return map[string]any{"clicked": true, "x": x, "y": y}, nil
 }
 
 func scroll(amount int) (any, error) {
+	var err error
 	switch runtime.GOOS {
 	case "darwin":
 		c := absI(amount)
-		exec.Command("osascript", "-e", fmt.Sprintf(`tell app "System Events" to repeat %d times; key code %s; end repeat`, c, scrollKey(amount))).Run()
+		err = runDesktop("osascript", "-e", fmt.Sprintf(`tell app "System Events" to repeat %d times; key code %s; end repeat`, c, scrollKey(amount)))
 	case "linux":
 		dir := "4"
 		if amount < 0 {
 			dir = "5"
 		}
-		exec.Command("xdotool", "click", dir).Run()
+		err = runDesktop("xdotool", "click", dir)
 	case "windows":
 		d := 120
 		if amount < 0 {
 			d = -120
 		}
-		exec.Command("powershell", "-NoProfile", "-Command", fmt.Sprintf(
-			`Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern void mouse_event(int f,int x,int y,int d,int ei);' -Name W -Namespace S; [S.W]::mouse_event(0x0800,0,0,%d,0)`, d)).Run()
+		err = runDesktop("powershell", "-NoProfile", "-Command", fmt.Sprintf(
+			`Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern void mouse_event(int f,int x,int y,int d,int ei);' -Name W -Namespace S; [S.W]::mouse_event(0x0800,0,0,%d,0)`, d))
+	default:
+		return nil, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return map[string]any{"scrolled": amount}, nil
 }
 
 func drag(x, y, dx, dy int) (any, error) {
+	var err error
 	switch runtime.GOOS {
 	case "darwin":
-		exec.Command("osascript", "-e", fmt.Sprintf(
-			`tell app "System Events"; key down option; delay 0.1; click at {%d,%d}; delay 0.1; click at {%d,%d}; delay 0.1; key up option; end tell`, x, y, x+dx, y+dy)).Run()
+		err = runDesktop("osascript", "-e", fmt.Sprintf(
+			`tell app "System Events"; key down option; delay 0.1; click at {%d,%d}; delay 0.1; click at {%d,%d}; delay 0.1; key up option; end tell`, x, y, x+dx, y+dy))
 	case "linux":
-		exec.Command("xdotool", "mousedown", "1", "mousemove_relative", its(dx), its(dy), "mouseup", "1").Run()
+		err = runDesktop("xdotool", "mousedown", "1", "mousemove_relative", its(dx), its(dy), "mouseup", "1")
 	case "windows":
-		exec.Command("powershell", "-NoProfile", "-Command", fmt.Sprintf(
-			`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position=New-Object Drawing.Point(%d,%d); Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern void mouse_event(int f,int x,int y,int d,int ei);' -Name W -Namespace S; [S.W]::mouse_event(2,0,0,0,0); [System.Windows.Forms.Cursor]::Position=New-Object Drawing.Point(%d,%d); Start-Sleep -Milliseconds 100; [S.W]::mouse_event(4,0,0,0,0)`, x, y, x+dx, y+dy)).Run()
+		err = runDesktop("powershell", "-NoProfile", "-Command", fmt.Sprintf(
+			`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position=New-Object Drawing.Point(%d,%d); Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern void mouse_event(int f,int x,int y,int d,int ei);' -Name W -Namespace S; [S.W]::mouse_event(2,0,0,0,0); [System.Windows.Forms.Cursor]::Position=New-Object Drawing.Point(%d,%d); Start-Sleep -Milliseconds 100; [S.W]::mouse_event(4,0,0,0,0)`, x, y, x+dx, y+dy))
+	default:
+		return nil, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return map[string]any{"dragged": true, "dx": dx, "dy": dy}, nil
 }
 
 func typeTxt(text string) (any, error) {
+	var err error
 	switch runtime.GOOS {
 	case "darwin":
-		exec.Command("osascript", "-e", fmt.Sprintf(`tell app "System Events" to keystroke "%s"`, escapeAppleScriptString(text))).Run()
+		err = runDesktop("osascript", "-e", fmt.Sprintf(`tell app "System Events" to keystroke "%s"`, escapeAppleScriptString(text)))
 	case "linux":
-		exec.Command("xdotool", "type", text).Run()
+		err = runDesktop("xdotool", "type", text)
 	case "windows":
 		script := fmt.Sprintf(`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('%s')`, escapeWinKeys(text))
-		exec.Command("powershell", "-NoProfile", "-Command", script).Run()
+		err = runDesktop("powershell", "-NoProfile", "-Command", script)
+	default:
+		return nil, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return map[string]any{"typed": text}, nil
 }
 
 func pressK(key string) (any, error) {
+	var err error
 	switch runtime.GOOS {
 	case "darwin":
 		if kc := macKeyCode(key); kc > 0 {
-			exec.Command("osascript", "-e", fmt.Sprintf(`tell app "System Events" to key code %d`, kc)).Run()
+			err = runDesktop("osascript", "-e", fmt.Sprintf(`tell app "System Events" to key code %d`, kc))
 		} else {
-			exec.Command("osascript", "-e", fmt.Sprintf(`tell app "System Events" to keystroke "%s"`, escapeAppleScriptString(key))).Run()
+			err = runDesktop("osascript", "-e", fmt.Sprintf(`tell app "System Events" to keystroke "%s"`, escapeAppleScriptString(key)))
 		}
 	case "linux":
-		exec.Command("xdotool", "key", key).Run()
+		err = runDesktop("xdotool", "key", key)
 	case "windows":
-		exec.Command("powershell", "-NoProfile", "-Command", fmt.Sprintf(
-			`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{%s}')`, escapePSString(escapeSendKeysBraces(key)))).Run()
+		err = runDesktop("powershell", "-NoProfile", "-Command", fmt.Sprintf(
+			`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{%s}')`, escapePSString(escapeSendKeysBraces(key))))
+	default:
+		return nil, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return map[string]any{"pressed": key}, nil
 }
 
 func setVal(value string) (any, error) {
+	var err error
 	switch runtime.GOOS {
 	case "darwin":
-		exec.Command("osascript", "-e", fmt.Sprintf(`set the clipboard to "%s"`, escapeAppleScriptString(value))).Run()
-		exec.Command("osascript", "-e", `tell app "System Events" to keystroke "v" using command down`).Run()
+		if err = runDesktop("osascript", "-e", fmt.Sprintf(`set the clipboard to "%s"`, escapeAppleScriptString(value))); err == nil {
+			err = runDesktop("osascript", "-e", `tell app "System Events" to keystroke "v" using command down`)
+		}
 	case "linux":
-		exec.Command("xdotool", "type", value).Run()
+		err = runDesktop("xdotool", "type", value)
 	case "windows":
-		exec.Command("powershell", "-NoProfile", "-Command",
-			fmt.Sprintf(`[System.Windows.Forms.Clipboard]::SetText('%s')`, escapeWinKeys(value))).Run()
-		exec.Command("powershell", "-NoProfile", "-Command",
-			`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^v')`).Run()
+		if err = runDesktop("powershell", "-NoProfile", "-Command",
+			fmt.Sprintf(`[System.Windows.Forms.Clipboard]::SetText('%s')`, escapeWinKeys(value))); err == nil {
+			err = runDesktop("powershell", "-NoProfile", "-Command",
+				`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^v')`)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return map[string]any{"set": value, "method": "clipboard+paste"}, nil
 }
 
 func rightClick(x, y int) (any, error) {
+	var err error
 	switch runtime.GOOS {
 	case "darwin":
-		exec.Command("osascript", "-e", fmt.Sprintf(`tell app "System Events" to click at {%d, %d} with option down`, x, y)).Run()
+		err = runDesktop("osascript", "-e", fmt.Sprintf(`tell app "System Events" to click at {%d, %d} with option down`, x, y))
 	case "linux":
-		exec.Command("xdotool", "mousemove", its(x), its(y), "click", "3").Run()
+		err = runDesktop("xdotool", "mousemove", its(x), its(y), "click", "3")
 	case "windows":
-		exec.Command("powershell", "-NoProfile", "-Command", fmt.Sprintf(
-			`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position=New-Object Drawing.Point(%d,%d); Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern void mouse_event(int f,int x,int y,int d,int ei);' -Name W -Namespace S; [S.W]::mouse_event(8,0,0,0,0); [S.W]::mouse_event(16,0,0,0,0)`, x, y)).Run()
+		err = runDesktop("powershell", "-NoProfile", "-Command", fmt.Sprintf(
+			`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position=New-Object Drawing.Point(%d,%d); Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern void mouse_event(int f,int x,int y,int d,int ei);' -Name W -Namespace S; [S.W]::mouse_event(8,0,0,0,0); [S.W]::mouse_event(16,0,0,0,0)`, x, y))
+	default:
+		return nil, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return map[string]any{"right_clicked": true, "x": x, "y": y}, nil
 }

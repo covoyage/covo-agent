@@ -13,10 +13,9 @@ func buildReactionTool() *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "reaction",
 		Description: strings.Join([]string{
-			"React to a message with an emoji on the connected gateway channel.",
-			"Use this to acknowledge messages, indicate status, or provide visual feedback.",
-			"Common reactions: 👍 (agree/done), 👀 (reviewing), 🚀 (deploying),",
-			"✅ (verified), ❌ (failed), ⏳ (in progress), 🎉 (celebrate).",
+			"Show an emoji reaction in this conversation UI.",
+			"This does not post to Slack, Discord, or any other gateway.",
+			"Use it as lightweight local feedback: 👍 done, 👀 reviewing, ⏳ in progress.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",

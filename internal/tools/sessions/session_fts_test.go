@@ -898,3 +898,31 @@ func TestFTSSearcher_IndexSpill_SnippetRole(t *testing.T) {
 		t.Error("expected snippet containing 'searchable'")
 	}
 }
+
+// TestFTSSearchShortCJKTerm verifies that 1-2 rune CJK terms, which the
+// trigram tokenizer cannot index, are answered by the substring-scan fallback.
+func TestFTSSearchShortCJKTerm(t *testing.T) {
+	fts, sessionsDir := newTestFTS(t)
+
+	writeTestSession(t, sessionsDir, "sess-cjk", "中文会话", []sessionMessage{
+		{Role: "user", Content: "帮我修复登录问题，这关系到用户的记忆功能"},
+		{Role: "assistant", Content: "已经修复了记忆功能的 bug"},
+	})
+	writeTestSession(t, sessionsDir, "sess-other", "english", []sessionMessage{
+		{Role: "user", Content: "plain english content about databases"},
+	})
+
+	results, err := fts.Search(context.Background(), "记忆", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected results for 2-char CJK term 记忆, got none")
+	}
+	if results[0].SessionID != "sess-cjk" {
+		t.Fatalf("expected sess-cjk, got %s", results[0].SessionID)
+	}
+	if len(results[0].Snippets) == 0 {
+		t.Fatal("expected snippets in result")
+	}
+}

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"strings"
+
 	"github.com/covoyage/covonaut/agentcore"
 
 	"github.com/covoyage/covo-agent/internal/agent"
@@ -15,6 +17,9 @@ type AgentRequest struct {
 	Model          string
 	ContextLength  int64
 	ToolNameFilter func(string) bool
+	// SystemPromptSuffix is appended to the agent's system prompt for this
+	// request only (e.g. cron jobs instructing the agent to load skills).
+	SystemPromptSuffix string
 }
 
 // AgentFactory builds agents from one stable base configuration.
@@ -36,6 +41,10 @@ func (factory *AgentFactory) Config(request AgentRequest) agent.CovoAgentConfig 
 	config.Model = request.Model
 	config.ModelContextLength = request.ContextLength
 	config.ToolNameFilter = request.ToolNameFilter
+	if request.SystemPromptSuffix != "" {
+		config.AppendSystemPrompt = strings.TrimSpace(
+			config.AppendSystemPrompt + "\n\n" + request.SystemPromptSuffix)
+	}
 	if factory.state != nil {
 		config.ToolProfile = factory.state.ActiveProfile()
 	}
@@ -51,6 +60,8 @@ func cloneAgentConfig(config agent.CovoAgentConfig) agent.CovoAgentConfig {
 	cloned.LifecycleHooks = append([]agentcore.LifecycleHook(nil), config.LifecycleHooks...)
 	cloned.ProviderMiddlewares = append([]agent.ProviderMiddleware(nil), config.ProviderMiddlewares...)
 	cloned.SkillURLs = append([]string(nil), config.SkillURLs...)
+	cloned.SkillExtraDirs = append([]string(nil), config.SkillExtraDirs...)
+	cloned.SkillDisabled = append([]string(nil), config.SkillDisabled...)
 	cloned.ToolsetOverride = append([]string(nil), config.ToolsetOverride...)
 	if config.MCPServers != nil {
 		cloned.MCPServers = make(map[string]agenttools.MCPConfig, len(config.MCPServers))

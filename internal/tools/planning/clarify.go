@@ -9,6 +9,10 @@ import (
 	"github.com/covoyage/covonaut/agentcore"
 )
 
+// AskFunc presents a question and blocks until the user answers.
+// Same shape as tools.AskUserFunc so the TUI callback can be reused.
+type AskFunc func(ctx context.Context, question string, options []string, defaultValue string) (string, error)
+
 type ClarifyOption struct {
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
@@ -23,11 +27,13 @@ type ClarifyResult struct {
 	MultiSelect   bool            `json:"multi_select,omitempty"`
 }
 
-func BuildClarifyTool() *agentcore.Tool {
+func BuildClarifyTool(ask AskFunc) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "clarify",
 		Description: strings.Join([]string{
-			"Ask the user a clarifying question before proceeding. Use this when:",
+			"Ask the user a clarifying question and wait for their answer before proceeding.",
+			"Blocks until the user responds (same interaction as ask_user).",
+			"Use this when:",
 			"- There are multiple valid interpretations of the request",
 			"- You need to make a decision that depends on user preference",
 			"- A critical detail is missing and you cannot safely assume",
@@ -35,10 +41,10 @@ func BuildClarifyTool() *agentcore.Tool {
 			"For simple multiple-choice questions, use 'choices' (up to 4 string options).",
 			"For richer prompts where each option needs explanation, use 'options' with label+description pairs.",
 			"For open-ended questions, omit both choices and options.",
-			"Set 'multi_select' to true when the user can pick multiple options.",
 			"Set 'header' to a short label (max 12 chars) displayed as a chip/tag.",
+			"Set 'default_choice' so headless/cron runs do not hang.",
 			"",
-			"The question is presented to the user and their response is returned as the tool result.",
+			"The user's answer is returned as 'response'.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -110,13 +116,45 @@ func BuildClarifyTool() *agentcore.Tool {
 				params.Options = params.Options[:4]
 			}
 
-			return ClarifyResult{
-				Question:      params.Question,
-				Header:        params.Header,
-				Choices:       params.Choices,
-				Options:       params.Options,
-				DefaultChoice: params.DefaultChoice,
-				MultiSelect:   params.MultiSelect,
+			opts := params.Choices
+			if len(opts) == 0 {
+				for _, o := range params.Options {
+					if label := strings.TrimSpace(o.Label); label != "" {
+						opts = append(opts, label)
+					}
+				}
+			}
+
+			question := params.Question
+			if params.Header != "" {
+				question = "[" + params.Header + "] " + question
+			}
+
+			answer := ""
+			var err error
+			if ask != nil {
+				answer, err = ask(ctx, question, opts, params.DefaultChoice)
+			} else {
+				err = fmt.Errorf("no interactive user available")
+			}
+			if err != nil || strings.TrimSpace(answer) == "" {
+				if params.DefaultChoice != "" {
+					return map[string]any{
+						"response":     params.DefaultChoice,
+						"used_default": true,
+						"question":     params.Question,
+					}, nil
+				}
+				if err != nil {
+					return nil, fmt.Errorf("clarify: %w", err)
+				}
+				return nil, fmt.Errorf("clarify: no answer provided and no default_choice given")
+			}
+
+			return map[string]any{
+				"response":     strings.TrimSpace(answer),
+				"used_default": false,
+				"question":     params.Question,
 			}, nil
 		},
 	}

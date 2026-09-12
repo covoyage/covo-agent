@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/covoyage/covonaut/agentcore"
 	"github.com/covoyage/covo-agent/internal/evolution"
+	"github.com/covoyage/covonaut/agentcore"
 )
 
 type WorkshopToolItem struct {
@@ -32,18 +32,18 @@ func BuildSkillWorkshopTool(store *evolution.WorkshopStore, skillMgr *evolution.
 	}
 	return &agentcore.Tool{
 		Name:        "skill_workshop",
-		Description: "Manage Skill Workshop proposals: create, update, revise, list, inspect, apply, reject, quarantine. Proposals are pending until applied by the user. Never write proposal or skill files directly.",
+		Description: "Create and inspect Skill Workshop proposals. Proposals stay pending until the user runs /skill apply <id>. Never write proposal or skill files, and never apply/reject/quarantine from this tool.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"description": "Action to perform: create, list, inspect, revise, apply, reject, quarantine",
-					"enum":        []string{"create", "list", "inspect", "revise", "apply", "reject", "quarantine"},
+					"description": "Action to perform: create, list, inspect, revise. apply/reject/quarantine are user-only via /skill.",
+					"enum":        []string{"create", "list", "inspect", "revise"},
 				},
 				"proposal_id": map[string]any{
 					"type":        "string",
-					"description": "Proposal ID (required for inspect, revise, apply, reject, quarantine)",
+					"description": "Proposal ID (required for inspect and revise)",
 				},
 				"skill_name": map[string]any{
 					"type":        "string",
@@ -59,13 +59,14 @@ func BuildSkillWorkshopTool(store *evolution.WorkshopStore, skillMgr *evolution.
 				},
 				"kind": map[string]any{
 					"type":        "string",
-					"enum":         []string{"create", "update"},
-					"description": "Proposal kind (required for create): 'create' for new skill, 'update' for existing",
+					"enum":        []string{"create", "update", "delete"},
+					"description": "Proposal kind (required for create): 'create' for new skill, 'update' for existing, 'delete' to archive",
 				},
 			},
 			"required": []string{"action"},
 		},
 		Func: func(ctx context.Context, args json.RawMessage) (any, error) {
+			_ = skillMgr // apply/reject stay user-only via /skill
 			var p WorkshopParams
 			if err := json.Unmarshal(args, &p); err != nil {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
@@ -74,10 +75,16 @@ func BuildSkillWorkshopTool(store *evolution.WorkshopStore, skillMgr *evolution.
 			switch p.Action {
 			case "create":
 				kind := evolution.ProposalCreate
-				if p.Kind == "update" {
+				switch p.Kind {
+				case "update":
 					kind = evolution.ProposalUpdate
+				case "delete":
+					kind = evolution.ProposalDelete
 				}
-				if p.SkillName == "" || p.Body == "" {
+				if p.SkillName == "" {
+					return nil, fmt.Errorf("skill_name is required for 'create'")
+				}
+				if kind != evolution.ProposalDelete && p.Body == "" {
 					return nil, fmt.Errorf("skill_name and body are required for 'create'")
 				}
 				prop, err := store.Create(kind, p.SkillName, p.Body, p.Rationale)
@@ -130,82 +137,11 @@ func BuildSkillWorkshopTool(store *evolution.WorkshopStore, skillMgr *evolution.
 					"message":  fmt.Sprintf("Proposal %q revised.", p.ProposalID),
 				}, nil
 
-			case "apply":
-				if p.ProposalID == "" {
-					return nil, fmt.Errorf("proposal_id is required for 'apply'")
-				}
-				if skillMgr == nil {
-					return nil, fmt.Errorf("skill manager is not available")
-				}
-				prop, err := store.Apply(p.ProposalID, func(pr evolution.SkillProposal) error {
-					fm, skillBody, err := evolution.ParseSkillFrontmatter(pr.Body)
-					if err != nil {
-						return fmt.Errorf("parse skill body frontmatter: %w", err)
-					}
-					description := pr.Rationale
-					if fm != nil && fm.Description != "" {
-						description = fm.Description
-					}
-					if description == "" {
-						description = fmt.Sprintf("Skill created from workshop proposal %s", pr.ID)
-					}
-					switch pr.Kind {
-					case evolution.ProposalCreate:
-						body := skillBody
-						if body == "" {
-							body = pr.Body
-						}
-						_, err := skillMgr.CreateWithMeta(pr.SkillName, description, "", nil, body)
-						return err
-					case evolution.ProposalUpdate:
-						body := skillBody
-						if body == "" {
-							body = pr.Body
-						}
-						return skillMgr.Edit(pr.SkillName, body)
-					default:
-						return fmt.Errorf("unknown proposal kind: %s", pr.Kind)
-					}
-				})
-				if err != nil {
-					return nil, err
-				}
-				return map[string]any{
-					"status":   "applied",
-					"proposal": proposalToItem(*prop),
-					"message":  fmt.Sprintf("Proposal %q applied. Skill %q has been %sd.", p.ProposalID, prop.SkillName, string(prop.Kind)),
-				}, nil
-
-			case "reject":
-				if p.ProposalID == "" {
-					return nil, fmt.Errorf("proposal_id is required for 'reject'")
-				}
-				prop, err := store.Reject(p.ProposalID)
-				if err != nil {
-					return nil, err
-				}
-				return map[string]any{
-					"status":   "rejected",
-					"proposal": proposalToItem(*prop),
-					"message":  fmt.Sprintf("Proposal %q rejected.", p.ProposalID),
-				}, nil
-
-			case "quarantine":
-				if p.ProposalID == "" {
-					return nil, fmt.Errorf("proposal_id is required for 'quarantine'")
-				}
-				prop, err := store.Quarantine(p.ProposalID)
-				if err != nil {
-					return nil, err
-				}
-				return map[string]any{
-					"status":   "quarantined",
-					"proposal": proposalToItem(*prop),
-					"message":  fmt.Sprintf("Proposal %q quarantined.", p.ProposalID),
-				}, nil
+			case "apply", "reject", "quarantine":
+				return nil, fmt.Errorf("%s is user-only; run /skill apply <id> or /skill reject <id> after review", p.Action)
 
 			default:
-				return nil, fmt.Errorf("unknown action %q (valid: create, list, inspect, revise, apply, reject, quarantine)", p.Action)
+				return nil, fmt.Errorf("unknown action %q (valid: create, list, inspect, revise)", p.Action)
 			}
 		},
 	}
@@ -225,8 +161,8 @@ func proposalToItem(p evolution.SkillProposal) WorkshopToolItem {
 func BuildSkillWorkshopPromptSection() string {
 	return `## Skill Workshop
 
-Route durable skill work (creating or updating skills) through the skill_workshop tool; never write proposal or skill files directly.
-Generated skills are pending proposals. Apply, reject, or quarantine only when the user explicitly asks.
+Route durable skill work (creating or updating skills) through the skill_workshop or skill_manage tools; never write proposal or skill files directly.
+Generated skills are pending proposals. Tell the user to run /skill apply <id> after review. Do not apply, reject, or quarantine from this tool.
 To create a skill: use action "create" with skill_name, body (including YAML frontmatter), and optional rationale.
 To inspect a proposal: use action "inspect" with proposal_id.
 To update an existing skill: use action "create" with kind "update".`

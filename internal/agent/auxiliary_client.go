@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/covoyage/covo-agent/internal/rollout"
@@ -252,6 +253,31 @@ func (ac *AuxiliaryClient) Complete(ctx context.Context, task AuxiliaryTask, sys
 		return "", fmt.Errorf("auxiliary %s call: %w", task, err)
 	}
 	return resp.Content, nil
+}
+
+// DescribeImage sends a local image (as a data URL) to the vision model.
+func (ac *AuxiliaryClient) DescribeImage(ctx context.Context, prompt, mediaType, dataURL string) (string, error) {
+	if strings.TrimSpace(dataURL) == "" {
+		return "", fmt.Errorf("image data is required")
+	}
+	if prompt == "" {
+		prompt = "Describe this image."
+	}
+	messages := []agentcore.Message{
+		{
+			Role:    agentcore.RoleSystem,
+			Content: "You describe images for a coding agent. Be concrete: visible text, UI, errors, layout, and anything that would change what the agent does next.",
+		},
+		{
+			Role:    agentcore.RoleUser,
+			Content: prompt,
+			Blocks: []agentcore.ContentBlock{
+				{Kind: agentcore.BlockKindText, Text: prompt},
+				{Kind: agentcore.BlockKindImage, URL: dataURL, MediaType: mediaType},
+			},
+		},
+	}
+	return ac.CompleteWithMessages(ctx, TaskVision, messages, 800, 0.2)
 }
 
 // CompleteWithMessages dispatches an LLM call with arbitrary messages (not

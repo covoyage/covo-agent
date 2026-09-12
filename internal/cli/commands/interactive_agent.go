@@ -50,13 +50,7 @@ func (s *interactiveSession) createAgent(m agent.AgentMode) *agent.CovoAgent {
 }
 
 func sideQuestionToolAllowed(name string) bool {
-	switch name {
-	case "read", "read_file", "grep", "glob", "ls", "list", "search",
-		"web_search", "web_fetch", "code_navigate", "search_files", "find":
-		return true
-	default:
-		return false
-	}
+	return agent.SideQuestionAllowedTools[name]
 }
 
 func (s *interactiveSession) createSideAgent(m agent.AgentMode) *agent.CovoAgent {

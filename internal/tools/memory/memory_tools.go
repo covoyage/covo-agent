@@ -124,9 +124,9 @@ func BuildMemoryRecallTool(store *EnhancedMemoryStore) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "memory_recall",
 		Description: strings.Join([]string{
-			"Search through long-term memories using semantic keyword matching.",
-			"Results are scored by relevance with importance and tag boosts.",
-			"Use this to find past decisions, user preferences, or stored knowledge.",
+			"Search this session's in-memory notes (lost on restart).",
+			"Not long-term memory. For facts that should persist, use the memory tool (MEMORY.md).",
+			"Keyword match with importance/tag boosts.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -177,9 +177,9 @@ func BuildMemoryStoreTool(store *EnhancedMemoryStore) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "memory_store",
 		Description: strings.Join([]string{
-			"Save important information to long-term memory with an importance score.",
-			"Use this for user preferences, important decisions, project conventions, or lessons learned.",
-			"Importance should be 0.0 (routine) to 1.0 (critical). Tag with keywords for easier recall.",
+			"Save a note in this session only (lost on restart).",
+			"For lasting preferences, decisions, or conventions, use the memory tool instead.",
+			"Importance 0.0–1.0. Optional tags help later recall in this session.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -235,8 +235,8 @@ func BuildMemoryForgetTool(store *EnhancedMemoryStore) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "memory_forget",
 		Description: strings.Join([]string{
-			"Delete a specific memory by ID.",
-			"Use this for GDPR compliance, removing outdated info, or correcting mistakes.",
+			"Delete an in-session memory by ID (not MEMORY.md).",
+			"To change persistent memory, use the memory tool with action=remove.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",

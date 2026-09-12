@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/evolution"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -176,6 +177,9 @@ func buildSafeEnv(extra []string) []string {
 }
 
 func newStdioClient(ctx context.Context, command string, args, env []string) (*stdioClient, error) {
+	if err := evolution.CheckMCPCommandMalware(command, args); err != nil {
+		return nil, err
+	}
 	if _, err := exec.LookPath(command); err != nil {
 		return nil, fmt.Errorf("command not found: %s", command)
 	}

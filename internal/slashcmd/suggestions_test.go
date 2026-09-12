@@ -16,7 +16,7 @@ func TestBuildSlashSuggestions_HasAllCommands(t *testing.T) {
 	required := []string{"help", "clear", "mode general", "mode code",
 		"provider openai", "model", "memory agent", "memory user",
 		"skill", "session", "resume", "save",
-		"compact", "curator",
+		"compact", "tools", "context", "curator",
 		"retry",
 		"background", "queue", "steer", "cancel", "logs", "respawn", "agents",
 		"btw", "thinking", "verbose", "busy",

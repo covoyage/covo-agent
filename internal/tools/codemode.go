@@ -13,7 +13,7 @@ import (
 
 // BuildRunCodeToolWithRegistry creates the run_code tool with access to
 // the agent's tool registry for SDK generation and tool execution.
-func BuildRunCodeToolWithRegistry(getTool func(name string) (*agentcore.Tool, bool), toolNames func() []string) *agentcore.Tool {
+func BuildRunCodeToolWithRegistry(agent *agentcore.Agent) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "run_code",
 		Description: strings.Join([]string{
@@ -36,6 +36,7 @@ func BuildRunCodeToolWithRegistry(getTool func(name string) (*agentcore.Tool, bo
 			"",
 			"Use this when you need to compose multiple tool calls with control flow,",
 			"loops, or intermediate processing — instead of making individual tool calls.",
+			"Nested ToolCall runs the same hooks and approval path as a direct tool call.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -73,26 +74,21 @@ func BuildRunCodeToolWithRegistry(getTool func(name string) (*agentcore.Tool, bo
 				timeout = 300 * time.Second
 			}
 
+			if agent == nil {
+				return nil, fmt.Errorf("agent not ready")
+			}
+
 			// Build tool info list from the agent's registry
-			names := toolNames()
+			names := agent.ToolNames()
 			defs := make([]agentcore.ToolDefinition, 0, len(names))
 			for _, name := range names {
-				if t, ok := getTool(name); ok {
+				if t, ok := agent.GetTool(name); ok {
 					defs = append(defs, t.Definition())
 				}
 			}
 			tools := codemode.ToolsFromDefinitions(defs)
 
-			// Executor that delegates to the agent's tool functions
-			executor := func(ctx context.Context, name string, toolArgs json.RawMessage) (any, error) {
-				t, ok := getTool(name)
-				if !ok {
-					return nil, fmt.Errorf("tool %q not found", name)
-				}
-				return t.Func(ctx, toolArgs)
-			}
-
-			result, err := codemode.Execute(runCtx, tools, params.Code, executor, timeout)
+			result, err := codemode.Execute(runCtx, tools, params.Code, nestedRunCodeExecutor(agent), timeout)
 			if err != nil {
 				return nil, err
 			}
@@ -103,5 +99,22 @@ func BuildRunCodeToolWithRegistry(getTool func(name string) (*agentcore.Tool, bo
 				"timed_out": result.TimedOut,
 			}, nil
 		},
+	}
+}
+
+func nestedRunCodeExecutor(agent *agentcore.Agent) func(context.Context, string, json.RawMessage) (any, error) {
+	return func(ctx context.Context, name string, toolArgs json.RawMessage) (any, error) {
+		if name == "run_code" {
+			return nil, fmt.Errorf("run_code cannot invoke itself")
+		}
+		if agent == nil {
+			return nil, fmt.Errorf("agent not ready")
+		}
+		if _, ok := agent.GetTool(name); !ok {
+			return nil, fmt.Errorf("tool %q not found", name)
+		}
+		// InvokeTool runs the same before/after hooks, plan gate, and
+		// approval path as a model-issued call. Do not call Func directly.
+		return agent.InvokeTool(ctx, name, toolArgs)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -14,11 +15,32 @@ import (
 )
 
 const (
-	moaDefaultModels = "gpt-4o,claude-sonnet-4-20250514,gemini-2.5-flash,deepseek-chat"
 	moaMaxRetries    = 2
 	moaTimeoutPerRef = 120 * time.Second
 	moaMaxRefChars   = 6000 // max chars per reference response to avoid context overflow
 )
+
+func moaDefaultModelList(primary string) []string {
+	if env := strings.TrimSpace(os.Getenv("COVO_MOA_MODELS")); env != "" {
+		return splitModelList(env)
+	}
+	primary = strings.TrimSpace(primary)
+	if primary == "" {
+		return nil
+	}
+	return []string{primary}
+}
+
+func splitModelList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
 
 var moaAggregatorSystemPrompt = `You have been provided with responses from various models to the latest user query.
 Your task is to synthesize these responses into a single, high-quality response.
@@ -44,14 +66,14 @@ func buildMoATool(cfg MoAConfig) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "moa",
 		Description: strings.Join([]string{
-			"Mixture of Agents — queries multiple LLMs in parallel and synthesizes the best answer.",
+			"Mixture of Agents — queries one or more LLMs in parallel and synthesizes the best answer.",
 			"",
-			"Uses several reference models (default: gpt-4o, claude-sonnet-4-20250514, gemini-2.5-flash, deepseek-chat)",
-			"then aggregates their responses with the main model for a superior result.",
+			"Default models: the current agent model (override with models= or COVO_MOA_MODELS).",
+			"Does not assume gpt-4o / Claude / Gemini exist on the current provider.",
 			"",
 			"Parameters:",
 			"- query (required): The question or task",
-			"- models (optional): Comma-separated model list to query",
+			"- models (optional): Comma-separated model IDs on the current provider",
 			"- system_prompt (optional): Custom system prompt for all models",
 			"- aggregator_model (optional): Model to use for final synthesis (default: main model)",
 			"",
@@ -68,7 +90,7 @@ func buildMoATool(cfg MoAConfig) *agentcore.Tool {
 				},
 				"models": map[string]any{
 					"type":        "string",
-					"description": "Comma-separated model list (e.g. 'gpt-4o,claude-sonnet-4-20250514')",
+					"description": "Comma-separated model IDs on the current provider (or set COVO_MOA_MODELS)",
 				},
 				"system_prompt": map[string]any{
 					"type":        "string",
@@ -110,14 +132,23 @@ func buildMoATool(cfg MoAConfig) *agentcore.Tool {
 				systemPrompt = "You are a helpful assistant. Provide clear, accurate, and well-structured responses."
 			}
 
-			modelList := strings.Split(params.Models, ",")
-			if len(params.Models) == 0 || (len(modelList) == 1 && modelList[0] == "") {
-				modelList = strings.Split(moaDefaultModels, ",")
+			modelList := splitModelList(params.Models)
+			if len(modelList) == 0 {
+				modelList = moaDefaultModelList(cfg.DefaultModel)
+			}
+			if len(modelList) == 0 {
+				return map[string]any{
+					"success": false,
+					"error":   "no reference models: pass models= or set COVO_MOA_MODELS",
+				}, nil
 			}
 
 			aggregatorModel := params.AggregatorModel
 			if aggregatorModel == "" {
 				aggregatorModel = cfg.DefaultModel
+			}
+			if aggregatorModel == "" {
+				aggregatorModel = modelList[0]
 			}
 
 			// Phase 1: parallel reference model calls

@@ -32,11 +32,13 @@ CRITICAL RULES (violate these and you will fail):
 4. File diffs are displayed automatically after edits — do not repeat them.
 5. Respond in the same language the user is using.`
 
-	memoryGuidance = `You have access to persistent memory (MEMORY.md) and a user profile (USER.md). These are injected at session start and represent accumulated knowledge across sessions. Use them to inform your responses but do not mention them explicitly unless relevant. You can update your memory using the memory tool.`
+	memoryGuidance = `You have access to persistent memory (MEMORY.md) and a user profile (USER.md). These are injected at session start and represent accumulated knowledge across sessions. Use them to inform your responses but do not mention them explicitly unless relevant. Update them with the memory tool (not memory_store / memory_semantic_store).`
 
 	skillsGuidance = `You have access to a skill system. Skills are reusable procedural knowledge — they capture how to do specific types of tasks. You can list available skills, view their full content, and create new skills from successful experiences. When you solve a non-trivial problem that might recur, consider creating a skill to capture the approach. Skills should be class-level (broad), not session-level (narrow). A good skill answers "how do I do X?" for a whole category of tasks.
 
-If you complete a complex task using a skill, consider whether the skill could be improved with what you learned. Use the skill_manage tool with action "improve" and an improvement_summary describing what was changed and why. Improvements accumulate in the skill's improvement_history for future reference.`
+Durable skill create/edit/patch/delete work goes through skill_manage or skill_workshop as a pending proposal. Tell the user to run /skill apply <id> after review. Do not write SKILL.md yourself and do not apply proposals.
+
+If you complete a complex task using a skill, consider whether the skill could be improved with what you learned. Use skill_manage action "improve" with an improvement_summary (no body) to record history, or include body to propose a content update.`
 
 	toolUseEnforcement = `You have access to a set of tools. Use them proactively to gather information, verify facts, and execute actions. Do not guess when a tool can provide a definitive answer. When the user asks you to do something that a tool can accomplish, use the tool rather than describing how to do it.
 

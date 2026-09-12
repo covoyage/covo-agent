@@ -203,12 +203,16 @@ func buildToolCallTool(agent *agentcore.Agent) *agentcore.Tool {
 				return nil, fmt.Errorf("name is required")
 			}
 
-			tool, ok := agent.GetTool(params.Name)
-			if !ok {
+			if params.Name == "tool_call" {
+				return nil, fmt.Errorf("tool_call cannot invoke itself")
+			}
+			if _, ok := agent.GetTool(params.Name); !ok {
 				return nil, fmt.Errorf("tool '%s' not found in registry", params.Name)
 			}
 
-			result, err := tool.Func(ctx, params.Arguments)
+			// InvokeTool runs the same before/after hooks, plan gate, and
+			// approval path as a model-issued call. Do not call Func directly.
+			text, err := agent.InvokeTool(ctx, params.Name, params.Arguments)
 			if err != nil {
 				return map[string]any{
 					"status": "error",
@@ -219,7 +223,7 @@ func buildToolCallTool(agent *agentcore.Agent) *agentcore.Tool {
 
 			return map[string]any{
 				"status": "ok",
-				"result": result,
+				"result": text,
 				"tool":   params.Name,
 			}, nil
 		},

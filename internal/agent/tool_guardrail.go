@@ -18,6 +18,8 @@ var IdempotentToolNames = map[string]bool{
 	"web_fetch":      true,
 	"session_search": true,
 	"pdf":            true,
+	"view_image":     true,
+	"video_analyze":  true,
 	"diffs":          true,
 	"git_status":     true,
 	"git_log":        true,

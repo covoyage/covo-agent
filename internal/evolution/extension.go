@@ -15,10 +15,18 @@ type EvolutionExtension struct {
 	skillMgr  *SkillManager
 	bundleMgr *BundleManager
 	usage     *SkillUsageTracker
+	workshop  *WorkshopStore
 	tools     []*agentcore.Tool
 	// sessionID lazily resolves the current session id so skill preprocessing
 	// can substitute ${COVO_SESSION_ID}. May be nil.
 	sessionID func() string
+	skillCfg  SkillConfigStore
+}
+
+// SkillConfigStore persists skill config vars (typically config.yaml skills.config).
+type SkillConfigStore interface {
+	Get() map[string]string
+	Set(key, value string) error
 }
 
 func NewEvolutionExtension(memory *MemorySystem, skillMgr *SkillManager, bundleMgr *BundleManager, usage *SkillUsageTracker, sessionID func() string) *EvolutionExtension {
@@ -29,6 +37,14 @@ func NewEvolutionExtension(memory *MemorySystem, skillMgr *SkillManager, bundleM
 		usage:     usage,
 		sessionID: sessionID,
 	}
+}
+
+func (e *EvolutionExtension) SetWorkshopStore(store *WorkshopStore) {
+	e.workshop = store
+}
+
+func (e *EvolutionExtension) SetSkillConfigStore(store SkillConfigStore) {
+	e.skillCfg = store
 }
 
 func (e *EvolutionExtension) Name() string { return "evolution" }
@@ -54,7 +70,10 @@ func (e *EvolutionExtension) buildMemoryTool() *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "memory",
 		Description: strings.Join([]string{
-			"Manage persistent memory that survives across sessions. Two stores are available:",
+			"Primary long-term memory. Writes MEMORY.md / USER.md and survives restarts.",
+			"Use this for facts that should persist. Do not use memory_store or memory_semantic_store for that.",
+			"",
+			"Two stores:",
 			"- agent: your personal notes and observations (environment facts, project conventions, tool quirks, things learned)",
 			"- user: what you know about the user (preferences, communication style, expectations, workflow habits)",
 			"",
@@ -244,9 +263,8 @@ func (e *EvolutionExtension) buildSkillManageTool() *agentcore.Tool {
 			"Write clear, actionable instructions. Include examples where helpful.",
 			"Skills are stored in ~/.covo-agent/skills/<name>/SKILL.md.",
 			"",
-			"For sensitive or large changes, prefer the skill_workshop proposal flow:",
-			"create a proposal there and let the user apply it after review; use",
-			"this tool for routine edits and improvements.",
+			"Durable create/edit/patch/delete/write_file/remove_file actions create a pending workshop proposal.",
+			"The user must run /skill apply <id> before the skill becomes live. Do not write SKILL.md yourself.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type":       "object",
@@ -331,74 +349,73 @@ func (e *EvolutionExtension) handleSkillManage(ctx context.Context, args json.Ra
 		if params.Description == "" || params.Body == "" {
 			return nil, fmt.Errorf("description and body are required for create action")
 		}
-		path, err := e.skillMgr.Create(params.Name, params.Description, params.Body)
-		if err != nil {
-			return nil, fmt.Errorf("create skill: %w", err)
-		}
-		return map[string]string{
-			"status": "created",
-			"name":   params.Name,
-			"path":   path,
-		}, nil
+		return e.proposeSkillChange(ProposalCreate, params.Name, params.Body, params.Description)
 
 	case "edit":
 		if params.Body == "" {
 			return nil, fmt.Errorf("body is required for edit action")
 		}
-		if err := e.skillMgr.Edit(params.Name, params.Body); err != nil {
-			return nil, fmt.Errorf("edit skill: %w", err)
-		}
-		return map[string]string{"status": "edited", "name": params.Name}, nil
+		return e.proposeSkillChange(ProposalUpdate, params.Name, params.Body, "edit "+params.Name)
 
 	case "patch":
 		if params.FindStr == "" {
 			return nil, fmt.Errorf("find_str is required for patch action")
 		}
-		if err := e.skillMgr.Patch(params.Name, params.FindStr, params.ReplaceStr); err != nil {
+		content, err := e.skillMgr.Read(params.Name)
+		if err != nil {
 			return nil, fmt.Errorf("patch skill: %w", err)
 		}
-		return map[string]string{"status": "patched", "name": params.Name}, nil
+		if !strings.Contains(content, params.FindStr) {
+			return nil, fmt.Errorf("patch skill: find string not found")
+		}
+		patched := strings.Replace(content, params.FindStr, params.ReplaceStr, 1)
+		_, body, err := ParseSkillFrontmatter(patched)
+		if err != nil {
+			return nil, fmt.Errorf("patch skill: %w", err)
+		}
+		if body == "" {
+			body = patched
+		}
+		return e.proposeSkillChange(ProposalUpdate, params.Name, body, "patch "+params.Name)
 
 	case "improve":
 		if params.ImprovementSummary == "" {
 			return nil, fmt.Errorf("improvement_summary is required for improve action")
 		}
-		var newBody []string
 		if params.Body != "" {
-			newBody = []string{params.Body}
+			return e.proposeSkillChange(ProposalUpdate, params.Name, params.Body, params.ImprovementSummary)
 		}
-		if err := e.skillMgr.RecordImprovement(params.Name, params.ImprovementSummary, newBody...); err != nil {
+		if err := e.skillMgr.RecordImprovement(params.Name, params.ImprovementSummary); err != nil {
 			return nil, fmt.Errorf("improve skill: %w", err)
 		}
 		return map[string]string{"status": "improved", "name": params.Name}, nil
 
 	case "delete":
-		if err := e.skillMgr.Delete(params.Name); err != nil {
-			return nil, fmt.Errorf("delete skill: %w", err)
-		}
-		return map[string]string{"status": "archived", "name": params.Name}, nil
+		return e.proposeSkillChange(ProposalDelete, params.Name, "", "delete "+params.Name)
 
-	case "write_file":
-		if params.RelPath == "" || params.FileContent == "" {
-			return nil, fmt.Errorf("rel_path and file_content are required for write_file action")
-		}
-		if err := e.skillMgr.WriteFile(params.Name, params.RelPath, params.FileContent); err != nil {
-			return nil, fmt.Errorf("write file: %w", err)
-		}
-		return map[string]string{"status": "written", "name": params.Name, "path": params.RelPath}, nil
-
-	case "remove_file":
-		if params.RelPath == "" {
-			return nil, fmt.Errorf("rel_path is required for remove_file action")
-		}
-		if err := e.skillMgr.RemoveFile(params.Name, params.RelPath); err != nil {
-			return nil, fmt.Errorf("remove file: %w", err)
-		}
-		return map[string]string{"status": "removed", "name": params.Name, "path": params.RelPath}, nil
+	case "write_file", "remove_file":
+		return nil, fmt.Errorf("%s cannot write live skills; use skill_workshop to propose supporting-file changes", strings.ToLower(params.Action))
 
 	default:
 		return nil, fmt.Errorf("unknown action %q", params.Action)
 	}
+}
+
+func (e *EvolutionExtension) proposeSkillChange(kind SkillProposalKind, name, body, rationale string) (any, error) {
+	if e.workshop == nil {
+		return nil, fmt.Errorf("skill workshop is not enabled")
+	}
+	prop, err := e.workshop.Create(kind, name, body, rationale)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"status":      "proposed",
+		"proposal_id": prop.ID,
+		"skill_name":  name,
+		"kind":        string(kind),
+		"message":     fmt.Sprintf("Proposal %q created for skill %q. Run /skill apply %s before it becomes live.", prop.ID, name, prop.ID),
+	}, nil
 }
 
 func (e *EvolutionExtension) buildSkillBundleTool() *agentcore.Tool {
@@ -602,25 +619,29 @@ func (e *EvolutionExtension) buildSkillConfigTool() *agentcore.Tool {
 				}, nil
 			case "resolve":
 				vars := e.skillMgr.DiscoverSkillConfigVars()
-				values := make(map[string]string)
-				for _, v := range vars {
-					values[v.Key] = v.Default
+				var cfgValues map[string]string
+				if e.skillCfg != nil {
+					cfgValues = e.skillCfg.Get()
 				}
 				return map[string]any{
 					"action": "resolve",
 					"vars":   vars,
-					"values": values,
+					"values": e.skillMgr.ResolveSkillConfigValues(cfgValues),
 				}, nil
 			case "set":
 				if params.Key == "" || params.Value == "" {
 					return nil, fmt.Errorf("key and value are required for set action")
 				}
+				if e.skillCfg == nil {
+					return nil, fmt.Errorf("skill config store is not available")
+				}
+				if err := e.skillCfg.Set(params.Key, params.Value); err != nil {
+					return nil, fmt.Errorf("persist skill config: %w", err)
+				}
 				return map[string]any{
 					"action": "set",
 					"key":    params.Key,
-					"value":  params.Value,
-					"status": "acknowledged",
-					"note":   "To persist this value, add it to config.yaml under: skills.config." + params.Key,
+					"status": "saved",
 				}, nil
 			default:
 				return nil, fmt.Errorf("unknown action: %s", params.Action)

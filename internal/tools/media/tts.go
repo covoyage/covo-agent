@@ -89,12 +89,18 @@ func BuildTtsTool() *agentcore.Tool {
 	}
 }
 
+func EdgeTTSAvailable() bool {
+	if _, err := exec.LookPath("edge-tts"); err == nil {
+		return true
+	}
+	cmd := exec.Command("python3", "-m", "edge_tts", "--version")
+	return cmd.Run() == nil
+}
+
 func ensureEdgeTTS(ctx context.Context) error {
-	// Check if edge-tts is available
 	if _, err := exec.LookPath("edge-tts"); err == nil {
 		return nil
 	}
-	// Try python -m edge_tts
 	cmd := exec.CommandContext(ctx, "python3", "-m", "edge_tts", "--version")
 	if cmd.Run() == nil {
 		return nil

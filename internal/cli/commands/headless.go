@@ -61,6 +61,7 @@ func RunHeadless(opts *headless.Options) {
 	if len(opts.Tools) > 0 || len(opts.DisallowedTools) > 0 {
 		toolNameFilter = headless.NewToolFilter(opts).IsAllowed
 	}
+	skillCfgGet, skillCfgSet := shared.SkillConfigFns(cfg)
 
 	covoAgent, err := agent.NewCovoAgent(agent.CovoAgentConfig{
 		Mode:                     mode,
@@ -80,6 +81,11 @@ func RunHeadless(opts *headless.Options) {
 		AppendSystemPrompt:       opts.AppendSystemPrompt,
 		Auxiliary:                shared.AuxiliaryConfigFromCLI(cfg),
 		AuxiliaryProviderBuilder: cli.ResolveAuxiliaryProviderBuilder(),
+		SkillExtraDirs:           shared.SkillExtraDirs(cfg),
+		SkillDisabled:            shared.SkillDisabled(cfg),
+		SkillConfigGet:           skillCfgGet,
+		SkillConfigSet:           skillCfgSet,
+		LeanTools:                shared.LeanToolsEnabled(cfg),
 	})
 	if err != nil {
 		log.Fatalf("create agent: %v", err)

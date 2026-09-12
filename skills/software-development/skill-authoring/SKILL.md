@@ -16,14 +16,14 @@ metadata:
 
 There are two places a SKILL.md can live:
 
-1. **User-local:** `~/.covo-agent/skills/<maybe-category>/<name>/SKILL.md` — personal, not shared. Created via `skill_manage(action='create')`.
-2. **In-repo (this skill is about this case):** Committed, shipped with the package. Use `write` + `git add`. `skill_manage(action='create')` does NOT target this tree.
+1. **User-local:** `~/.covo-agent/skills/<maybe-category>/<name>/SKILL.md` — personal, not shared. Propose via `skill_manage(action='create')`; the user must run `/skill apply <id>` before it is live.
+2. **In-repo (this skill is about this case):** Committed, shipped with the package. Draft with `write` + `git add` in `skills/<category>/<name>/`. `skill_manage` does NOT target this tree.
 
 ## When to Use
 
 - User asks you to add a skill "in this branch / repo / commit"
 - You're committing a reusable workflow that should ship with covo-agent
-- You're editing an existing skill (use `skill_manage(action='patch')` for small edits, `write` for rewrites)
+- You're proposing a user-local skill change (`skill_manage` create/edit/patch)
 
 ## Required Frontmatter
 
@@ -126,14 +126,14 @@ Pick the closest existing category. Don't invent new top-level categories casual
 
 ## Editing Existing Skills
 
-- **Small fix (typo, added pitfall, tightened trigger):** `skill_manage(action='patch', name=..., old_string=..., new_string=...)` works fine.
-- **Major rewrite:** `write` the whole SKILL.md. `skill_manage(action='edit')` also works but requires supplying the full new content.
-- **Adding supporting files:** `write` to `skills/<category>/<name>/references/<file>.md`, `templates/<file>`, or `scripts/<file>`. `skill_manage(action='write_file')` also works and enforces the references/templates/scripts/assets subdir allowlist.
-- **Always commit** the edit — in-repo skills are source, not runtime state.
+- **In-repo small fix or rewrite:** `write` / `edit` the file under `skills/<category>/<name>/` and commit. Do not use `skill_manage` for the repo tree.
+- **User-local change:** `skill_manage(action='patch'|'edit'|'create')` creates a pending workshop proposal. Tell the user to run `/skill apply <id>`. Do not write `~/.covo-agent/skills/.../SKILL.md` yourself.
+- **Supporting files (in-repo):** `write` to `skills/<category>/<name>/references/<file>.md`, `templates/<file>`, or `scripts/<file>`.
+- **Always commit** in-repo edits — they are source, not runtime state.
 
 ## Common Pitfalls
 
-1. **Using `skill_manage(action='create')` for an in-repo skill.** It writes to `~/.covo-agent/skills/`, not the repo tree. Use `write` for in-repo creation.
+1. **Using `skill_manage(action='create')` for an in-repo skill.** It proposes a user-local skill under `~/.covo-agent/skills/`, not the repo tree. Use `write` for in-repo creation.
 
 2. **Leading whitespace before `---`.** The validator checks `content.startswith("---")`; any leading blank line or BOM fails validation.
 

@@ -686,6 +686,7 @@ func (ca *CovoAgent) chainAfterToolCall() func(
 		ca.lspAfterToolCall(),
 		ca.autoFormatAfterToolCall(),
 		ca.guardrailWarningAfterToolCall(),
+		ca.compactExecAfterToolCall(),
 		ca.persistLargeResultAfterToolCall(),
 		ca.untrustedWrapAfterToolCall(),
 		ca.claudeHooksPostToolUse(),
