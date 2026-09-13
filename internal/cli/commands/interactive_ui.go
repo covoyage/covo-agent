@@ -179,6 +179,7 @@ func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core
 		ShowTurns:                 true,
 		AltScreen:                 true,
 		Scrollback:                s.historyMode == "scrollback",
+		InputRail:                 true,
 		ProbeTerminal:             true,
 		EditorPlaceholder:         i18n.T("app.composer_placeholder"),
 		EditorStartingPlaceholder: i18n.T("system.starting"),
