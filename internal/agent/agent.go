@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -97,6 +97,7 @@ type CovoAgent struct {
 	backgroundReviewer      *BackgroundReviewer
 	promptBuilder           *PromptBuilder
 	sessionMgr              *session.Manager
+	subagentViews           *SubagentViewRegistry
 	agentTools              *agenttools.Extension
 	toolsetFilter           *toolset.ToolsetFilter
 	providerName            string
@@ -152,21 +153,26 @@ type CovoAgent struct {
 }
 
 type CovoAgentConfig struct {
-	Mode                AgentMode
-	Provider            agentcore.Provider
-	ProviderName        string
-	Model               string
-	WorkingDir          string
-	HomeDir             string
-	Platform            string
-	Logger              *slog.Logger
-	CuratorCfg          evolution.CuratorConfig
-	CredentialPool      *CredentialPool
-	MaxIterations       int64
-	SubMaxIterations    int64
-	LifecycleHooks      []agentcore.LifecycleHook
-	GitWorktree         *GitWorktree
-	SpawnRunner         toolssubagent.SpawnRunner
+	Mode             AgentMode
+	Provider         agentcore.Provider
+	ProviderName     string
+	Model            string
+	WorkingDir       string
+	HomeDir          string
+	Platform         string
+	Logger           *slog.Logger
+	CuratorCfg       evolution.CuratorConfig
+	CredentialPool   *CredentialPool
+	MaxIterations    int64
+	SubMaxIterations int64
+	LifecycleHooks   []agentcore.LifecycleHook
+	GitWorktree      *GitWorktree
+	SpawnRunner      toolssubagent.SpawnRunner
+	// SpawnNotifyFunc is invoked when a background subagent spawned by this
+	// agent completes (success or failure). Interactive sessions use it to
+	// wake the parent conversation (steer mid-run / start a turn); nil keeps
+	// the inbox-only behavior.
+	SpawnNotifyFunc     toolssubagent.SpawnCompleteFunc
 	MemoryProviderName  string
 	ProviderMiddlewares []ProviderMiddleware
 	ExecutionMode       string
@@ -179,6 +185,15 @@ type CovoAgentConfig struct {
 	ThinkingCfg         *agentcore.ThinkingConfig
 	ShowReasoning       bool  // display thinking blocks
 	ModelContextLength  int64 // model's context window size
+
+	// MaxTurns bounds the agent's per-run turn loop. 0 (default) means
+	// effectively unlimited, matching the main loop; subagent spawns pass an
+	// explicit budget only when the model sets max_turns on the tool call.
+	MaxTurns int
+	// SubagentViews shares a sub-agent view registry across generations:
+	// when set (parents pass their own), grandchildren register into the
+	// same registry so the TUI dashboard shows the whole tree.
+	SubagentViews *SubagentViewRegistry
 
 	// FrequencyPenalty / PresencePenalty reduce the model's tendency to
 	// stream the same text over and over (degeneration/repetition loops).
@@ -501,6 +516,13 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	var parentRolloutID string
 	var parentRecorder *rollout.Recorder
 
+	// Subagent view registry: powers the TUI's live subagent transcript views.
+	// Parents share theirs with children so the dashboard shows all generations.
+	subagentViews := cfg.SubagentViews
+	if subagentViews == nil {
+		subagentViews = NewSubagentViewRegistry()
+	}
+
 	// Default SpawnRunner: creates a child agentcore.Agent with restricted toolsets
 	spawnRunner := cfg.SpawnRunner
 	if spawnRunner == nil {
@@ -554,6 +576,10 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 				CredentialPool:  childCredPool,
 				ToolsetOverride: toolsetNames,
 				GitWorktree:     childWorktree,
+				// 0 (max_turns omitted) resolves to unbounded, same as the
+				// main loop; an explicit budget is honored verbatim.
+				MaxTurns:      maxTurns,
+				SubagentViews: subagentViews,
 				// Inherit auxiliary config from parent so spawned children
 				// use the same auxiliary models for title/review/judge tasks.
 				Auxiliary:                cfg.Auxiliary,
@@ -614,16 +640,42 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 			// does not have) and system messages would duplicate the child's
 			// own system prompt.
 			if parentMsgs := toolssubagent.ParentMessagesFromContext(ctx); len(parentMsgs) > 0 {
-				for _, msg := range filterInjectableParentMessages(parentMsgs) {
+				injectable := filterInjectableParentMessages(parentMsgs)
+				// "turns:N" context mode: keep only the most recent N
+				// injectable parent messages.
+				if n := toolssubagent.ParentMessageTurnsFromContext(ctx); n > 0 && len(injectable) > n {
+					injectable = injectable[len(injectable)-n:]
+				}
+				for _, msg := range injectable {
 					child.Core().State().AddMessage(msg)
 				}
 			}
 
 			_ = child.Core().Config()
+			viewID := toolssubagent.SubagentViewRefFromContext(childCtx)
+			subagentViews.RegisterWithID(viewID, task, toolssubagent.SubagentDepthFromContext(ctx)+1,
+				func() []agentcore.Message { return child.Core().State().Messages() })
+			// Guarantee the view status flips even if the child run panics —
+			// a leaked "running" entry would keep the footer strip alive
+			// forever.
+			defer func() {
+				if r := recover(); r != nil {
+					subagentViews.MarkFinished(viewID, "failed")
+					panic(r)
+				}
+			}()
 			subagentResult, err = child.core.Run(childCtx, task)
 			if err != nil {
+				// A manual interrupt cancels the child context — report the
+				// view status as interrupted, not failed.
+				if errors.Is(err, context.Canceled) {
+					subagentViews.MarkFinished(viewID, "interrupted")
+				} else {
+					subagentViews.MarkFinished(viewID, "failed")
+				}
 				return "", fmt.Errorf("spawn: child run: %w", err)
 			}
+			subagentViews.MarkFinished(viewID, "completed")
 			return subagentResult, nil
 		}
 	}
@@ -634,6 +686,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 		HandoffCallback:   stdinHandoffCallback,
 		Sandbox:           sb,
 		SpawnRunner:       spawnRunner,
+		SpawnNotifyFunc:   cfg.SpawnNotifyFunc,
 		ToolProfile:       cfg.ToolProfile,
 		WorkDir:           cfg.WorkingDir,
 		WebFetchTransport: NewSafeClient().Transport,
@@ -651,6 +704,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 		baseCfg:          cfg,
 		mode:             cfg.Mode,
 		homeDir:          cfg.HomeDir,
+		subagentViews:    subagentViews,
 		memory:           memory,
 		skillMgr:         skillMgr,
 		bundleMgr:        bundleMgr,
@@ -995,6 +1049,15 @@ func (ca *CovoAgent) wrapContextEngine(cfg CovoAgentConfig) {
 	}
 }
 
+// turnBudget resolves the per-run turn limit. 0 (unset) means effectively
+// unlimited, matching the main loop; an explicit value bounds the run.
+func turnBudget(maxTurns int) int64 {
+	if maxTurns > 0 {
+		return int64(maxTurns)
+	}
+	return math.MaxInt64
+}
+
 func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 	logger := cfg.Logger
 	if logger == nil {
@@ -1226,7 +1289,7 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		ExecutionConfig: agentcore.ExecutionConfig{
 			ExecutionMode:      execMode,
 			Concurrency:        concurrency,
-			MaxTurns:           math.MaxInt64, // effectively no limit
+			MaxTurns:           turnBudget(cfg.MaxTurns),
 			ValidateArguments:  true,
 			ArgumentRepairFunc: RepairToolCallArguments,
 			SteeringMode:       agentcore.SteeringAll,

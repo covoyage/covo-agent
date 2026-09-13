@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -57,22 +58,65 @@ func (s *SpawnStore) Get(id string) (*SpawnResult, bool) {
 	return r, ok
 }
 
+// flexBool accepts JSON booleans and their stringified forms ("true",
+// "false", "1", "0") — models frequently stringify flag arguments, and a
+// strict unmarshal would fail the whole spawn for a cosmetic type mismatch.
+type flexBool bool
+
+func (b *flexBool) UnmarshalJSON(data []byte) error {
+	v := strings.Trim(strings.TrimSpace(string(data)), `"`)
+	switch v {
+	case "true", "1":
+		*b = true
+	case "false", "0", "null", "":
+		*b = false
+	default:
+		return fmt.Errorf("invalid boolean value %q", v)
+	}
+	return nil
+}
+
+// flexInt accepts JSON numbers and numeric strings ("10") for the same
+// reason as flexBool.
+type flexInt int
+
+func (i *flexInt) UnmarshalJSON(data []byte) error {
+	v := strings.Trim(strings.TrimSpace(string(data)), `"`)
+	if v == "" || v == "null" {
+		*i = 0
+		return nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fmt.Errorf("invalid integer value %q", v)
+	}
+	*i = flexInt(n)
+	return nil
+}
+
 func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, parentToolsets func() []string, parentMessages func() []agentcore.Message, registry *SubagentRegistry, onComplete SpawnCompleteFunc) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "sessions_spawn",
 		Description: strings.Join([]string{
-			"Spawn a child agent session to execute a subtask autonomously.",
-			"The child agent runs with a scoped subset of tools and returns the result.",
+			"Spawn a child agent session that works on a subtask independently and reports back.",
 			"",
-			"Use this for:",
-			"- Parallel independent subtasks",
-			"- Isolated operations that shouldn't pollute the main conversation",
-			"- Long-running searches or analysis",
+			buildSpawnRoster(subagentRunner),
 			"",
-			"By default spawn blocks until the child finishes. Set background=true to return",
-			"immediately with a child id, then call sessions_yield to end the turn.",
-			"",
-			"The child inherits a filtered subset of the parent's tools (no clarify, no nested spawn).",
+			"Usage notes:",
+			"- When the child is done, its result is returned in the tool result (for background",
+			"  spawns, retrieve it with sessions_wait). You MUST incorporate the results into your",
+			"  work based on the requirements BEFORE concluding.",
+			"- background: defaults to TRUE — the call returns immediately with a child id and",
+			"  the child runs concurrently with your work; results are delivered to you on",
+			"  completion. Set background=false only to block until one child finishes.",
+			"- Subagents receive the project's AGENTS.md. If the task depends on specific conventions",
+			"  (build rules, testing patterns, output formats), include them directly in the task.",
+			"- Children start without this conversation (context_mode 'isolated'): give absolute",
+			"  paths, the exact question to answer, and the expected report format. Never refer to",
+			"  \"as discussed above\" inside a child task.",
+			"- The child inherits a filtered subset of the parent's tools: no clarify, and — unless",
+			"  role='orchestrator' — the whole delegation family (spawn/wait/fork/close/steer tools)",
+			"  is physically removed, so leaf children cannot delegate further.",
 			"",
 			"Context modes:",
 			"- 'isolated' (default): child gets no parent context — clean slate.",
@@ -86,8 +130,11 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 			"    Overrides toolsets when set. 'read-only'=filesystem/search/git/web; 'read-write'=+editing;",
 			"    'execute'=+shell; 'all'=inherit everything from parent (default).",
 			"- toolsets: Explicit toolset names (overrides capability_mode).",
-			"- max_turns: Maximum turns for the child (default: 10).",
-			"- context_mode: 'isolated' (default), 'state', or 'full'.",
+			"- max_turns: Optional turn budget for the child. Omit for no limit — the child runs",
+			"    until it judges the task complete (guardrails still apply). Set it only to bound",
+			"    cost on well-scoped tasks.",
+			"- context_mode: 'isolated' (default), 'state', 'full', or 'turns:N' (inherit only the",
+			"    most recent N parent messages, e.g. 'turns:5').",
 			"- role: 'leaf' (default, cannot delegate) or 'orchestrator' (can further spawn children).",
 			"- persona: name or comma-separated names of behavior overlays (e.g. 'reviewer', 'concise,debugger').",
 			"    Injects tone/format/focus guidance as a system-reminder. Use 'list' to see available personas.",
@@ -116,12 +163,12 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 				},
 				"max_turns": map[string]any{
 					"type":        "integer",
-					"description": "Maximum turns for the child agent (default: 10).",
+					"description": "Optional turn budget for the child. Omit for no limit — the child runs until it judges the task complete. Set only to bound cost.",
 				},
 				"context_mode": map[string]any{
 					"type":        "string",
-					"description": "Context isolation mode: 'isolated' (default, no parent context), 'state' (compact checkpoint summary of parent), or 'full' (inherits parent messages).",
-					"enum":        []string{"isolated", "state", "full"},
+					"description": "Context mode: 'isolated' (default, no parent context), 'state' (compact checkpoint summary of parent), 'full' (inherits parent messages), or 'turns:N' (inherits only the most recent N parent messages, e.g. 'turns:5').",
+					"enum":        []string{"isolated", "state", "full", "turns:N"},
 				},
 				"role": map[string]any{
 					"type":        "string",
@@ -154,17 +201,17 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 		},
 		Func: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var params struct {
-				Task           string   `json:"task"`
-				Toolsets       []string `json:"toolsets"`
-				CapabilityMode string   `json:"capability_mode"`
-				MaxTurns       int      `json:"max_turns"`
-				ContextMode    string   `json:"context_mode"`
-				Role           string   `json:"role"`
-				Background     bool     `json:"background"`
-				Persona        string   `json:"persona"`
-				Provider       string   `json:"provider"`
-				Model          string   `json:"model"`
-				Isolation      string   `json:"isolation"`
+				Task           string    `json:"task"`
+				Toolsets       []string  `json:"toolsets"`
+				CapabilityMode string    `json:"capability_mode"`
+				MaxTurns       flexInt   `json:"max_turns"`
+				ContextMode    string    `json:"context_mode"`
+				Role           string    `json:"role"`
+				Background     *flexBool `json:"background"`
+				Persona        string    `json:"persona"`
+				Provider       string    `json:"provider"`
+				Model          string    `json:"model"`
+				Isolation      string    `json:"isolation"`
 			}
 			if err := json.Unmarshal(args, &params); err != nil {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
@@ -173,12 +220,12 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 			if strings.TrimSpace(params.Task) == "" {
 				return nil, fmt.Errorf("task is required")
 			}
-			if params.MaxTurns <= 0 {
-				params.MaxTurns = 10
-			}
-			if params.ContextMode == "" {
-				params.ContextMode = "isolated"
-			}
+			// background defaults to TRUE (grok-style): spawns return
+			// immediately and children run concurrently — sequential tool
+			// calls must not serialize children. Explicit false blocks.
+			background := params.Background == nil || bool(*params.Background)
+			// MaxTurns <= 0 means "no turn budget" — passed through as-is;
+			// the child runs until it judges the task complete.
 			if params.Role == "" {
 				params.Role = "leaf"
 			}
@@ -191,33 +238,49 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 			// 'isolated': child gets no parent context (default).
 			// 'state': child gets a compact checkpoint summary prepended to the task.
 			// 'full': child inherits parent's full messages via context.
+			// 'turns:N': child inherits only the most recent N injectable parent messages.
+			mode, turnsN, err := normalizeContextMode(params.ContextMode)
+			if err != nil {
+				return nil, err
+			}
 			task := params.Task
 
 			// --- Persona injection ---
 			// If a persona is specified, resolve it (or the chain) and inject
 			// the system-reminder text into the task description.
+			var personaWarnings []string
+			applyPersonaWarnings := func(out map[string]any) map[string]any {
+				if len(personaWarnings) > 0 {
+					out["persona_warnings"] = personaWarnings
+				}
+				return out
+			}
 			if params.Persona != "" {
 				names := strings.Split(params.Persona, ",")
-				chain, err := ResolvePersonaChain(names)
+				chain, warnings, err := ResolvePersonaChainLenient(names)
 				if err != nil {
 					return nil, fmt.Errorf("persona: %w", err)
 				}
+				personaWarnings = warnings
 				reminder := FormatPersonaChainReminder(chain)
 				if reminder != "" {
 					task = reminder + "\n\n---\n## Your Task\n" + task
 				}
 			}
 
-			switch params.ContextMode {
+			switch mode {
 			case "state":
 				if parentMessages != nil {
 					if summary := SummarizeParentState(parentMessages()); summary != "" {
 						task = summary + "\n\n---\n## Your Task\n" + params.Task
 					}
 				}
-			case "full":
+			case "full", "turns":
 				if parentMessages != nil {
 					ctx = WithParentMessages(ctx, parentMessages())
+					if turnsN > 0 {
+						ctx = WithParentMessageTurns(ctx, turnsN)
+					}
 				}
 			}
 
@@ -256,20 +319,18 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 				)
 			}
 
-			// Ensure sessions_spawn is not available to leaf children
+			// Physically strip the delegation tool family from leaf children:
+			// recursive spawn/steer/close tools are removed from the child's
+			// toolset override, so a leaf cannot delegate even if it tries.
 			if !orchestrator {
-				var safeToolsets []string
-				for _, ts := range childToolsets {
-					if ts != "delegation" {
-						safeToolsets = append(safeToolsets, ts)
-					}
-				}
-				childToolsets = safeToolsets
+				childToolsets = StripDelegationTools(childToolsets)
 			}
-			if params.Background {
-				if registry == nil {
-					return nil, fmt.Errorf("sessions_spawn: background requires a subagent registry")
-				}
+			if background && registry == nil {
+				// No registry (headless/test contexts): fall back to a
+				// blocking run rather than failing the spawn.
+				background = false
+			}
+			if background {
 				if runner == nil {
 					return nil, fmt.Errorf("sessions_spawn: no runner configured")
 				}
@@ -283,6 +344,9 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 					ctx = WithSubagentIsolation(ctx, params.Isolation)
 				}
 				runCtx, id := registry.StartBackground(ctx, params.Task, currentDepth+1)
+				// Carry the registry id so the spawn runner registers the
+				// transcript view under the same id the tool block shows.
+				runCtx = WithSubagentViewRef(runCtx, id)
 				var timeoutCancel context.CancelFunc
 				if subagentRunner != nil && subagentRunner.cfg.DefaultTimeout > 0 {
 					runCtx, timeoutCancel = context.WithTimeout(runCtx, subagentRunner.cfg.DefaultTimeout)
@@ -294,19 +358,30 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 					if timeoutCancel != nil {
 						defer timeoutCancel()
 					}
-					output, err := runner(runCtx, spawnTask, spawnToolsets, maxTurns)
+					// Panic-safe completion: a child runner panic must not
+					// leak a "running" registry entry or skip the completion
+					// notification.
+					defer func() {
+						if r := recover(); r != nil {
+							registry.Complete(id, true)
+							if onComplete != nil {
+								onComplete(id, params.Task, "", fmt.Errorf("subagent panicked: %v", r))
+							}
+						}
+					}()
+					output, err := runner(runCtx, spawnTask, spawnToolsets, int(maxTurns))
 					registry.Complete(id, err != nil)
 					if onComplete != nil {
 						onComplete(id, params.Task, output, err)
 					}
 				}, nil)
-				return map[string]any{
+				return applyPersonaWarnings(map[string]any{
 					"status":   "started",
 					"id":       id,
 					"task":     params.Task,
 					"toolsets": childToolsets,
 					"role":     params.Role,
-				}, nil
+				}), nil
 			}
 
 			// Run through SubagentRunner if configured (adds timeout, heartbeat, diagnostics)
@@ -328,7 +403,7 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 					Goal:         params.Task,
 					Orchestrator: orchestrator,
 					Depth:        currentDepth + 1,
-					MaxTurns:     params.MaxTurns,
+					MaxTurns:     int(params.MaxTurns),
 				})
 				if err != nil {
 					return map[string]any{
@@ -339,19 +414,19 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 						"role":     params.Role,
 					}, nil
 				}
-				return map[string]any{
+				return applyPersonaWarnings(map[string]any{
 					"status":   "completed",
 					"output":   output,
 					"toolsets": childToolsets,
 					"task":     params.Task,
 					"role":     params.Role,
-				}, nil
+				}), nil
 			}
 
 			// Fallback: raw SpawnRunner without safety wrapper
 			var safeToolsets []string
 			for _, ts := range childToolsets {
-				if ts != "delegation" {
+				if ts != "clarify" {
 					safeToolsets = append(safeToolsets, ts)
 				}
 			}
@@ -359,21 +434,59 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 				ctx = WithSubagentIsolation(ctx, params.Isolation)
 			}
 
-			output, err := runner(ctx, task, safeToolsets, params.MaxTurns)
+			output, err := runner(ctx, task, safeToolsets, int(params.MaxTurns))
 			if err != nil {
-				return map[string]any{
+				return applyPersonaWarnings(map[string]any{
 					"status": "error",
 					"error":  err.Error(),
 					"task":   params.Task,
-				}, nil
+				}), nil
 			}
 
-			return map[string]any{
+			return applyPersonaWarnings(map[string]any{
 				"status":   "completed",
 				"output":   output,
 				"toolsets": safeToolsets,
 				"task":     params.Task,
-			}, nil
+			}), nil
 		},
 	}
+}
+
+// buildSpawnRoster renders the live delegation roster into the tool
+// description: available personas and roles, spawn depth, and timeout. The
+// tool is rebuilt with each agent instance, so the roster reflects what is
+// actually spawnable ("visible == callable") instead of a static guess.
+func buildSpawnRoster(subagentRunner *SubagentRunner) string {
+	var b strings.Builder
+	b.WriteString("Roster for this session:")
+
+	var personas []string
+	for _, p := range ListPersonas() {
+		personas = append(personas, p.Name)
+	}
+	if len(personas) > 0 {
+		b.WriteString("\n- Personas (persona param): " + strings.Join(personas, ", "))
+	}
+
+	var roles []string
+	for _, r := range GetRoles() {
+		roles = append(roles, r.Name)
+	}
+	if len(roles) > 0 {
+		b.WriteString("\n- Preset roles (persona param, set toolsets): " + strings.Join(roles, ", "))
+	}
+
+	if subagentRunner != nil && subagentRunner.cfg.MaxSpawnDepth > 0 {
+		b.WriteString(fmt.Sprintf("\n- Max spawn depth: %d (delegation tools are physically removed from children at or beyond this depth)",
+			subagentRunner.cfg.MaxSpawnDepth))
+	} else {
+		b.WriteString("\n- Max spawn depth: 0 (flat — delegation tools are physically removed from all children)")
+	}
+	if subagentRunner != nil && subagentRunner.cfg.DefaultTimeout > 0 {
+		b.WriteString(fmt.Sprintf("\n- Per-child timeout: %s (a foreground wait that exceeds it moves the child to the background)",
+			subagentRunner.cfg.DefaultTimeout))
+	}
+
+	return b.String()
 }

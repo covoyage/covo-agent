@@ -29,8 +29,15 @@ type HotkeyRouterConfig struct {
 	OpenHistorySearch  func()
 	OpenDashboard      func()
 	ToggleVerbose      func()
-	Suggestions        *SuggestionsManager
-	QuitWindow         time.Duration
+	// SubagentPrev/Next cycle the TUI into the previous/next spawned
+	// sub-agent's transcript view (codex-style fast-switch).
+	SubagentPrev func()
+	SubagentNext func()
+	// AllowSubagentSwitch guards the switch: when set and returning false
+	// (e.g. the composer has a draft), the shortcut is ignored.
+	AllowSubagentSwitch func() bool
+	Suggestions         *SuggestionsManager
+	QuitWindow          time.Duration
 }
 
 // HotkeyRouter dispatches application-level keyboard shortcuts.
@@ -85,6 +92,14 @@ func (router *HotkeyRouter) HandleInput(data string) {
 		invoke(router.config.OpenSettings)
 	case terminal.MatchesKey(data, "ctrl+shift+p"):
 		invoke(router.config.OpenPromptQueue)
+	case terminal.MatchesKey(data, "alt+left"):
+		if router.allowSubagentSwitch() {
+			invoke(router.config.SubagentPrev)
+		}
+	case terminal.MatchesKey(data, "alt+right"):
+		if router.allowSubagentSwitch() {
+			invoke(router.config.SubagentNext)
+		}
 	default:
 		if router.config.Suggestions != nil && router.config.Suggestions.HasActive() {
 			router.config.Suggestions.HandleHotkey(data)
@@ -118,6 +133,10 @@ func (router *HotkeyRouter) handleQuit() {
 	if router.config.PrintSystem != nil {
 		router.config.PrintSystem(i18n.T("helpers.quit_confirm"))
 	}
+}
+
+func (router *HotkeyRouter) allowSubagentSwitch() bool {
+	return router.config.AllowSubagentSwitch == nil || router.config.AllowSubagentSwitch()
 }
 
 func invoke(callback func()) {

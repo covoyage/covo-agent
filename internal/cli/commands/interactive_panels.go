@@ -270,12 +270,13 @@ func (s *interactiveSession) openDashboard() {
 	if s.app == nil {
 		return
 	}
-	data := s.dashboardData()
 	var ov chat.OverlayRef
 	closeOverlay := func() {
 		loadUIBus().ClosePanel(ov)
 	}
-	picker := agentui.NewDashboardPicker(data, func(item agentui.PickerItem) {
+	picker := agentui.NewDashboardOverlay(func() agentui.DashboardData {
+		return s.dashboardData()
+	}, func(item agentui.PickerItem) {
 		closeOverlay()
 		s.runDashboardItem(item)
 	}, closeOverlay)
@@ -325,12 +326,27 @@ func (s *interactiveSession) dashboardData() agentui.DashboardData {
 			})
 		}
 	}
+	if mgr != nil {
+		for _, entry := range mgr.SubagentViews().List() {
+			data.Subagents = append(data.Subagents, agentui.DashboardSubagent{
+				ID:        entry.ID(),
+				Task:      entry.Task(),
+				Status:    entry.Status(),
+				Depth:     entry.Depth(),
+				StartedAt: entry.StartedAt(),
+				EndedAt:   entry.EndedAt(),
+				Live:      entry.Live(),
+			})
+		}
+	}
 	return data
 }
 
 func (s *interactiveSession) runDashboardItem(item agentui.PickerItem) {
 	value := item.Value
 	switch {
+	case strings.HasPrefix(value, "subagent:"):
+		s.openSubagentView(strings.TrimPrefix(value, "subagent:"))
 	case strings.HasPrefix(value, "session:"):
 		sessionID := strings.TrimPrefix(value, "session:")
 		mgr := s.agentRuntime.Current()
@@ -422,11 +438,19 @@ func (s *interactiveSession) installHotkeyRouter() {
 		OpenHistorySearch:  s.openHistorySearch,
 		OpenDashboard:      s.openDashboard,
 		OpenKeyHelp:        s.openKeyHelp,
-		OpenModelPicker:    s.openModelPicker,
-		OpenEditor:         s.openExternalEditorPanel,
-		OpenChangedFiles:   func() { openChangedFilesPanel(s.changedFiles, s.workingDir) },
-		OpenSettings:       s.openSettings,
-		OpenPromptQueue:    s.showPromptQueue,
+		SubagentPrev:       func() { s.cycleSubagentView(-1) },
+		SubagentNext:       func() { s.cycleSubagentView(1) },
+		AllowSubagentSwitch: func() bool {
+			// codex-style guard: never steal alt+arrows while the composer
+			// holds a draft.
+			ed := loadUIBus().Editor()
+			return ed == nil || ed.GetValue() == ""
+		},
+		OpenModelPicker:  s.openModelPicker,
+		OpenEditor:       s.openExternalEditorPanel,
+		OpenChangedFiles: func() { openChangedFilesPanel(s.changedFiles, s.workingDir) },
+		OpenSettings:     s.openSettings,
+		OpenPromptQueue:  s.showPromptQueue,
 		ToggleVerbose: func() {
 			s.app.History().ToggleVerbose()
 			s.app.PrintSystem(i18n.T("system.verbose_set", "level", s.app.History().VerboseLevel()))

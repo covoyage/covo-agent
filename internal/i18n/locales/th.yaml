@@ -12,7 +12,6 @@ app:
 statusline:
   mode_general: ทั่วไป
   mode_code: โค้ด
-  bg_tasks: ⚙ {count} พื้นหลัง
   tokens: 'โทเค็น: {count}'
   shortcuts: ctrl+/ ช่วยเหลือ  ctrl+t งาน  ctrl+o เซสชัน  ctrl+k ทักษะ
 approval:

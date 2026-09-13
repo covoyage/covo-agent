@@ -11,7 +11,6 @@ app:
 statusline:
   mode_general: 일반
   mode_code: 코드
-  bg_tasks: ⚙ {count} 백그라운드
   tokens: 'tokens: {count}'
   shortcuts: ctrl+/ 도움말  ctrl+t 할일  ctrl+o 세션  ctrl+k 스킬
 approval:

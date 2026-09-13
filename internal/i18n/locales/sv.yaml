@@ -13,7 +13,6 @@ app:
 statusline:
   mode_general: Allmän
   mode_code: Kod
-  bg_tasks: ⚙ {count} bakgrund
   tokens: 'token: {count}'
   shortcuts: ctrl+/ hjälp  ctrl+t uppgifter  ctrl+o sessioner  ctrl+k färdigheter
 approval:

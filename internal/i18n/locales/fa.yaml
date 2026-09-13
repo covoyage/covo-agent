@@ -13,7 +13,6 @@ app:
 statusline:
   mode_general: عمومی
   mode_code: کد
-  bg_tasks: ⚙ {count} پس‌زمینه
   tokens: 'توکن: {count}'
   shortcuts: ctrl+/ راهنما  ctrl+t وظایف  ctrl+o جلسات  ctrl+k مهارت‌ها
 approval:

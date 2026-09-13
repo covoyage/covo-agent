@@ -206,11 +206,14 @@ func (r *SubagentRegistry) Complete(id string, failed bool) {
 	run.EndedAt = &now
 	status := "completed"
 	if failed {
-		run.Status = "failed"
 		status = "failed"
-	} else {
-		run.Status = "completed"
 	}
+	// An explicit interrupt already set a terminal state; do not downgrade
+	// it to completed/failed when the cancelled run reports back later.
+	if run.Status == "interrupted" {
+		status = "interrupted"
+	}
+	run.Status = status
 	// Persist final state.
 	if r.store != nil {
 		_ = r.store.MarkCompleted(id, status, "")

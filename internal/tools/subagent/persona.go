@@ -217,7 +217,18 @@ func FormatPersonaChainReminder(chain PersonaChain) string {
 // ResolvePersonaChain resolves a list of persona names into a PersonaChain.
 // Returns an error if any persona name is not found.
 func ResolvePersonaChain(names []string) (PersonaChain, error) {
+	chain, _, err := ResolvePersonaChainLenient(names)
+	return chain, err
+}
+
+// ResolvePersonaChainLenient resolves a persona name list with soft
+// degradation: unknown names are skipped and reported as warnings instead of
+// failing the whole spawn — personas are behavior overlays, and an invented
+// name should not abort the child. The warning text lists the available
+// personas so the model can self-correct on the next call.
+func ResolvePersonaChainLenient(names []string) (PersonaChain, []string, error) {
 	var chain PersonaChain
+	var warnings []string
 	for _, name := range names {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -225,11 +236,23 @@ func ResolvePersonaChain(names []string) (PersonaChain, error) {
 		}
 		p, ok := GetPersona(name)
 		if !ok {
-			return PersonaChain{}, fmt.Errorf("persona %q not found", name)
+			warnings = append(warnings, fmt.Sprintf(
+				"persona %q not found, spawned without it (available: %s)",
+				name, strings.Join(PersonaNames(), ", ")))
+			continue
 		}
 		chain.Personas = append(chain.Personas, p)
 	}
-	return chain, nil
+	return chain, warnings, nil
+}
+
+// PersonaNames returns the registered persona names in registration order.
+func PersonaNames() []string {
+	var out []string
+	for _, p := range ListPersonas() {
+		out = append(out, p.Name)
+	}
+	return out
 }
 
 // ValidatePersonaChain checks IO contract compatibility between consecutive

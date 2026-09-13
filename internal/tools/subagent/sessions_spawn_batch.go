@@ -18,11 +18,11 @@ type BatchTask struct {
 	Task           string   `json:"task"`
 	Toolsets       []string `json:"toolsets,omitempty"`
 	CapabilityMode string   `json:"capability_mode,omitempty"` // read-only, read-write, execute, all
-	MaxTurns       int      `json:"max_turns,omitempty"`
+	MaxTurns       flexInt  `json:"max_turns,omitempty"`
 	Role           string   `json:"role,omitempty"`         // "leaf" or "orchestrator"
 	Provider       string   `json:"provider,omitempty"`     // override LLM provider
 	Model          string   `json:"model,omitempty"`        // override model
-	ContextMode    string   `json:"context_mode,omitempty"` // "isolated" (default), "state", "full"
+	ContextMode    string   `json:"context_mode,omitempty"` // "isolated" (default), "state", "full", "turns:N"
 }
 
 // BatchResult holds the result of one task in a batch spawn.
@@ -42,13 +42,17 @@ func BuildSessionsSpawnBatchTool(runner SpawnRunner, subagentRunner *SubagentRun
 			"Spawn MULTIPLE child agent sessions in PARALLEL to execute independent subtasks.",
 			"Each child runs with a scoped subset of tools and returns its result.",
 			"",
-			"Use this for:",
-			"- Exploring multiple approaches simultaneously",
-			"- Researching several independent topics in parallel",
-			"- Running batch analysis tasks concurrently",
-			"",
-			"The maximum parallelism is 5 by default (configurable via max_parallel).",
-			"Children cannot spawn further sessions unless role='orchestrator'.",
+			"Usage notes:",
+			"- Each child's result is returned keyed by task id. You MUST incorporate the results",
+			"  into your work based on the requirements BEFORE concluding.",
+			"- The maximum parallelism is 5 by default (configurable via max_parallel).",
+			"- Leaf children have the delegation tool family (spawn/wait/fork/close/steer)",
+			"  physically removed — only role='orchestrator' children can delegate further,",
+			"  subject to max_spawn_depth.",
+			"- Each child task must be self-contained (children get no parent context by default):",
+			"  absolute paths, the exact question to answer, and the expected report format.",
+			"- Subagents receive the project's AGENTS.md. If a task depends on specific conventions,",
+			"  include them directly in that task's description.",
 			"",
 			"Each task supports an optional 'role' field:",
 			"  - 'leaf' (default): Cannot delegate further.",
@@ -58,6 +62,7 @@ func BuildSessionsSpawnBatchTool(runner SpawnRunner, subagentRunner *SubagentRun
 			"  - 'isolated' (default): No parent context — clean slate.",
 			"  - 'state': Compact checkpoint summary of parent's recent conversation.",
 			"  - 'full': Inherits the parent's full conversation messages.",
+			"  - 'turns:N': Inherits only the most recent N parent messages (e.g. 'turns:5').",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -88,7 +93,7 @@ func BuildSessionsSpawnBatchTool(runner SpawnRunner, subagentRunner *SubagentRun
 							},
 							"max_turns": map[string]any{
 								"type":        "integer",
-								"description": "Maximum turns for this child agent (default: 10).",
+								"description": "Optional turn budget for this child. Omit for no limit — the child runs until the task is complete. Set only to bound cost.",
 							},
 							"role": map[string]any{
 								"type":        "string",
@@ -105,8 +110,8 @@ func BuildSessionsSpawnBatchTool(runner SpawnRunner, subagentRunner *SubagentRun
 							},
 							"context_mode": map[string]any{
 								"type":        "string",
-								"description": "Context isolation mode: 'isolated' (default, no parent context), 'state' (compact checkpoint summary of parent), or 'full' (inherits parent messages).",
-								"enum":        []string{"isolated", "state", "full"},
+								"description": "Context mode: 'isolated' (default, no parent context), 'state' (compact checkpoint summary of parent), 'full' (inherits parent messages), or 'turns:N' (inherits only the most recent N parent messages, e.g. 'turns:5').",
+								"enum":        []string{"isolated", "state", "full", "turns:N"},
 							},
 						},
 						"required": []string{"id", "task"},
@@ -153,6 +158,9 @@ func BuildSessionsSpawnBatchTool(runner SpawnRunner, subagentRunner *SubagentRun
 				if strings.TrimSpace(t.Task) == "" {
 					return nil, fmt.Errorf("task %q has empty description", t.ID)
 				}
+				if _, _, err := normalizeContextMode(t.ContextMode); err != nil {
+					return nil, fmt.Errorf("task %q: %w", t.ID, err)
+				}
 			}
 
 			// Determine depth and orchestrator settings
@@ -197,40 +205,37 @@ func BuildSessionsSpawnBatchTool(runner SpawnRunner, subagentRunner *SubagentRun
 					}
 
 					if !orchestrator {
-						var safeToolsets []string
-						for _, ts := range childToolsets {
-							if ts != "delegation" {
-								safeToolsets = append(safeToolsets, ts)
-							}
-						}
-						childToolsets = safeToolsets
+						// Physically strip the delegation tool family from
+						// leaf children (see StripDelegationTools).
+						childToolsets = StripDelegationTools(childToolsets)
 					}
 
+					// MaxTurns <= 0 means "no turn budget" — passed through
+					// as-is; the child runs until the task is complete.
 					maxT := t.MaxTurns
-					if maxT <= 0 {
-						maxT = 10
-					}
 
 					// --- Context mode handling ---
 					// 'isolated': child gets no parent context (default).
 					// 'state': child gets a compact checkpoint summary prepended to the task.
 					// 'full': child inherits parent's full messages via context.
+					// 'turns:N': child inherits only the most recent N parent messages.
 					taskText := t.Task
 					childCtx := ctx
-					contextMode := t.ContextMode
-					if contextMode == "" {
-						contextMode = "isolated"
-					}
-					switch contextMode {
+					// Pre-validated in the argument check above.
+					mode, turnsN, _ := normalizeContextMode(t.ContextMode)
+					switch mode {
 					case "state":
 						if parentMessages != nil {
 							if summary := SummarizeParentState(parentMessages()); summary != "" {
 								taskText = summary + "\n\n---\n## Your Task\n" + t.Task
 							}
 						}
-					case "full":
+					case "full", "turns":
 						if parentMessages != nil {
 							childCtx = WithParentMessages(childCtx, parentMessages())
+							if turnsN > 0 {
+								childCtx = WithParentMessageTurns(childCtx, turnsN)
+							}
 						}
 					}
 
@@ -251,10 +256,10 @@ func BuildSessionsSpawnBatchTool(runner SpawnRunner, subagentRunner *SubagentRun
 							ChildCount:   len(params.Tasks),
 							Orchestrator: orchestrator,
 							Depth:        currentDepth + 1,
-							MaxTurns:     maxT,
+							MaxTurns:     int(maxT),
 						})
 					} else {
-						output, runErr = runner(childCtx, taskText, childToolsets, maxT)
+						output, runErr = runner(childCtx, taskText, childToolsets, int(maxT))
 					}
 
 					r := BatchResult{

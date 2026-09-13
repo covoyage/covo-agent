@@ -12,7 +12,6 @@ app:
 statusline:
   mode_general: عام
   mode_code: كود
-  bg_tasks: ⚙ {count} خلفية
   tokens: 'tokens: {count}'
   shortcuts: ctrl+/ مساعدة  ctrl+t مهام  ctrl+o جلسات  ctrl+k مهارات
 approval:

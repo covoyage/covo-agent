@@ -40,6 +40,7 @@ type StickyFooter struct {
 	mu            sync.RWMutex
 	todoStore     func() []TodoItem
 	planStore     func() []PlanItem
+	subagents     func() []FooterSubagent
 	gitBranch     string
 	contextUsed   string
 	contextWarn   bool
@@ -65,6 +66,21 @@ func (footer *StickyFooter) SetPlanStore(store func() []PlanItem) {
 	footer.mu.Lock()
 	footer.planStore = store
 	footer.mu.Unlock()
+}
+
+// SetSubagentsProvider supplies the spawned sub-agent snapshot for the
+// footer's live sub-agent line (grok/hermes-style bottom strip). Return
+// nil/empty to hide the line.
+func (footer *StickyFooter) SetSubagentsProvider(store func() []FooterSubagent) {
+	footer.subagents = store
+}
+
+// FooterSubagent is one sub-agent row in the footer strip.
+type FooterSubagent struct {
+	ID     string
+	Task   string
+	Status string
+	Live   bool
 }
 
 func (footer *StickyFooter) SetGitBranch(branch string) {
@@ -137,6 +153,7 @@ func (footer *StickyFooter) Render(width int64) []string {
 	footer.mu.RLock()
 	todoStore := footer.todoStore
 	planStore := footer.planStore
+	subagents := footer.subagents
 	statusLineManager := footer.statusLineMgr
 	snapshot := FooterSnapshot{
 		GitBranch:     footer.gitBranch,
@@ -162,6 +179,13 @@ func (footer *StickyFooter) Render(width int64) []string {
 		if len(active) > 0 {
 			lines = append(lines, footer.renderTodoLine(active, palette, width))
 		}
+	}
+	var subagentEntries []FooterSubagent
+	if subagents != nil {
+		subagentEntries = subagents()
+	}
+	if line := footer.renderAsyncWorkLine(subagentEntries, snapshot.BgTaskCount, palette, width); line != "" {
+		lines = append(lines, line)
 	}
 	if infoLine := footer.renderInfoLine(palette, width, statusLineManager, snapshot); infoLine != "" {
 		lines = append(lines, infoLine)
@@ -190,6 +214,8 @@ func (footer *StickyFooter) renderPlanLine(items []PlanItem, palette *theme.Pale
 		}
 		label = label + "  " + palette.Accent.Render("◐ "+current)
 	}
+	// Leading space aligns with the status line below.
+	label = " " + label
 	if core.VisibleWidth(label) > width {
 		label = core.TruncateToWidth(label, width, "")
 	}
@@ -206,6 +232,60 @@ func (footer *StickyFooter) renderTodoLine(items []TodoItem, palette *theme.Pale
 		parts = append(parts, fmt.Sprintf("%s%s", todoStatusIcon(item.Status), todoStatusStyle(item.Status, palette).Render(content)))
 	}
 	line := palette.Dim.Render("TODO ") + strings.Join(parts, "  ")
+	// Leading space aligns with the status line below.
+	line = " " + line
+	if core.VisibleWidth(line) > width {
+		line = core.TruncateToWidth(line, width, "")
+	}
+	return core.PadToWidth(line, width)
+}
+
+// renderAsyncWorkLine renders the unified background-work strip (grok-style
+// tasks strip): live spawned sub-agents and background task count share one
+// line, visible only while there is async work. The leading space aligns the
+// strip with the status line below it.
+func (footer *StickyFooter) renderAsyncWorkLine(entries []FooterSubagent, bgCount int, palette *theme.Palette, width int64) string {
+	live := 0
+	latest := ""
+	for _, e := range entries {
+		if !e.Live {
+			continue
+		}
+		live++
+		if latest == "" {
+			latest = SubagentTaskPreview(e.Task, 40)
+		}
+	}
+	if w := int64(core.VisibleWidth(latest)); w > width/3 {
+		latest = core.TruncateToWidth(latest, width/3, "")
+	}
+	if live == 0 && bgCount == 0 {
+		return ""
+	}
+
+	var parts []string
+	if live > 0 {
+		agents := "agents"
+		if live == 1 {
+			agents = "agent"
+		}
+		parts = append(parts, fmt.Sprintf("▸ %d live %s", live, agents))
+	}
+	if bgCount > 0 {
+		bg := "tasks"
+		if bgCount == 1 {
+			bg = "task"
+		}
+		parts = append(parts, fmt.Sprintf("⚙ %d bg %s", bgCount, bg))
+	}
+	switch {
+	case live > 0:
+		parts = append(parts, latest, "alt+←/→")
+	default:
+		parts = append(parts, "/agents")
+	}
+
+	line := " " + palette.Accent.Render(strings.Join(parts, " · "))
 	if core.VisibleWidth(line) > width {
 		line = core.TruncateToWidth(line, width, "")
 	}

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -83,6 +84,7 @@ type Extension struct {
 	workshopStore     *evolution.WorkshopStore
 	skillMgr          *evolution.SkillManager
 	spawnRunner       toolssubagent.SpawnRunner
+	spawnNotify       toolssubagent.SpawnCompleteFunc
 	subagentRunner    *toolssubagent.SubagentRunner
 	handoffCallback   HandoffCallback
 	askUserCallback   AskUserFunc
@@ -106,6 +108,10 @@ type ExtensionConfig struct {
 	HomeDir string
 	// SpawnRunner is the function used to run spawned child sessions.
 	SpawnRunner toolssubagent.SpawnRunner
+	// SpawnNotifyFunc is invoked when a background subagent completes
+	// (success or failure), in addition to the inbox delivery. Interactive
+	// sessions use it to wake the parent conversation; nil is valid.
+	SpawnNotifyFunc toolssubagent.SpawnCompleteFunc
 	// HandoffCallback is the function used to block on user input for human_handoff.
 	HandoffCallback HandoffCallback
 	// AskUserCallback is the function used to present a structured question to
@@ -234,6 +240,7 @@ func NewExtension(cfg ExtensionConfig) *Extension {
 		auditStore:        auditStore,
 		subagentStore:     subagentStore,
 		spawnRunner:       cfg.SpawnRunner,
+		spawnNotify:       cfg.SpawnNotifyFunc,
 		subagentRunner:    subagent,
 		handoffCallback:   cfg.HandoffCallback,
 		askUserCallback:   cfg.AskUserCallback,
@@ -262,7 +269,9 @@ func NewExtension(cfg ExtensionConfig) *Extension {
 		})
 		// Recover orphans from previous process run (non-fatal).
 		if orphaned, err := ext.subagentReg.RecoverOrphaned(); err == nil && len(orphaned) > 0 {
-			logger.Warn("recovered orphaned subagents from previous run", "count", len(orphaned))
+			// Debug, not Warn: the TUI owns the terminal at construction
+			// time, so a stderr Warn lands visibly in the UI.
+			logger.Debug("recovered orphaned subagents from previous run", "count", len(orphaned))
 		}
 	}
 	// Expose hooks for agent loop integration
@@ -342,6 +351,12 @@ func (e *Extension) SetImageAnalyzer(fn toolsmedia.ImageAnalyzer) {
 func (e *Extension) InboxStore() *inbox.Store { return e.inboxStore }
 
 func (e *Extension) onSpawnComplete(childID, task, output string, err error) {
+	// Wake the parent conversation first (interactive sessions steer or start
+	// a turn); the inbox delivery below is the persistent fallback that any
+	// later run drains.
+	if e.spawnNotify != nil {
+		e.spawnNotify(childID, task, output, err)
+	}
 	if e.inboxStore == nil {
 		return
 	}
@@ -355,7 +370,11 @@ func (e *Extension) onSpawnComplete(childID, task, output string, err error) {
 	status := "completed"
 	body := output
 	if err != nil {
-		status = "failed"
+		if errors.Is(err, context.Canceled) {
+			status = "interrupted"
+		} else {
+			status = "failed"
+		}
 		body = err.Error()
 	}
 	if len(body) > 4000 {
@@ -372,6 +391,10 @@ func (e *Extension) AuditStore() *audit.Store { return e.auditStore }
 // SubagentStore returns the persistent subagent store for crash recovery
 // and orphan detection. May be nil if construction failed.
 func (e *Extension) SubagentStore() *toolssubagent.SubagentStore { return e.subagentStore }
+
+// SubagentRegistry returns the live sub-agent run registry (TUI dashboard
+// steer/interrupt integration). Never nil after construction.
+func (e *Extension) SubagentRegistry() *toolssubagent.SubagentRegistry { return e.subagentReg }
 
 // SetAuditStore replaces the default audit store with an externally-provided one.
 func (e *Extension) SetAuditStore(s *audit.Store) {

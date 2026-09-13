@@ -225,6 +225,26 @@ func handleAgents(sctx *SlashContext, parts []string) bool {
 		}
 		b.WriteString(fmt.Sprintf("  foreground [%s] session=%s model=%s\n", status, sessionID, ca.Model()))
 	}
+	// Spawned sub-agents (view registry)
+	if ca != nil && ca.SubagentViews() != nil {
+		entries := ca.SubagentViews().List()
+		if len(entries) > 0 {
+			b.WriteString("  sub-agents:\n")
+			for _, e := range entries {
+				flag := ""
+				if e.Live() {
+					flag = " ●"
+				}
+				task := e.Task()
+				if len([]rune(task)) > 60 {
+					task = string([]rune(task)[:57]) + "..."
+				}
+				b.WriteString(fmt.Sprintf("    %s [%s] depth=%d %s%s\n", e.ID(), e.Status(), e.Depth(), task, flag))
+			}
+			b.WriteString("    (/dashboard → select an agent to open its live view)\n")
+		}
+	}
+
 	if sctx.Services.BackgroundManager == nil {
 		b.WriteString("  background: (unavailable)\n")
 		sctx.UI.App.PrintSystem(b.String())

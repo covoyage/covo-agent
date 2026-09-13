@@ -13,7 +13,6 @@ app:
 statusline:
   mode_general: सामान्य
   mode_code: कोड
-  bg_tasks: ⚙ {count} पृष्ठभूमि
   tokens: 'टोकन: {count}'
   shortcuts: ctrl+/ सहायता  ctrl+t कार्य  ctrl+o सत्र  ctrl+k स्किल
 approval:

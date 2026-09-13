@@ -16,13 +16,11 @@ app:
 statusline:
   mode_general: "通用"
   mode_code: "编码"
-  bg_tasks: "⚙ {count} 后台"
   tokens_io: "tokens: {input} 入 + {output} 出 = {total}"
   tokens: "tokens: {count}"
   shortcuts: "ctrl+/ 說明  ctrl+k 命令面板  tab 排隊  ctrl+s 搜尋"
   tool_calls: "工具调用: {count}"
   mode_desc: "Agent 模式（通用/编码）"
-  bg_desc: "后台任务数"
   git_desc: "当前 Git 分支"
   tokens_desc: "Token 用量"
   shortcuts_desc: "键盘快捷键提示"
@@ -483,6 +481,8 @@ keybinding:
   session: "打开会话選擇器"
   session_tree: "打開會話樹"
   changed_files: "顯示變更檔案樹"
+  subagent_prev: "切換到上一個子代理檢視"
+  subagent_next: "切換到下一個子代理檢視"
   group_app: "應用"
   group_slash: "斜線命令"
   group_editor: "編輯器"
@@ -782,4 +782,3 @@ dashboard:
   cat_sessions: "工作階段"
   no_summary: "（無摘要）"
   task_selected: "背景任務 {id}"
-

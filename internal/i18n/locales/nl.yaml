@@ -13,7 +13,6 @@ app:
 statusline:
   mode_general: Algemeen
   mode_code: Code
-  bg_tasks: ⚙ {count} achtergrond
   tokens: 'tokens: {count}'
   shortcuts: ctrl+/ hulp  ctrl+t taken  ctrl+o sessies  ctrl+k vaardigheden
 approval:

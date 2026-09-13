@@ -274,6 +274,37 @@ func (s *interactiveSession) steerCurrentRun(text string) bool {
 	return true
 }
 
+// onSubagentComplete wakes the parent conversation when a background subagent
+// finishes: mid-run the result is steered into the current turn; when idle a
+// turn is started directly so the result is never left polling in the inbox.
+// Called from the spawn-completion goroutine — submitPrompt is already
+// invoked off the UI thread for queued prompts after each run, so this
+// follows existing practice.
+func (s *interactiveSession) onSubagentComplete(childID, task, output string, err error) {
+	if s.agentRuntime == nil {
+		return
+	}
+	status := "completed"
+	body := output
+	if err != nil {
+		status = "failed"
+		body = err.Error()
+	}
+	text := fmt.Sprintf(
+		"[subagent %s %s] task: %s\nresult:\n%s\n\nIncorporate this result into your work before concluding. If the parent task still has unfinished work, continue it now instead of waiting for further input.",
+		childID, status, shared.Truncate(task, 200), shared.Truncate(body, 4000))
+
+	if s.busy.Load() {
+		if ag := s.agentRuntime.Core(); ag != nil {
+			ag.Steer(agentcore.Message{Role: agentcore.RoleUser, Content: text})
+			loadUIBus().PrintSystem(fmt.Sprintf("↩ subagent %s %s — steered into current run", shared.Truncate(childID, 12), status))
+		}
+		return
+	}
+	loadUIBus().PrintSystem(fmt.Sprintf("↩ subagent %s %s — waking session", shared.Truncate(childID, 12), status))
+	s.submitPrompt(context.Background(), text)
+}
+
 // submitPrompt dispatches a plain prompt to the agent, handling busy-mode
 // (interrupt/queue/steer/collect/block) and context preprocessing first.
 func (s *interactiveSession) submitPrompt(ctx context.Context, trimmed string) {

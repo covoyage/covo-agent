@@ -13,7 +13,6 @@ app:
 statusline:
   mode_general: Загальний
   mode_code: Код
-  bg_tasks: ⚙ {count} фонових
   tokens: 'токенів: {count}'
   shortcuts: ctrl+/ довідка  ctrl+t завдання  ctrl+o сесії  ctrl+k навички
 approval:

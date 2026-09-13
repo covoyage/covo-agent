@@ -13,7 +13,6 @@ app:
 statusline:
   mode_general: Umum
   mode_code: Kode
-  bg_tasks: ⚙ {count} latar
   tokens: 'tokens: {count}'
   shortcuts: ctrl+/ bantuan  ctrl+t tugas  ctrl+o sesi  ctrl+k skill
 approval:

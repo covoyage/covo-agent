@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -229,6 +230,66 @@ func WithParentMessages(ctx context.Context, msgs []agentcore.Message) context.C
 func ParentMessagesFromContext(ctx context.Context) []agentcore.Message {
 	msgs, _ := ctx.Value(ctxKeyParentMessages{}).([]agentcore.Message)
 	return msgs
+}
+
+type ctxKeyParentMessageTurns struct{}
+
+// WithParentMessageTurns limits how many of the parent's most recent
+// injectable messages a "turns:N" context-mode child inherits. 0 = no limit
+// (the "full" behavior). Applied after injectability filtering.
+func WithParentMessageTurns(ctx context.Context, n int) context.Context {
+	return context.WithValue(ctx, ctxKeyParentMessageTurns{}, n)
+}
+
+// ParentMessageTurnsFromContext returns the "turns:N" message limit, or 0.
+func ParentMessageTurnsFromContext(ctx context.Context) int {
+	n, _ := ctx.Value(ctxKeyParentMessageTurns{}).(int)
+	return n
+}
+
+// ctxKeySubagentViewRef carries the background sub-agent's registry id so
+// the spawn runner can register the TUI transcript view under the SAME id
+// the chat-side tool block can reference.
+type ctxKeySubagentViewRef struct{}
+
+// WithSubagentViewRef attaches the sub-agent registry id to the context.
+func WithSubagentViewRef(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, ctxKeySubagentViewRef{}, id)
+}
+
+// SubagentViewRefFromContext returns the attached sub-agent registry id.
+func SubagentViewRefFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(ctxKeySubagentViewRef{}).(string)
+	return id
+}
+
+// maxForkTurns caps the "turns:N" context mode.
+const maxForkTurns = 1000
+
+// normalizeContextMode resolves the context_mode parameter: "isolated",
+// "state", "full", or "turns:N". Returns the canonical mode and, for
+// "turns:N", the parsed message limit.
+func normalizeContextMode(mode string) (string, int, error) {
+	mode = strings.TrimSpace(strings.ToLower(mode))
+	if mode == "" {
+		return "isolated", 0, nil
+	}
+	if strings.HasPrefix(mode, "turns:") {
+		n, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(mode, "turns:")))
+		if err != nil || n <= 0 {
+			return "", 0, fmt.Errorf("context_mode %q: turns:N requires a positive integer", mode)
+		}
+		if n > maxForkTurns {
+			n = maxForkTurns
+		}
+		return "turns", n, nil
+	}
+	switch mode {
+	case "isolated", "state", "full":
+		return mode, 0, nil
+	default:
+		return "", 0, fmt.Errorf("unknown context_mode %q (use isolated, state, full, or turns:N)", mode)
+	}
 }
 
 // SummarizeParentState generates a compact checkpoint summary from the
@@ -807,8 +868,10 @@ func (sr *SubagentRunner) writeDiagnostic(goal, task string, toolsets []string, 
 }
 
 // DelegateToolsetsForRole computes child toolsets based on the orchestration role.
-// When orchestrator is true, the "delegation" toolset is retained so the child
-// can spawn grandchildren (subject to depth limits).
+// The lists here are tool names (the parent's ToolNames()). When orchestrator
+// is true, the delegation tool family is retained so the child can spawn
+// grandchildren (subject to depth limits); otherwise it is stripped
+// physically — see StripDelegationTools.
 func DelegateToolsetsForRole(parentToolsets []string, childRequested []string, restrictToParent bool, orchestrator bool) []string {
 	var result []string
 
@@ -826,14 +889,15 @@ func DelegateToolsetsForRole(parentToolsets []string, childRequested []string, r
 		result = append(result, childRequested...)
 	}
 
-	// Strip dangerous toolsets unless orchestrator retains "delegation"
 	filtered := make([]string, 0, len(result))
 	for _, ts := range result {
-		if ts == "delegation" && orchestrator {
-			filtered = append(filtered, ts)
-		} else if ts != "delegation" && ts != "clarify" {
-			filtered = append(filtered, ts)
+		if ts == "clarify" {
+			continue // a child cannot ask the user directly
 		}
+		filtered = append(filtered, ts)
+	}
+	if !orchestrator {
+		filtered = StripDelegationTools(filtered)
 	}
 	return filtered
 }

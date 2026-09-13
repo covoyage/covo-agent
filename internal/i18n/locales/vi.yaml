@@ -13,7 +13,6 @@ app:
 statusline:
   mode_general: Chung
   mode_code: Mã
-  bg_tasks: ⚙ {count} nền
   tokens: 'token: {count}'
   shortcuts: ctrl+/ trợ giúp  ctrl+t việc  ctrl+o phiên  ctrl+k kỹ năng
 approval:

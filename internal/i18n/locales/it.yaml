@@ -14,7 +14,6 @@ app:
 statusline:
   mode_general: Generale
   mode_code: Codice
-  bg_tasks: ⚙ {count} sfondo
   tokens_io: 'tokens: {input} in + {output} out = {total}'
   tokens: 'tokens: {count}'
   shortcuts: ctrl+/ aiuto  ctrl+t TODO  ctrl+o sessioni  ctrl+k skill

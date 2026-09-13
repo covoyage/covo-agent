@@ -71,13 +71,17 @@ type interactiveSession struct {
 	slashContext   *slashcmd.ContextBuilder
 	changedFiles   *ChangedFilesTracker
 
-	busy           atomic.Bool
-	sideBusy       atomic.Bool
-	cancelRun      atomic.Pointer[context.CancelFunc]
-	cancelSide     atomic.Pointer[context.CancelFunc]
-	pendingImages  sync.Map
-	pasteStore     *agentui.PasteStore
-	composerDrafts map[string]component.EditorDraft
+	busy          atomic.Bool
+	sideBusy      atomic.Bool
+	cancelRun     atomic.Pointer[context.CancelFunc]
+	cancelSide    atomic.Pointer[context.CancelFunc]
+	pendingImages sync.Map
+
+	// Subagent view state: which sub-agent transcript panel is open ("" = none).
+	subagentViewMu     sync.Mutex
+	subagentViewOpenID string
+	pasteStore         *agentui.PasteStore
+	composerDrafts     map[string]component.EditorDraft
 }
 
 func (s *interactiveSession) currentSessionID() string {
@@ -347,6 +351,7 @@ func (s *interactiveSession) run() {
 		SkillDisabled:            shared.SkillDisabled(s.cfg),
 		SkillConfigGet:           skillCfgGet,
 		SkillConfigSet:           skillCfgSet,
+		SpawnNotifyFunc:          s.onSubagentComplete,
 		LeanTools:                shared.LeanToolsEnabled(s.cfg),
 		SystemPrompt:             s.opts.SystemPrompt,
 		AppendSystemPrompt:       s.opts.AppendSystemPrompt,
@@ -466,6 +471,7 @@ func (s *interactiveSession) run() {
 	}
 
 	s.installHotkeyRouter()
+	s.installSubagentViewClickHandler()
 
 	s.app.SetReady()
 

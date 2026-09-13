@@ -15,7 +15,6 @@ app:
 statusline:
   mode_general: Общий
   mode_code: Код
-  bg_tasks: ⚙ {count} фоновых
   tokens_io: 'токенов: {input} вх + {output} исх = {total}'
   tokens: 'токенов: {count}'
   shortcuts: ctrl+/ помощь  ctrl+t задачи  ctrl+o сессии  ctrl+k навыки

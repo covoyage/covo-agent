@@ -15,7 +15,6 @@ app:
 statusline:
   mode_general: Genel
   mode_code: Kod
-  bg_tasks: ⚙ {count} arka plan
   tokens_io: 'token: {input} giriş + {output} çıkış = {total}'
   tokens: 'token: {count}'
   shortcuts: ctrl+/ yardım  ctrl+t görev  ctrl+o oturum  ctrl+k beceri

@@ -12,7 +12,6 @@ app:
 statusline:
   mode_general: Général
   mode_code: Code
-  bg_tasks: ⚙ {count} arrière-plan
   tokens: 'tokens: {count}'
   shortcuts: ctrl+/ aide  ctrl+t TODO  ctrl+o session  ctrl+k skills
 approval:

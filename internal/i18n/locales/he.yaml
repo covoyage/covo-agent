@@ -12,7 +12,6 @@ app:
 statusline:
   mode_general: כללי
   mode_code: קוד
-  bg_tasks: ⚙ {count} רקע
   tokens: 'אסימונים: {count}'
   shortcuts: ctrl+/ עזרה  ctrl+t משימות  ctrl+o מפגשים  ctrl+k מיומנויות
 approval:

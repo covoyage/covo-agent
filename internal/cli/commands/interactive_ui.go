@@ -349,13 +349,6 @@ func (s *interactiveSession) wireFooter() {
 		}
 		return modeStyle.Render(fmt.Sprintf("%s %s", modeIcon, md))
 	})
-	s.statusLineMgr.SetRenderFn("bg-tasks", func(pal *theme.Palette) string {
-		n := s.stickyFooter.Snapshot().BgTaskCount
-		if n <= 0 {
-			return ""
-		}
-		return pal.Accent.Render(i18n.T("statusline.bg_tasks", "count", fmt.Sprintf("%d", n)))
-	})
 	s.statusLineMgr.SetRenderFn("git-branch", func(pal *theme.Palette) string {
 		b := s.stickyFooter.Snapshot().GitBranch
 		if b == "" {
@@ -473,6 +466,23 @@ func (s *interactiveSession) pumpFooterStatus() {
 				}
 				return items
 			})
+			s.stickyFooter.SetSubagentsProvider(func() []agentui.FooterSubagent {
+				ca := s.agentRuntime.Current()
+				if ca == nil {
+					return nil
+				}
+				entries := ca.SubagentViews().List()
+				out := make([]agentui.FooterSubagent, 0, len(entries))
+				for _, e := range entries {
+					out = append(out, agentui.FooterSubagent{
+						ID:     e.ID(),
+						Task:   e.Task(),
+						Status: e.Status(),
+						Live:   e.Live(),
+					})
+				}
+				return out
+			})
 
 			ca := s.agentRuntime.Current()
 			if ca != nil {
@@ -582,6 +592,14 @@ func (s *interactiveSession) registerKeybindings() {
 	s.app.Keybindings().Register("app.changed-files", terminal.KeybindingDef{
 		DefaultKeys: []terminal.KeyID{"ctrl+g"},
 		Description: i18n.T("keybinding.changed_files"),
+	})
+	s.app.Keybindings().Register("app.subagent-prev", terminal.KeybindingDef{
+		DefaultKeys: []terminal.KeyID{"alt+left"},
+		Description: i18n.T("keybinding.subagent_prev"),
+	})
+	s.app.Keybindings().Register("app.subagent-next", terminal.KeybindingDef{
+		DefaultKeys: []terminal.KeyID{"alt+right"},
+		Description: i18n.T("keybinding.subagent_next"),
 	})
 }
 

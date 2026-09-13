@@ -124,15 +124,17 @@ func (m *BackgroundManager) Start(input string, createAgent func() *agent.CovoAg
 		} else {
 			bt.Status = TaskCompleted
 		}
+		status := bt.Status
+		errMsg := bt.Error
 		m.mu.Unlock()
 
 		if notify != nil {
 			prefix := fmt.Sprintf("[bg/%s] ", id)
-			switch bt.Status {
+			switch status {
 			case TaskCompleted:
 				notify(prefix + "completed")
 			case TaskFailed:
-				notify(prefix + "failed: " + bt.Error)
+				notify(prefix + "failed: " + errMsg)
 			case TaskCancelled:
 				notify(prefix + "cancelled")
 			}
@@ -209,9 +211,27 @@ func (m *BackgroundManager) Respawn(id string, createAgent func() *agent.CovoAge
 	return m.Start(input, createAgent, notify), nil
 }
 
+// maxBgTaskAge bounds how long a background task may remain "running"
+// without finishing. A hung task would otherwise keep the footer's bg-task
+// strip alive forever; over-age tasks are cancelled and marked cancelled so
+// the strip is always eventually cleared. Overridable in tests.
+var maxBgTaskAge = 60 * time.Minute
+
 func (m *BackgroundManager) List() []TaskSummary {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Watchdog: force-terminate over-aged running tasks.
+	for _, bt := range m.tasks {
+		if bt.Status == TaskRunning && time.Since(bt.startedAt) > maxBgTaskAge {
+			if bt.cancel != nil {
+				bt.cancel()
+			}
+			bt.Status = TaskCancelled
+			bt.completedAt = time.Now()
+			bt.Error = "cancelled: exceeded max background task age"
+		}
+	}
 
 	result := make([]TaskSummary, 0, len(m.tasks))
 	for _, bt := range m.tasks {

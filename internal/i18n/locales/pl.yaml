@@ -13,7 +13,6 @@ app:
 statusline:
   mode_general: Ogólny
   mode_code: Kod
-  bg_tasks: ⚙ {count} w tle
   tokens: 'tokeny: {count}'
   shortcuts: ctrl+/ pomoc  ctrl+t zadania  ctrl+o sesje  ctrl+k umiejętności
 approval:

@@ -392,3 +392,25 @@ func TestParseSubagentNum(t *testing.T) {
 		}
 	}
 }
+
+// TestRegistryInterruptSurvivesComplete verifies the status-consistency
+// chain behind manual termination: Interrupt flips the entry to a terminal
+// "interrupted" state, and the later Complete callback (fired when the
+// cancelled run unwinds) must not downgrade it to failed.
+func TestRegistryInterruptSurvivesComplete(t *testing.T) {
+	r := NewSubagentRegistry()
+	id := r.Start("long task", 1)
+
+	if !r.Interrupt(id) {
+		t.Fatal("interrupt failed")
+	}
+	r.Complete(id, true) // the cancelled runner reports back
+
+	run, ok := r.Get(id)
+	if !ok {
+		t.Fatal("entry missing")
+	}
+	if run.Status != "interrupted" {
+		t.Fatalf("expected interrupted preserved, got %q", run.Status)
+	}
+}

@@ -74,7 +74,11 @@ Use run_code when a task requires multiple tool calls with logic, loops, or inte
 
 Example: instead of calling search_files 10 times with different patterns, write one program that loops and aggregates results.
 
-Do NOT use run_code for simple single tool calls — call the tool directly.`
+Do NOT use run_code for simple single tool calls — call the tool directly.
+
+### Delegation (subagents)
+
+If subagent tools (sessions_spawn, sessions_spawn_batch) are available and the user explicitly asks you to use subagents or delegate work, those launches are part of the requested outcome: make the sessions_spawn calls near the start of the work. Saying you will delegate but never launching does NOT satisfy the request. When a launched subagent finishes, incorporate its results into your work before concluding.`
 
 	// memoryBudgetTokens caps the memory suffix (MEMORY.md + USER.md)
 	// injected into the system prompt. Section-aware budgeting keeps headers,

@@ -187,6 +187,9 @@ func (p *Picker) SetSearching(on bool) {
 // Invalidate 实现 core.Component。
 func (p *Picker) Invalidate() {}
 
+// Searching reports whether inline filter mode is active.
+func (p *Picker) Searching() bool { return p.searching }
+
 // Update 实现 core.Updatable。
 func (p *Picker) Update(msg core.Msg) core.Cmd {
 	switch m := msg.(type) {
