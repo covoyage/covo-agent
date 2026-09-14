@@ -324,8 +324,18 @@ func stripHTMLTags(htmlStr string) string {
 	return strings.Join(clean, "\n")
 }
 
+// resolveReferencePath 把引用目标解析为绝对路径：绝对路径原样使用
+// （filepath.Join 只拼接不重置，直接 Join 会把 cwd 错误地加在绝对
+// 路径前面），相对路径才基于 cwd 解析。
+func resolveReferencePath(target, cwd string) string {
+	if filepath.IsAbs(target) {
+		return filepath.Clean(target)
+	}
+	return filepath.Join(cwd, target)
+}
+
 func expandFileReference(ref ContextReference, cwd string) (string, string) {
-	path := filepath.Join(cwd, ref.Target)
+	path := resolveReferencePath(ref.Target, cwd)
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Sprintf("%s: cannot resolve path", ref.Raw), ""
@@ -372,7 +382,7 @@ func expandFileReference(ref ContextReference, cwd string) (string, string) {
 }
 
 func expandFolderReference(ref ContextReference, cwd string) (string, string) {
-	path := filepath.Join(cwd, ref.Target)
+	path := resolveReferencePath(ref.Target, cwd)
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Sprintf("%s: cannot resolve path", ref.Raw), ""
