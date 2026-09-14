@@ -110,12 +110,6 @@ func NewBackgroundReviewer(reviewer LLMReviewer, reviewType ReviewType) *Backgro
 	}
 }
 
-func (r *BackgroundReviewer) SetMinInterval(d time.Duration) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.minInterval = d
-}
-
 func (r *BackgroundReviewer) reviewPrompt() string {
 	switch r.reviewType {
 	case ReviewMemory:

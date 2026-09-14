@@ -13,7 +13,6 @@ import (
 // 架构：
 //   - ScrollbackSearchIndex：缓存每个 entry 的 searchable_text，按 content_generation
 //     增量同步——只有内容变化时重建缓存
-//   - 后台 goroutine 跑 regex 扫描，UI 线程每次按键只需 O(1) 入队最新 query
 //   - ScrollbackMatch：精确定位到 entry + line + byte range
 //
 // 使用方式：
@@ -23,7 +22,6 @@ import (
 //	matches := idx.Find("hello world")
 //
 // 在 UI 线程上同步调用即可——长对话扫描通常 < 1ms。
-// 超长对话可切换到异步模式（SetAsyncMode）。
 // ---------------------------------------------------------------------------
 
 // ScrollbackMatch 描述一次搜索匹配的位置。

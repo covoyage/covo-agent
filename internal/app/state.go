@@ -113,10 +113,6 @@ type EnqueueResult struct {
 	Entry  promptqueue.Entry
 }
 
-func (state *RuntimeState) SetPendingInput(input string) {
-	state.EnqueuePrompt(input)
-}
-
 // EnqueuePrompt appends text to the prompt queue. It never drops older
 // entries; a full queue is rejected (Full=true, OK=false).
 func (state *RuntimeState) EnqueuePrompt(input string) EnqueueResult {

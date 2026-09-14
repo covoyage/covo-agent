@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -34,6 +36,8 @@ type Adapter struct {
 	botToken   string
 	httpClient *http.Client
 	logger     *slog.Logger
+	apiBase    string
+	sessionID  string
 
 	mu        sync.Mutex
 	running   bool
@@ -144,18 +148,80 @@ func (a *Adapter) createMessage(ctx context.Context, channelID, text string, rep
 }
 
 func (a *Adapter) sendFile(ctx context.Context, channelID string, media *plugin.MediaInfo) error {
-	body := map[string]any{}
-	if media.URL != "" {
-		body["content"] = media.URL
-		if media.Caption != "" {
-			body["content"] = media.Caption + "\n" + media.URL
+	// Binary media must go out as multipart/form-data: payload_json carries
+	// the message JSON and files[0] carries the file bytes (with filename),
+	// mirroring openclaw's internal/rest-body.ts multipart serialization.
+	if media.Data == nil {
+		body := map[string]any{}
+		if media.URL != "" {
+			body["content"] = media.URL
+			if media.Caption != "" {
+				body["content"] = media.Caption + "\n" + media.URL
+			}
+		} else if media.Caption != "" {
+			body["content"] = media.Caption
 		}
-	} else if media.Data != nil {
-		body["content"] = media.Caption
-		body["file"] = media.Data
-		body["filename"] = media.FileName
+		if len(body) == 0 {
+			return nil
+		}
+		return a.apiCall(ctx, "POST", "/channels/"+channelID+"/messages", body, nil)
 	}
-	return a.apiCall(ctx, "POST", "/channels/"+channelID+"/messages", body, nil)
+
+	filename := media.FileName
+	if filename == "" {
+		filename = "file"
+	}
+	payload := map[string]any{
+		"attachments": []map[string]any{{"id": 0, "filename": filename}},
+	}
+	if media.Caption != "" {
+		payload["content"] = media.Caption
+	}
+	payloadData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("discord: marshal payload_json: %w", err)
+	}
+
+	base := a.apiBase
+	if base == "" {
+		base = apiBaseURL
+	}
+	apiURL := base + "/channels/" + channelID + "/messages"
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	if err := writer.WriteField("payload_json", string(payloadData)); err != nil {
+		return fmt.Errorf("discord: write payload_json: %w", err)
+	}
+	part, err := writer.CreateFormFile("files[0]", filename)
+	if err != nil {
+		return fmt.Errorf("discord: create files[0] field: %w", err)
+	}
+	if _, err := part.Write(media.Data); err != nil {
+		return fmt.Errorf("discord: write file data: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("discord: close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, &buf)
+	if err != nil {
+		return fmt.Errorf("discord: create request: %w", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bot "+a.botToken)
+	req.Header.Set("User-Agent", useragent.UserAgent("covo-agent"))
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("discord: send file: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("discord: send file failed (status %d): %s", resp.StatusCode, string(respBody))
+	}
+	return nil
 }
 
 func (a *Adapter) apiCall(ctx context.Context, method, path string, body map[string]any, result any) error {
@@ -244,6 +310,29 @@ func (a *Adapter) gatewayLoop(ctx context.Context) {
 	}
 }
 
+var errReconnect = fmt.Errorf("discord: gateway reconnect requested")
+
+func (a *Adapter) setSession(id string) {
+	a.mu.Lock()
+	a.sessionID = id
+	a.mu.Unlock()
+}
+
+func (a *Adapter) clearSession() {
+	a.mu.Lock()
+	a.sessionID = ""
+	a.mu.Unlock()
+}
+
+func (a *Adapter) currentSeq() int64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sequence == nil {
+		return 0
+	}
+	return *a.sequence
+}
+
 func (a *Adapter) connectGateway(ctx context.Context) error {
 	conn, _, _, err := ws.Dial(ctx, gatewayURL)
 	if err != nil {
@@ -288,7 +377,35 @@ func (a *Adapter) connectGateway(ctx context.Context) error {
 				json.Unmarshal(payload.D, &hello)
 				helloCh <- hello.HeartbeatInterval
 			case 0:
+				if payload.T == "READY" {
+					var ready struct {
+						SessionID string `json:"session_id"`
+					}
+					if json.Unmarshal(payload.D, &ready) == nil && ready.SessionID != "" {
+						a.setSession(ready.SessionID)
+					}
+				}
 				a.handleDispatch(payload.T, payload.D)
+			case 7:
+				// RECONNECT: server asks us to reconnect and resume.
+				errCh <- errReconnect
+				return
+			case 9:
+				// INVALID_SESSION: d=false -> RESUME immediately on this
+				// connection; d=true -> wait 1-6s then degrade to a fresh
+				// IDENTIFY on the next connection.
+				var resumable bool
+				json.Unmarshal(payload.D, &resumable)
+				if resumable {
+					a.clearSession()
+					time.Sleep(time.Duration(1000+time.Now().UnixNano()%5000) * time.Millisecond)
+					errCh <- errReconnect
+					return
+				}
+				if err := a.writeResume(conn); err != nil {
+					errCh <- err
+					return
+				}
 			case 11:
 			}
 		}
@@ -303,20 +420,39 @@ func (a *Adapter) connectGateway(ctx context.Context) error {
 		return ctx.Err()
 	}
 
-	identify := map[string]any{
-		"op": 2,
-		"d": map[string]any{
-			"token":   a.botToken,
-			"intents": 1<<9 | 1<<0,
-			"properties": map[string]string{
-				"os":      "linux",
-				"browser": "covo-agent",
-				"device":  "covo-agent",
+	a.mu.Lock()
+	sess := a.sessionID
+	a.mu.Unlock()
+
+	if sess != "" {
+		// Resume an existing session instead of a fresh IDENTIFY.
+		resume := map[string]any{
+			"op": 6,
+			"d": map[string]any{
+				"token":      a.botToken,
+				"session_id": sess,
+				"seq":        a.currentSeq(),
 			},
-		},
+		}
+		resumeData, _ := json.Marshal(resume)
+		_ = wsutil.WriteClientText(conn, resumeData)
+		a.logger.Info("discord: gateway resuming session")
+	} else {
+		identify := map[string]any{
+			"op": 2,
+			"d": map[string]any{
+				"token":   a.botToken,
+				"intents": 1<<15 | 1<<9 | 1<<0,
+				"properties": map[string]string{
+					"os":      "linux",
+					"browser": "covo-agent",
+					"device":  "covo-agent",
+				},
+			},
+		}
+		identifyData, _ := json.Marshal(identify)
+		_ = wsutil.WriteClientText(conn, identifyData)
 	}
-	identifyData, _ := json.Marshal(identify)
-	_ = wsutil.WriteClientText(conn, identifyData)
 
 	heartbeatMs := time.Duration(interval) * time.Millisecond
 	ticker := time.NewTicker(heartbeatMs)
@@ -338,6 +474,22 @@ func (a *Adapter) connectGateway(ctx context.Context) error {
 			_ = wsutil.WriteClientText(conn, hbData)
 		}
 	}
+}
+
+func (a *Adapter) writeResume(conn net.Conn) error {
+	a.mu.Lock()
+	sess := a.sessionID
+	a.mu.Unlock()
+	resume := map[string]any{
+		"op": 6,
+		"d": map[string]any{
+			"token":      a.botToken,
+			"session_id": sess,
+			"seq":        a.currentSeq(),
+		},
+	}
+	resumeData, _ := json.Marshal(resume)
+	return wsutil.WriteClientText(conn, resumeData)
 }
 
 func (a *Adapter) handleDispatch(eventType string, data json.RawMessage) {

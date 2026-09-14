@@ -4,20 +4,16 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/covoyage/covo-agent/internal/tools/hook"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
 // auditHook is the built-in audit logger. It is the reference implementation
 // of the "safety/audit logic plugin-ification" pattern: it observes every
 // tool call via the BeforeHook/AfterHook chain and persists a record to the
-// SQLite audit log, while also publishing events to the EventBus so that
-// other plugins (Lua, shell, or Go plugins via plugin.LifecycleHook) can
-// subscribe and implement their own audit/safety logic.
+// SQLite audit log.
 //
-// Audit is not a separate module but flows through the event bus + hook
-// system: any plugin can subscribe to observe (audit) or register a hook to
-// intercept (safety).
+// Plugins can implement plugin.LifecycleHook to intercept (safety) or
+// observe (audit) tool calls at the same boundaries.
 type auditHook struct {
 	ca *CovoAgent
 }
@@ -42,16 +38,6 @@ func (h *auditHook) sessionID() string {
 func (h *auditHook) before(ctx context.Context, hc *agentcore.HookContext) error {
 	sessionID := h.sessionID()
 	agentID := h.ca.agentID()
-
-	// Publish to EventBus for subscriber plugins (audit/safety).
-	if ext := h.ca.agentTools; ext != nil {
-		ext.PublishEvent(hook.EventToolCallStart, map[string]any{
-			"session_id": sessionID,
-			"tool_name":  hc.ToolName,
-			"agent_id":   agentID,
-			"args_size":  len(hc.Arguments),
-		})
-	}
 
 	// Persist to audit log (built-in reference audit logger).
 	if ext := h.ca.agentTools; ext != nil {
@@ -82,19 +68,6 @@ func (h *auditHook) after(ctx context.Context, hc *agentcore.HookContext, result
 	if err != nil {
 		status = "error"
 		errMsg = err.Error()
-	}
-
-	// Publish to EventBus.
-	if ext := h.ca.agentTools; ext != nil {
-		ext.PublishEvent(hook.EventToolCallEnd, map[string]any{
-			"session_id":  sessionID,
-			"tool_name":   hc.ToolName,
-			"agent_id":    agentID,
-			"status":      status,
-			"result_size": len(result),
-			"error":       errMsg,
-			"duration_ms": 0, // populated below if we tracked start time
-		})
 	}
 
 	// Persist to audit log. Previews and error strings are force-redacted so

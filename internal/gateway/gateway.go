@@ -53,6 +53,11 @@ type Config struct {
 	// (e.g. rate-limited) with automatic TTL-based resume.
 	// Nil disables session suspension.
 	SuspendStore *SessionSuspendStore
+
+	// IPCSocketPath enables the local unix-socket API (mcpserver session
+	// tools, CLI) when non-empty. Use IPCSocketPath(homeDir) for the
+	// well-known location; empty disables IPC.
+	IPCSocketPath string
 }
 
 type Gateway struct {
@@ -62,12 +67,22 @@ type Gateway struct {
 	pairing      *PairingStore
 	suspendStore *SessionSuspendStore
 	platforms    []plugin.PlatformProvider
+	platformMap  map[string]plugin.PlatformProvider
 	msgChs       []chan plugin.IncomingMessage
+	events       *EventLog
+	perms        *PermissionStore
+	ipc          *ipcServer
 	ctx          context.Context
 	cancel       context.CancelFunc
 	running      bool
 	done         chan struct{}
 }
+
+// Events exposes the gateway event log (cursor-based polling).
+func (g *Gateway) Events() *EventLog { return g.events }
+
+// Permissions exposes the pending permission store.
+func (g *Gateway) Permissions() *PermissionStore { return g.perms }
 
 func New(cfg Config) *Gateway {
 	if cfg.AgentCacheSize <= 0 {
@@ -103,6 +118,11 @@ func (g *Gateway) Start(ctx context.Context) error {
 			default:
 				slog.Warn("gateway: dropping message, channel full",
 					"platform", msg.Platform, "user", msg.UserName)
+				g.events.Append(Event{
+					Type: EventMessageDropped, Platform: msg.Platform,
+					ChannelID: msg.ChannelID, UserID: msg.UserID, UserName: msg.UserName,
+					Text: msg.Text, Detail: "inbound channel full",
+				})
 			}
 		})
 	}
@@ -179,6 +199,20 @@ func (g *Gateway) Start(ctx context.Context) error {
 	g.running = true
 	g.mu.Unlock()
 
+	// Local IPC API: lets the mcpserver session tools (messages_send,
+	// events_poll/events_wait, permissions_*) and the CLI drive the running
+	// gateway. Disabled when no socket path is configured.
+	if g.cfg.IPCSocketPath != "" {
+		ipc, err := newIPCServer(g, g.cfg.IPCSocketPath)
+		if err != nil {
+			slog.Warn("gateway: ipc server disabled", "error", err)
+		} else {
+			g.ipc = ipc
+			safego.SafeGo(ipc.serve, nil)
+			slog.Info("gateway: ipc listening", "socket", g.cfg.IPCSocketPath)
+		}
+	}
+
 	safego.SafeGo(func() {
 		wg.Wait()
 		close(g.done)
@@ -196,6 +230,11 @@ func (g *Gateway) Stop() error {
 	g.mu.Unlock()
 
 	g.cancel()
+
+	if g.ipc != nil {
+		g.ipc.close()
+		g.ipc = nil
+	}
 
 	for _, p := range g.configuredPlatforms() {
 		if err := p.Stop(); err != nil {
@@ -268,6 +307,10 @@ func (g *Gateway) handleMessage(ctx context.Context, plat plugin.PlatformProvide
 		return
 	}
 
+	// Make the message origin available to downstream consumers (the
+	// approval bridge attributes permission requests to the channel).
+	ctx = WithMessageContext(ctx, msg)
+
 	// DM pairing gate: if a PairingStore is configured, only approved
 	// users may interact. Unapproved senders receive a pairing code
 	// that an admin must approve via "covo-agent pairing approve <code>".
@@ -286,6 +329,11 @@ func (g *Gateway) handleMessage(ctx context.Context, plat plugin.PlatformProvide
 					"platform", platformName, "user", msg.UserName, "error", err)
 				return
 			}
+			g.events.Append(Event{
+				Type: EventPairingRequested, Platform: platformName,
+				ChannelID: msg.ChannelID, UserID: msg.UserID, UserName: msg.UserName,
+				Detail: "pairing code " + code,
+			})
 			hint := i18n.T("pairing.access_denied", "code", code)
 			if err := plat.Send(ctx, msg.ChannelID, hint); err != nil {
 				slog.Warn("gateway: send pairing code failed",
@@ -303,6 +351,11 @@ func (g *Gateway) handleMessage(ctx context.Context, plat plugin.PlatformProvide
 		if suspended, reason := g.suspendStore.IsSuspended(cacheKey); suspended {
 			slog.Info("gateway: session suspended",
 				"key", cacheKey, "reason", reason)
+			g.events.Append(Event{
+				Type: EventSessionSuspended, Platform: plat.Name(),
+				ChannelID: msg.ChannelID, UserID: msg.UserID, UserName: msg.UserName,
+				Detail: reason,
+			})
 			if err := plat.Send(ctx, msg.ChannelID,
 				i18n.T("gateway.suspended", "reason", reason)); err != nil {
 				slog.Warn("gateway: send suspend notice failed", "error", err)
@@ -321,6 +374,12 @@ func (g *Gateway) handleMessage(ctx context.Context, plat plugin.PlatformProvide
 		}
 		ctx = WithVisibilityPolicy(ctx, vp)
 	}
+
+	g.events.Append(Event{
+		Type: EventMessageReceived, Platform: plat.Name(),
+		ChannelID: msg.ChannelID, UserID: msg.UserID, UserName: msg.UserName,
+		Text: msg.Text,
+	})
 
 	agent, err := g.cache.GetOrCreate(ctx, cacheKey)
 	if err != nil {
@@ -361,7 +420,18 @@ func (g *Gateway) handleMessage(ctx context.Context, plat plugin.PlatformProvide
 			"channel", msg.ChannelID,
 			"error", err,
 		)
+		g.events.Append(Event{
+			Type: EventReplyFailed, Platform: plat.Name(),
+			ChannelID: msg.ChannelID, UserID: msg.UserID, UserName: msg.UserName,
+			Detail: err.Error(),
+		})
+		return
 	}
+	g.events.Append(Event{
+		Type: EventReplySent, Platform: plat.Name(),
+		ChannelID: msg.ChannelID, UserID: msg.UserID, UserName: msg.UserName,
+		Text: response,
+	})
 }
 
 // applyAutoTranscription looks for an audio attachment on the incoming

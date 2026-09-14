@@ -367,29 +367,6 @@ func TestNextDisplayMode(t *testing.T) {
 	}
 }
 
-func TestBlockFoldManager(t *testing.T) {
-	m := NewBlockFoldManager()
-	id := EntryID(42)
-	if m.GetDisplayMode(id) != DisplayNormal {
-		t.Error("expected default Normal")
-	}
-	m.ToggleFold(id, false)
-	if m.GetDisplayMode(id) != DisplayCollapsed {
-		t.Error("expected Collapsed after toggle")
-	}
-	m.SetDisplayMode(id, DisplayExpanded)
-	if m.GetDisplayMode(id) != DisplayExpanded {
-		t.Error("expected Expanded after set")
-	}
-	if m.IsRawMode(id) {
-		t.Error("expected raw off by default")
-	}
-	m.ToggleRaw(id)
-	if !m.IsRawMode(id) {
-		t.Error("expected raw on after toggle")
-	}
-}
-
 // --- #11 状态栏块 ---
 
 func TestQueueBlock(t *testing.T) {

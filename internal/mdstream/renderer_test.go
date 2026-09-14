@@ -7,7 +7,7 @@ import (
 
 func TestRenderer_BasicText(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "") // disable colors for testing
+	r.noColor = true // disable colors for testing
 	out := r.Feed("Hello world\n")
 	if !strings.Contains(out, "Hello world") {
 		t.Errorf("expected 'Hello world', got %q", out)
@@ -16,7 +16,7 @@ func TestRenderer_BasicText(t *testing.T) {
 
 func TestRenderer_Heading(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	out := r.Feed("# My Heading\n")
 	if !strings.Contains(out, "My Heading") {
 		t.Errorf("expected heading text, got %q", out)
@@ -26,7 +26,7 @@ func TestRenderer_Heading(t *testing.T) {
 func TestRenderer_CodeFence(t *testing.T) {
 	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "false")
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	out := r.Feed("```go\npackage main\n```\n")
 	if !strings.Contains(out, "package main") {
 		t.Errorf("expected code content, got %q", out)
@@ -39,7 +39,7 @@ func TestRenderer_CodeFence(t *testing.T) {
 func TestRenderer_CodeFence_Incomplete(t *testing.T) {
 	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "false")
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	// Feed incomplete code block
 	out := r.Feed("```go\npackage main\n")
 	// Should not render incomplete block
@@ -57,7 +57,7 @@ func TestRenderer_SetSyntaxHighlighting_False(t *testing.T) {
 	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "true")
 	r := NewRenderer()
 	r.SetSyntaxHighlighting(false)
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	out := r.Feed("```go\npackage main\n```\n")
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("SetSyntaxHighlighting(false) should skip token colors, got %q", out)
@@ -70,7 +70,7 @@ func TestRenderer_SetSyntaxHighlighting_False(t *testing.T) {
 func TestRenderer_CodeFence_SyntaxHighlight(t *testing.T) {
 	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "true")
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	out := r.Feed("```go\npackage main\n```\n")
 	if !strings.Contains(out, "\x1b[") {
 		t.Errorf("expected ANSI-highlighted code fence, got %q", out)
@@ -81,7 +81,7 @@ func TestRenderer_CodeFence_SyntaxHighlight(t *testing.T) {
 	}
 
 	r2 := NewRenderer()
-	r2.SetColors("", "", "", "", "")
+	r2.noColor = true
 	out2 := r2.Feed("```go\npackage main\n```\n")
 	plain := r3Plain(t)
 	if stripANSIHelper(out2) != stripANSIHelper(plain) {
@@ -94,7 +94,7 @@ func r3Plain(t *testing.T) string {
 	t.Helper()
 	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "false")
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	return r.Feed("```go\npackage main\n```\n")
 }
 
@@ -119,7 +119,7 @@ func stripANSIHelper(s string) string {
 
 func TestRenderer_MathBlock(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	out := r.Feed("$$E = mc^2$$\n")
 	if !strings.Contains(out, "E = mc") {
 		t.Errorf("expected math content, got %q", out)
@@ -128,7 +128,7 @@ func TestRenderer_MathBlock(t *testing.T) {
 
 func TestRenderer_MathBlock_Multiline(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	out := r.Feed("$$\nx^2 + y^2 = z^2\n$$\n")
 	if !strings.Contains(out, "x") || !strings.Contains(out, "y") || !strings.Contains(out, "z") {
 		t.Errorf("expected multiline math, got %q", out)
@@ -137,7 +137,7 @@ func TestRenderer_MathBlock_Multiline(t *testing.T) {
 
 func TestRenderer_MathBlock_Incomplete(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	out := r.Feed("$$\nx^2 + y^2\n")
 	if strings.Contains(out, "x") && strings.Contains(out, "y") {
 		t.Errorf("should not render incomplete math, got %q", out)
@@ -150,7 +150,7 @@ func TestRenderer_MathBlock_Incomplete(t *testing.T) {
 
 func TestRenderer_InlineCode(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	out := r.Feed("Use `fmt.Println` to print.\n")
 	if !strings.Contains(out, "fmt.Println") {
 		t.Errorf("expected inline code, got %q", out)
@@ -159,7 +159,7 @@ func TestRenderer_InlineCode(t *testing.T) {
 
 func TestRenderer_InlineMath(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	out := r.Feed("The formula $E = mc^2$ is famous.\n")
 	if !strings.Contains(out, "E = mc") {
 		t.Errorf("expected inline math, got %q", out)
@@ -168,7 +168,7 @@ func TestRenderer_InlineMath(t *testing.T) {
 
 func TestRenderer_InlineMath_NotCurrency(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	out := r.Feed("The price is $5 and $10.\n")
 	// Should not treat $5 as math
 	if strings.Contains(out, "⟨5⟩") {
@@ -179,7 +179,7 @@ func TestRenderer_InlineMath_NotCurrency(t *testing.T) {
 func TestRenderer_Flush(t *testing.T) {
 	t.Setenv("COVO_SYNTAX_HIGHLIGHT", "false")
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	r.Feed("```go\npackage main\n") // incomplete
 	out := r.Flush()
 	// Flush should render incomplete blocks
@@ -199,7 +199,7 @@ func TestRenderer_Reset(t *testing.T) {
 
 func TestRenderer_MultipleBlocks(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	out := r.Feed("# Title\n\nSome text.\n\n```go\ncode\n```\n")
 	if !strings.Contains(out, "Title") {
 		t.Error("missing heading")
@@ -214,7 +214,7 @@ func TestRenderer_MultipleBlocks(t *testing.T) {
 
 func TestRenderer_IsInCodeBlock(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	r.Feed("```go\n")
 	if !r.IsInCodeBlock() {
 		t.Error("expected to be in code block")
@@ -227,7 +227,7 @@ func TestRenderer_IsInCodeBlock(t *testing.T) {
 
 func TestRenderer_IsInMathBlock(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	r.Feed("$$\n")
 	if !r.IsInMathBlock() {
 		t.Error("expected to be in math block")
@@ -240,8 +240,8 @@ func TestRenderer_IsInMathBlock(t *testing.T) {
 
 func TestRenderer_LaTeXDisabled(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
-	r.SetLaTeX(false)
+	r.noColor = true
+	r.enableLaTeX = false
 	out := r.Feed("$$E = mc^2$$\n")
 	if !strings.Contains(out, "$$") {
 		t.Errorf("with LaTeX disabled, should show raw $$: %q", out)
@@ -250,7 +250,7 @@ func TestRenderer_LaTeXDisabled(t *testing.T) {
 
 func TestRenderer_TaskListAndTable(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	out := r.Feed("- [ ] todo\n- [x] done\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n")
 	if !strings.Contains(out, "todo") || !strings.Contains(out, "done") {
 		t.Errorf("task list missing: %q", out)
@@ -265,7 +265,7 @@ func TestRenderer_TaskListAndTable(t *testing.T) {
 
 func TestRenderer_MermaidFence(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 	out := r.Feed("```mermaid\ngraph TD; A[Start] --> B[End]\n```\n")
 	if !strings.Contains(out, "Start") || !strings.Contains(out, "End") {
 		t.Errorf("mermaid diagram missing nodes: %q", out)
@@ -274,7 +274,7 @@ func TestRenderer_MermaidFence(t *testing.T) {
 
 func TestRenderer_Streaming(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "", "")
+	r.noColor = true
 
 	// Simulate streaming text line by line (realistic streaming pattern)
 	text := "# Hello\n\nWorld\n"
@@ -297,7 +297,11 @@ func TestRenderer_Streaming(t *testing.T) {
 
 func TestRenderer_Colors(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("\033[36m", "\033[33m", "\033[35m", "\033[1m", "\033[0m")
+	r.colorFence = "\033[36m"
+	r.colorInline = "\033[33m"
+	r.colorMath = "\033[35m"
+	r.colorHeading = "\033[1m"
+	r.colorReset = "\033[0m"
 	out := r.Feed("```go\ncode\n```\n")
 	if !strings.Contains(out, "\033[36m") {
 		t.Error("expected color code in output")
@@ -309,7 +313,8 @@ func TestRenderer_Colors(t *testing.T) {
 
 func TestRenderer_HeadingLadder(t *testing.T) {
 	r := NewRenderer()
-	r.SetColors("", "", "", "\033[35m", "\033[0m")
+	r.colorHeading = "\033[35m"
+	r.colorReset = "\033[0m"
 	out := r.Feed("# One\n\n###### Six\n")
 	if !strings.Contains(out, "One") || !strings.Contains(out, "Six") {
 		t.Fatalf("heading text missing: %q", out)

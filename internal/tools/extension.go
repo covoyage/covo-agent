@@ -26,7 +26,6 @@ import (
 	toolsfeishu "github.com/covoyage/covo-agent/internal/tools/feishu"
 	"github.com/covoyage/covo-agent/internal/tools/fileops"
 	toolshardware "github.com/covoyage/covo-agent/internal/tools/hardware"
-	"github.com/covoyage/covo-agent/internal/tools/hook"
 	toolsmedia "github.com/covoyage/covo-agent/internal/tools/media"
 	toolsmemory "github.com/covoyage/covo-agent/internal/tools/memory"
 	toolsplanning "github.com/covoyage/covo-agent/internal/tools/planning"
@@ -58,14 +57,11 @@ type Extension struct {
 	feishuClient  *toolsfeishu.FeishuClient
 	ftsSearcher   *toolssessions.FTSSearcher
 	compressor    *toolscontext.ContextCompressor
-	hooks         *hook.HookRegistry
 	dreamCycle    *toolsmemory.DreamCycle
 	forkGuard     *toolssubagent.ForkGuard
 	fragLimiter   *toolscontext.FragmentTokenLimiter
 	metrics       *toolMetrics
 	fileState     *FileStateRegistry
-	eventBus      *hook.EventBus
-	permDeferred  *PermissionDeferred
 	sessionFork   *toolssessions.SessionFork
 	runnerMutex   *toolssessions.RunnerMutex
 	worktreeMgr   *toolsworktree.WorktreeManager
@@ -74,7 +70,6 @@ type Extension struct {
 	subagentStore *toolssubagent.SubagentStore
 
 	// Expose for embedding into agent loop
-	Hooks             *hook.HookRegistry
 	swarmBoard        *toolswarm.SwarmBoard
 	swarmOrch         *toolswarm.SwarmOrchestrator
 	secretsStore      *SecretsStore
@@ -219,14 +214,11 @@ func NewExtension(cfg ExtensionConfig) *Extension {
 		feishuClient:      toolsfeishu.NewFeishuClient(),
 		ftsSearcher:       ftsSearcher,
 		compressor:        compr,
-		hooks:             hook.NewHookRegistry(),
 		dreamCycle:        toolsmemory.NewDreamCycle(),
 		forkGuard:         toolssubagent.NewForkGuard(3),
 		fragLimiter:       toolscontext.NewFragmentTokenLimiter(),
 		metrics:           newToolMetrics(),
 		fileState:         NewFileStateRegistry(),
-		eventBus:          hook.NewEventBus(64),
-		permDeferred:      NewPermissionDeferred(),
 		sessionFork:       toolssessions.NewSessionFork(),
 		runnerMutex:       toolssessions.NewRunnerMutex(),
 		worktreeMgr:       toolsworktree.NewWorktreeManager(cfg.HomeDir),
@@ -274,8 +266,6 @@ func NewExtension(cfg ExtensionConfig) *Extension {
 			logger.Debug("recovered orphaned subagents from previous run", "count", len(orphaned))
 		}
 	}
-	// Expose hooks for agent loop integration
-	ext.Hooks = ext.hooks
 	return ext
 }
 
@@ -402,18 +392,6 @@ func (e *Extension) SetAuditStore(s *audit.Store) {
 		_ = e.auditStore.Close()
 	}
 	e.auditStore = s
-}
-
-// EventBus returns the event bus for plugin/event subscription. Activated
-// (published to) by the agent-layer audit hook and tool lifecycle hooks.
-func (e *Extension) EventBus() *hook.EventBus { return e.eventBus }
-
-// PublishEvent is a convenience wrapper for publishing events on the
-// extension's event bus. Safe to call even if the event bus is nil.
-func (e *Extension) PublishEvent(et hook.EventType, data any) {
-	if e.eventBus != nil {
-		e.eventBus.Publish(et, data)
-	}
 }
 
 func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {

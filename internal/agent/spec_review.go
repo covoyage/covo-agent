@@ -122,11 +122,6 @@ func NewSpecReviewer(llmCall func(ctx context.Context, systemPrompt, userPrompt 
 	}
 }
 
-// SetTimeout overrides the default review timeout.
-func (r *SpecReviewer) SetTimeout(d time.Duration) {
-	r.timeout = d
-}
-
 // Review performs the full two-phase review.
 func (r *SpecReviewer) Review(ctx context.Context, diff, specMarkdown string) (*SpecReviewResult, error) {
 	sections := ParseSpecSections(specMarkdown)

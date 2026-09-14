@@ -83,20 +83,6 @@ func (ca *CovoAgent) KanbanManager() *kanban.KanbanManager {
 	return ca.agentTools.KanbanManager()
 }
 
-// EnableCuratorExtraction enables automatic skill extraction from trajectories.
-func (ca *CovoAgent) EnableCuratorExtraction() {
-	if ca.curator != nil {
-		ca.curator.SetSkillManager(ca.skillMgr)
-	}
-}
-
-// EnableCuratorNudge enables periodic self-improvement nudges.
-func (ca *CovoAgent) EnableCuratorNudge(cfg evolution.NudgeConfig) {
-	if ca.curator != nil {
-		ca.curator.SetNudgeSystem(cfg, ca.homeDir)
-	}
-}
-
 func (ca *CovoAgent) PromptBuilder() *PromptBuilder {
 	return ca.promptBuilder
 }

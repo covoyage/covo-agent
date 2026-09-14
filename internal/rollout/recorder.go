@@ -138,16 +138,6 @@ func (r *Recorder) MarkComplete() {
 	r.rollout.EndedAt = time.Now()
 }
 
-// SetMetadata sets a key-value pair in the rollout metadata.
-func (r *Recorder) SetMetadata(key, value string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.rollout.Metadata == nil {
-		r.rollout.Metadata = make(map[string]string)
-	}
-	r.rollout.Metadata[key] = value
-}
-
 // RecordSubagentEvent records a subagent lifecycle event (spawn, send_message,
 // result, close, timeout) on this rollout, anchored to the current turn. This
 // links the parent trace to a spawned child's session/rollout.

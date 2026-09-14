@@ -434,8 +434,12 @@ func startGateway(pidFile string) {
 
 	suspendStore := gateway.NewSessionSuspendStore()
 
-	// Agent factory — creates a new agent per channel
+	// Agent factory — creates a new agent per channel. Gateway agents have
+	// no interactive terminal: manual approvals are routed to the gateway
+	// permission store so a human can decide them remotely (via the
+	// permissions_* MCP tools or the CLI) instead of being auto-denied.
 	skillCfgGet, skillCfgSet := shared.SkillConfigFns(cfg)
+	var gw *gateway.Gateway
 	factory := func(ctx context.Context) (gateway.Agent, error) {
 		ca, err := agent.NewCovoAgent(agent.CovoAgentConfig{
 			Mode:                     agent.ModeGeneral,
@@ -455,10 +459,16 @@ func startGateway(pidFile string) {
 		if err != nil {
 			return nil, fmt.Errorf("create agent: %w", err)
 		}
+		if sys := ca.ApprovalSystem(); sys != nil {
+			sys.SetNonInteractive(true)
+			if gw != nil {
+				sys.SetExternalApprover(gw.ApprovalBridge())
+			}
+		}
 		return ca, nil
 	}
 
-	gw := gateway.New(gateway.Config{
+	gw = gateway.New(gateway.Config{
 		Platforms:      platforms,
 		AgentFactory:   factory,
 		FooterEnabled:  gatewayFooterEnabled(homeDir),
@@ -466,6 +476,7 @@ func startGateway(pidFile string) {
 		FooterProvider: providerType,
 		PairingStore:   gateway.NewPairingStore(homeDir),
 		SuspendStore:   suspendStore,
+		IPCSocketPath:  gateway.IPCSocketPath(homeDir),
 	})
 
 	fmt.Println("  Gateway starting... Press Ctrl+C to stop.")

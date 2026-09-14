@@ -287,40 +287,6 @@ func TestSearchStatusLine(t *testing.T) {
 	}
 }
 
-// --- #7 Shortcuts Bar ---
-
-func TestShortcutsBar(t *testing.T) {
-	pal := theme.CurrentPalette()
-	sb := NewShortcutsBar()
-
-	// Default context (prompt)
-	sb.SetContext(ShortcutCtxPrompt)
-	hints := sb.Hints()
-	if len(hints) == 0 {
-		t.Error("expected hints for prompt context")
-	}
-
-	// Render
-	line := sb.Render(80, pal)
-	if line == "" {
-		t.Error("expected non-empty render")
-	}
-
-	// Switch to search context
-	sb.SetContext(ShortcutCtxSearch)
-	hints = sb.Hints()
-	if len(hints) == 0 {
-		t.Error("expected hints for search context")
-	}
-
-	// Busy context
-	sb.SetContext(ShortcutCtxBusy)
-	hints = sb.Hints()
-	if len(hints) == 0 {
-		t.Error("expected hints for busy context")
-	}
-}
-
 // --- #8 Subagent/BgTask/Workflow Block ---
 
 func TestSubagentBlock(t *testing.T) {

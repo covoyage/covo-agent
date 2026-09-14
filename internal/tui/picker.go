@@ -111,7 +111,6 @@ func NewPicker(config PickerConfig) *Picker {
 			"picker.cancel":    {DefaultKeys: []terminal.KeyID{"escape"}},
 			"picker.pageUp":    {DefaultKeys: []terminal.KeyID{"pageUp"}},
 			"picker.pageDn":    {DefaultKeys: []terminal.KeyID{"pageDown"}},
-			"picker.toggle":    {DefaultKeys: []terminal.KeyID{" "}},
 			"picker.search":    {DefaultKeys: []terminal.KeyID{"/"}},
 			"picker.backspace": {DefaultKeys: []terminal.KeyID{"backspace", "ctrl+h"}},
 		}),
@@ -368,13 +367,6 @@ func (p *Picker) handleKey(data string) core.Cmd {
 		if p.onCancel != nil {
 			p.mu.Unlock()
 			p.onCancel()
-			p.mu.Lock()
-		}
-	case p.km.Matches(data, "picker.toggle"):
-		if p.config.MultiSelect && len(p.filtered) > 0 && p.onToggle != nil {
-			item := p.filtered[p.selected]
-			p.mu.Unlock()
-			p.onToggle(item)
 			p.mu.Lock()
 		}
 	case p.km.Matches(data, "picker.search"):

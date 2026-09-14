@@ -3,6 +3,9 @@ package whatsapp
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,6 +31,7 @@ type Adapter struct {
 	phoneNumberID string
 	accessToken   string
 	verifyToken   string
+	appSecret     string
 	httpClient    *http.Client
 	logger        *slog.Logger
 
@@ -45,6 +49,7 @@ func New() *Adapter {
 		phoneNumberID: strings.TrimSpace(os.Getenv("WHATSAPP_PHONE_NUMBER_ID")),
 		accessToken:   strings.TrimSpace(os.Getenv("WHATSAPP_ACCESS_TOKEN")),
 		verifyToken:   strings.TrimSpace(os.Getenv("WHATSAPP_VERIFY_TOKEN")),
+		appSecret:     strings.TrimSpace(os.Getenv("WHATSAPP_APP_SECRET")),
 		httpClient:    &http.Client{Timeout: 30 * time.Second},
 		logger:        logger,
 	}
@@ -94,7 +99,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 	}
 	addr := ":" + whPort
 	a.whServer = plugin.NewWebhookServer(addr, a.logger)
-	a.whServer.RegisterRoute("/whatsapp/webhook", a.handleWebhook)
+	a.whServer.RegisterRouteWithRequest("/whatsapp/webhook", a.handleWebhook)
 	a.whServer.SetOnMessage(func(msg plugin.IncomingMessage) {
 		a.mu.Lock()
 		callback := a.onMessage
@@ -186,11 +191,31 @@ func (a *Adapter) sendText(ctx context.Context, channelID, text string) error {
 	return nil
 }
 
-func (a *Adapter) handleWebhook(ctx context.Context, body []byte, headers http.Header) (*plugin.IncomingMessage, error) {
-	if a.verifyToken != "" {
-		qs := headers.Get("hub.verify_token")
-		if qs == a.verifyToken {
+func (a *Adapter) handleWebhook(ctx context.Context, body []byte, r *http.Request) (*plugin.WebhookResponse, error) {
+	// Meta subscription verification: a GET with hub.mode / hub.verify_token /
+	// hub.challenge as URL query parameters. Echo the challenge verbatim.
+	if r.Method == http.MethodGet {
+		q := r.URL.Query()
+		if q.Get("hub.mode") == "" && q.Get("hub.verify_token") == "" && q.Get("hub.challenge") == "" {
 			return nil, nil
+		}
+		if a.verifyToken == "" || q.Get("hub.verify_token") != a.verifyToken {
+			a.logger.Warn("whatsapp: webhook verify_token mismatch")
+			return &plugin.WebhookResponse{StatusCode: http.StatusForbidden, Body: "forbidden"}, nil
+		}
+		return &plugin.WebhookResponse{Body: q.Get("hub.challenge")}, nil
+	}
+
+	// Inbound event payloads: verify X-Hub-Signature-256 (sha256=<hex>,
+	// HMAC-SHA256 of the raw body keyed by the app secret) when configured.
+	if a.appSecret != "" {
+		signature := r.Header.Get("X-Hub-Signature-256")
+		mac := hmac.New(sha256.New, []byte(a.appSecret))
+		mac.Write(body)
+		expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+		if !hmac.Equal([]byte(signature), []byte(expected)) {
+			a.logger.Warn("whatsapp: webhook signature mismatch")
+			return &plugin.WebhookResponse{StatusCode: http.StatusForbidden, Body: "forbidden"}, nil
 		}
 	}
 
@@ -227,7 +252,7 @@ func (a *Adapter) handleWebhook(ctx context.Context, body []byte, headers http.H
 					continue
 				}
 
-				return &plugin.IncomingMessage{
+				return &plugin.WebhookResponse{Message: &plugin.IncomingMessage{
 					Platform:  PlatformName,
 					ChannelID: msg.From,
 					UserID:    msg.From,
@@ -235,7 +260,7 @@ func (a *Adapter) handleWebhook(ctx context.Context, body []byte, headers http.H
 					Text:      msg.Text.Body,
 					Timestamp: time.Now(),
 					Raw:       body,
-				}, nil
+				}}, nil
 			}
 		}
 	}

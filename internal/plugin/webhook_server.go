@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
@@ -14,12 +15,25 @@ import (
 
 type WebhookHandler func(ctx context.Context, body []byte, headers http.Header) (*IncomingMessage, error)
 
+// WebhookResponse lets a handler customize the HTTP response (status and
+// body) and/or deliver an incoming message. If Body is nil the default
+// {"ok":true} response is written.
+type WebhookResponse struct {
+	StatusCode int
+	Body       any // string -> written as plain text; otherwise JSON-marshalled
+	Message    *IncomingMessage
+}
+
+// WebhookHandlerWithRequest is like WebhookHandler but receives the full
+// *http.Request (for URL query parameters, method, etc.) and can return a
+// custom WebhookResponse.
+type WebhookHandlerWithRequest func(ctx context.Context, body []byte, r *http.Request) (*WebhookResponse, error)
+
 type WebhookServer struct {
 	mu        sync.Mutex
 	addr      string
 	server    *http.Server
 	mux       *http.ServeMux
-	routes    map[string]WebhookHandler
 	onMessage func(IncomingMessage)
 	logger    *slog.Logger
 }
@@ -31,7 +45,6 @@ func NewWebhookServer(addr string, logger *slog.Logger) *WebhookServer {
 	return &WebhookServer{
 		addr:   addr,
 		mux:    http.NewServeMux(),
-		routes: make(map[string]WebhookHandler),
 		logger: logger,
 	}
 }
@@ -39,7 +52,22 @@ func NewWebhookServer(addr string, logger *slog.Logger) *WebhookServer {
 func (s *WebhookServer) RegisterRoute(path string, handler WebhookHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.routes[path] = handler
+	s.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		s.handleWebhook(w, r, func(ctx context.Context, body []byte, req *http.Request) (*WebhookResponse, error) {
+			msg, err := handler(ctx, body, req.Header)
+			if err != nil {
+				return nil, err
+			}
+			return &WebhookResponse{Message: msg}, nil
+		})
+	})
+}
+
+// RegisterRouteWithRequest registers a handler that sees the full request and
+// may return a custom WebhookResponse (e.g. a challenge echo).
+func (s *WebhookServer) RegisterRouteWithRequest(path string, handler WebhookHandlerWithRequest) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		s.handleWebhook(w, r, handler)
 	})
@@ -102,7 +130,7 @@ func (s *WebhookServer) Addr() string {
 	return s.addr
 }
 
-func (s *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request, handler WebhookHandler) {
+func (s *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request, handler WebhookHandlerWithRequest) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		s.logger.Warn("webhook: read body failed", "error", err)
@@ -110,27 +138,50 @@ func (s *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request, ha
 		return
 	}
 
-	msg, err := handler(r.Context(), body, r.Header)
+	resp, err := handler(r.Context(), body, r)
 	if err != nil {
 		s.logger.Warn("webhook: handler failed", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	if msg == nil {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"ok":true}`))
+	if resp == nil {
+		resp = &WebhookResponse{}
+	}
+
+	if resp.Message != nil {
+		s.mu.Lock()
+		callback := s.onMessage
+		s.mu.Unlock()
+		if callback != nil {
+			callback(*resp.Message)
+		}
+	}
+
+	status := resp.StatusCode
+	if status == 0 {
+		status = http.StatusOK
+	}
+
+	if resp.Body != nil {
+		if text, ok := resp.Body.(string); ok {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(text))
+			return
+		}
+		data, err := json.Marshal(resp.Body)
+		if err != nil {
+			s.logger.Warn("webhook: marshal response", "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write(data)
 		return
 	}
 
-	s.mu.Lock()
-	callback := s.onMessage
-	s.mu.Unlock()
-
-	if callback != nil {
-		callback(*msg)
-	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"ok":true}`))
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(`{"ok":true}`))
 }

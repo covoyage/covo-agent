@@ -346,14 +346,6 @@ func (pg *PermissionGate) buildSummary(toolName string, argsJSON []byte) string 
 	}
 }
 
-// SetPendingPattern stores the pattern info from the approval system.
-func (pg *PermissionGate) SetPendingPattern(patternKey, description string) {
-	pg.mu.Lock()
-	defer pg.mu.Unlock()
-	pg.pendingPatternKey = patternKey
-	pg.pendingDescription = description
-}
-
 // ToggleCategoryAutoApprove toggles auto-approval for a category and returns
 // the new state (true = auto-approved, false = requires manual approval).
 func (pg *PermissionGate) ToggleCategoryAutoApprove(cat ApprovalCategory) bool {

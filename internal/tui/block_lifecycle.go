@@ -1,9 +1,5 @@
 package tui
 
-import (
-	"sync"
-)
-
 // ---------------------------------------------------------------------------
 // Block 生命周期高级特性。
 //
@@ -74,66 +70,4 @@ func NextDisplayMode(current DisplayMode) DisplayMode {
 	default:
 		return DisplayNormal
 	}
-}
-
-// --- Block 折叠管理器 ---
-
-// BlockFoldManager 管理每个 entry 的折叠状态。
-type BlockFoldManager struct {
-	mu     sync.RWMutex
-	states map[EntryID]DisplayMode
-	rawOn  map[EntryID]bool
-}
-
-// NewBlockFoldManager 创建折叠管理器。
-func NewBlockFoldManager() *BlockFoldManager {
-	return &BlockFoldManager{
-		states: make(map[EntryID]DisplayMode),
-		rawOn:  make(map[EntryID]bool),
-	}
-}
-
-// GetDisplayMode 返回 entry 的当前显示模式。
-func (m *BlockFoldManager) GetDisplayMode(id EntryID) DisplayMode {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if mode, ok := m.states[id]; ok {
-		return mode
-	}
-	return DisplayNormal
-}
-
-// ToggleFold 切换 entry 的折叠状态。
-func (m *BlockFoldManager) ToggleFold(id EntryID, isRunning bool) DisplayMode {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	current := m.states[id]
-	if current == 0 {
-		current = DisplayNormal
-	}
-	next := NextDisplayMode(current)
-	m.states[id] = next
-	return next
-}
-
-// IsRawMode 返回 entry 是否在 raw 模式。
-func (m *BlockFoldManager) IsRawMode(id EntryID) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.rawOn[id]
-}
-
-// ToggleRaw 切换 entry 的 raw 模式。
-func (m *BlockFoldManager) ToggleRaw(id EntryID) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.rawOn[id] = !m.rawOn[id]
-	return m.rawOn[id]
-}
-
-// SetDisplayMode 显式设置 entry 的显示模式。
-func (m *BlockFoldManager) SetDisplayMode(id EntryID, mode DisplayMode) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.states[id] = mode
 }

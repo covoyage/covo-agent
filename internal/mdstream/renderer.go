@@ -41,39 +41,11 @@ func NewRenderer() *Renderer {
 	}
 }
 
-// SetColors configures ANSI color codes. Empty strings disable markdown
-// chrome (headings, quotes, fences) so tests can assert on plain text.
-// Syntax highlighting is controlled separately via SetSyntaxHighlighting.
-func (r *Renderer) SetColors(codeFence, inlineCode, math, heading, reset string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.colorFence = codeFence
-	r.colorInline = inlineCode
-	r.colorMath = math
-	r.colorHeading = heading
-	r.colorReset = reset
-	r.noColor = codeFence == "" && inlineCode == "" && math == "" && heading == "" && reset == ""
-}
-
-// SetLaTeX enables/disables LaTeX rendering.
-func (r *Renderer) SetLaTeX(enabled bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.enableLaTeX = enabled
-}
-
 // SetSyntaxHighlighting enables/disables syntax highlighting.
 func (r *Renderer) SetSyntaxHighlighting(enabled bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.enableSyntaxHL = enabled
-}
-
-// SetWidth sets the wrap width in terminal cells. Zero means no wrapping.
-func (r *Renderer) SetWidth(width int64) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.width = width
 }
 
 // Feed appends new text and returns any newly renderable output.

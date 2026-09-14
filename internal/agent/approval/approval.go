@@ -108,6 +108,11 @@ type System struct {
 	// Permanent allowlist (loaded from disk)
 	permanentApproved map[string]bool
 
+	// externalApprover routes manual approvals to a remote bridge (gateway
+	// mode): instead of denying or falling through, the decision blocks on
+	// the bridge until a human responds via MCP/CLI or it times out.
+	externalApprover func(ctx context.Context, req ExternalApprovalRequest) (string, error)
+
 	logger *slog.Logger
 }
 
@@ -222,18 +227,25 @@ func (s *System) SetSmartApprovalFn(fn func(ctx context.Context, command, descri
 	s.config.SmartApprovalFn = fn
 }
 
-// SetPreApprovalHook sets the pre-approval plugin hook.
-func (s *System) SetPreApprovalHook(hook func(ctx context.Context, event ApprovalEvent)) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.config.PreApprovalHook = hook
+// ExternalApprovalRequest describes a command that reached the manual
+// approval stage and is being escalated to a remote approver (gateway mode).
+type ExternalApprovalRequest struct {
+	Command     string
+	PatternKey  string
+	Description string
+	SessionKey  string
 }
 
-// SetPostApprovalHook sets the post-approval plugin hook.
-func (s *System) SetPostApprovalHook(hook func(ctx context.Context, event ApprovalEvent)) {
+// SetExternalApprover wires a remote-approval bridge (e.g. the gateway's
+// pending-permission store). When set, manual approvals are routed to it and
+// block until it returns a choice ("once"/"session"/"always"/"deny") or an
+// error/timeout — in which case the normal non-interactive deny applies.
+// Non-interactive mode does NOT bypass this bridge: the bridge itself is the
+// user-presence for gateway sessions.
+func (s *System) SetExternalApprover(fn func(ctx context.Context, req ExternalApprovalRequest) (string, error)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.config.PostApprovalHook = hook
+	s.externalApprover = fn
 }
 
 // SetNonInteractive toggles non-interactive mode at runtime. When true, any
@@ -393,6 +405,25 @@ func (s *System) CheckCommand(ctx context.Context, command, sessionKey string) *
 				}
 			}
 			// "escalate" falls through to manual
+		}
+	}
+
+	// 8.5 External approver (gateway mode): route the manual approval to the
+	// configured bridge and block until a human decides via MCP/CLI or the
+	// bridge times out. Errors/timeouts fall through to the non-interactive
+	// deny below so a broken bridge never hangs or silently allows.
+	if s.externalApprover != nil {
+		choice, err := s.externalApprover(ctx, ExternalApprovalRequest{
+			Command:     command,
+			PatternKey:  patternKey,
+			Description: description,
+			SessionKey:  sessionKey,
+		})
+		if err != nil {
+			s.logger.Warn("approval: external approver failed", "error", err,
+				"pattern_key", patternKey)
+		} else {
+			return s.HandleUserChoice(sessionKey, patternKey, description, choice)
 		}
 	}
 

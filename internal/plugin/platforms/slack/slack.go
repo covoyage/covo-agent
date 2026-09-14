@@ -24,6 +24,9 @@ const (
 	apiBaseURL   = "https://slack.com/api"
 	pollInterval = 3 * time.Second
 	maxRetries   = 3
+
+	reconnectInitial = 1 * time.Second
+	reconnectMax     = 60 * time.Second
 )
 
 type Adapter struct {
@@ -32,6 +35,7 @@ type Adapter struct {
 	botUserID  string
 	httpClient *http.Client
 	logger     *slog.Logger
+	apiBase    string
 
 	mu        sync.Mutex
 	running   bool
@@ -160,20 +164,60 @@ func (a *Adapter) postMessage(ctx context.Context, channelID, text string, threa
 }
 
 func (a *Adapter) uploadFile(ctx context.Context, channelID string, media *plugin.MediaInfo) error {
-	body := map[string]any{
-		"channels": channelID,
+	// files.upload is deprecated (server returns method_deprecated); use the
+	// three-step external upload flow: getUploadURLExternal -> upload bytes ->
+	// completeUploadExternal. Mirrors openclaw client-delivery.ts.
+	if media.Data == nil {
+		// URL-only media cannot use the external upload flow; post the link.
+		return a.postMessage(ctx, channelID, media.URL, "")
 	}
-	if media.URL != "" {
-		body["url"] = media.URL
-		body["filename"] = media.FileName
-	} else {
-		body["content"] = string(media.Data)
-		body["filename"] = media.FileName
+
+	filename := media.FileName
+	if filename == "" {
+		filename = "file"
+	}
+
+	var uploadResp struct {
+		slackAPIResponse
+		UploadURL string `json:"upload_url"`
+		FileID    string `json:"file_id"`
+	}
+	params := map[string]any{
+		"filename": filename,
+		"length":   len(media.Data),
+	}
+	if err := a.apiCall(ctx, "files.getUploadURLExternal", params, &uploadResp); err != nil {
+		return fmt.Errorf("slack: getUploadURLExternal: %w", err)
+	}
+	if uploadResp.UploadURL == "" || uploadResp.FileID == "" {
+		return fmt.Errorf("slack: getUploadURLExternal returned empty upload_url/file_id")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", uploadResp.UploadURL, bytes.NewReader(media.Data))
+	if err != nil {
+		return fmt.Errorf("slack: create upload request: %w", err)
+	}
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("slack: upload file bytes: %w", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("slack: upload file bytes failed (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	complete := map[string]any{
+		"files":      []map[string]string{{"id": uploadResp.FileID, "title": filename}},
+		"channel_id": channelID,
 	}
 	if media.Caption != "" {
-		body["initial_comment"] = media.Caption
+		complete["initial_comment"] = media.Caption
 	}
-	return a.apiCall(ctx, "files.upload", body, nil)
+	if err := a.apiCall(ctx, "files.completeUploadExternal", complete, nil); err != nil {
+		return fmt.Errorf("slack: completeUploadExternal: %w", err)
+	}
+	return nil
 }
 
 func (a *Adapter) authTest(ctx context.Context) (*slackAuthResponse, error) {
@@ -185,7 +229,11 @@ func (a *Adapter) authTest(ctx context.Context) (*slackAuthResponse, error) {
 }
 
 func (a *Adapter) apiCall(ctx context.Context, method string, params map[string]any, result any) error {
-	apiURL := fmt.Sprintf("%s/%s", apiBaseURL, method)
+	base := a.apiBase
+	if base == "" {
+		base = apiBaseURL
+	}
+	apiURL := fmt.Sprintf("%s/%s", base, method)
 
 	var reqBody io.Reader
 	if params != nil {
@@ -261,16 +309,52 @@ func (a *Adapter) apiCall(ctx context.Context, method string, params map[string]
 }
 
 func (a *Adapter) socketModeLoop(ctx context.Context) {
+	// Reconnect loop: any dial failure or read error tears down the old
+	// connection and rebuilds with exponential backoff (1s -> 60s cap).
+	// Only ctx cancellation exits the loop. Mirrors openclaw's
+	// monitor/reconnect-policy.ts backoff approach.
+	backoff := reconnectInitial
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		helloSeen := a.socketModeSession(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if helloSeen {
+			// Connection was healthy at some point; reset the backoff.
+			backoff = reconnectInitial
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+
+		backoff *= 2
+		if backoff > reconnectMax {
+			backoff = reconnectMax
+		}
+	}
+}
+
+// socketModeSession opens one socket-mode connection and serves it until a
+// read error or ctx cancellation. It reports whether a hello envelope was
+// received on the connection.
+func (a *Adapter) socketModeSession(ctx context.Context) (helloSeen bool) {
 	connResp, err := a.appsConnectionsOpen(ctx)
 	if err != nil {
-		a.logger.Error("slack: socket mode connect failed", "error", err)
-		return
+		a.logger.Warn("slack: socket mode connections.open failed", "error", err)
+		return false
 	}
 
 	conn, _, _, err := ws.Dial(ctx, connResp.URL)
 	if err != nil {
-		a.logger.Error("slack: socket mode dial failed", "error", err)
-		return
+		a.logger.Warn("slack: socket mode dial failed", "error", err)
+		return false
 	}
 	defer conn.Close()
 
@@ -279,18 +363,16 @@ func (a *Adapter) socketModeLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return helloSeen
 		default:
 		}
 
 		data, _, err := wsutil.ReadServerData(conn)
 		if err != nil {
-			if ctx.Err() != nil {
-				return
+			if ctx.Err() == nil {
+				a.logger.Warn("slack: socket mode read failed", "error", err)
 			}
-			a.logger.Warn("slack: socket mode read failed", "error", err)
-			time.Sleep(pollInterval)
-			continue
+			return helloSeen
 		}
 
 		var envelope struct {
@@ -300,6 +382,10 @@ func (a *Adapter) socketModeLoop(ctx context.Context) {
 		}
 		if err := json.Unmarshal(data, &envelope); err != nil {
 			continue
+		}
+
+		if envelope.Type == "hello" {
+			helloSeen = true
 		}
 
 		if envelope.Type == "events_api" {
@@ -365,7 +451,11 @@ func (a *Adapter) handleEvent(payload json.RawMessage) {
 }
 
 func (a *Adapter) appsConnectionsOpen(ctx context.Context) (*slackConnResponse, error) {
-	apiURL := fmt.Sprintf("%s/apps.connections.open", apiBaseURL)
+	base := a.apiBase
+	if base == "" {
+		base = apiBaseURL
+	}
+	apiURL := fmt.Sprintf("%s/apps.connections.open", base)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, nil)
 	if err != nil {

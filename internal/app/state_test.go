@@ -32,16 +32,15 @@ func TestRuntimeStateSettersAndPendingTake(t *testing.T) {
 	state := NewRuntimeState()
 	state.SetSessionYolo(true)
 	state.SetFastMode(true)
-	state.SetFooterEnabled(true)
 	state.SetReasoningEffort("high")
 	state.SetPersonality("reviewer")
 	state.SetBusyInputMode("queue")
-	state.SetPendingInput("next task")
+	state.EnqueuePrompt("next task")
 	state.SetActiveProfile("coding")
 	ui := tui.NewUIBus(nil)
 	state.SetUI(ui)
 
-	if !state.SessionYolo() || !state.FastMode() || !state.FooterEnabled() {
+	if !state.SessionYolo() || !state.FastMode() {
 		t.Fatal("boolean setters did not persist")
 	}
 	if state.ReasoningEffort() != "high" || state.Personality() != "reviewer" || state.BusyInputMode() != "queue" || state.ActiveProfile() != "coding" {
@@ -83,7 +82,7 @@ func TestRuntimeStateResetPromptQueue(t *testing.T) {
 	state := NewRuntimeState()
 	state.EnqueuePrompt("one")
 	state.EnqueuePrompt("two")
-	state.SetPendingInput("legacy")
+	state.EnqueuePrompt("legacy")
 	state.ResetPromptQueue()
 	if state.HasQueuedPrompts() {
 		t.Fatal("queue should be empty after reset")

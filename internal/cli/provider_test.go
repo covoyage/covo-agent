@@ -185,9 +185,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Mode != "general" {
 		t.Errorf("cfg.Mode = %q, want %q", cfg.Mode, "general")
 	}
-	if cfg.Skills == nil {
-		t.Fatal("cfg.Skills is nil")
-	}
 	if cfg.Curator == nil {
 		t.Fatal("cfg.Curator is nil")
 	}

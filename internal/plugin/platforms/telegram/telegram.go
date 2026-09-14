@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
@@ -30,6 +31,7 @@ type Adapter struct {
 	botName    string
 	httpClient *http.Client
 	logger     *slog.Logger
+	apiBase    string
 
 	mu           sync.Mutex
 	running      bool
@@ -226,13 +228,46 @@ func (a *Adapter) sendDocument(ctx context.Context, chatID int64, media *plugin.
 }
 
 func (a *Adapter) uploadDocument(ctx context.Context, chatID int64, media *plugin.MediaInfo) error {
-	url := fmt.Sprintf("%s/bot%s/sendDocument", apiBaseURL, a.token)
+	base := a.apiBase
+	if base == "" {
+		base = apiBaseURL
+	}
+	url := fmt.Sprintf("%s/bot%s/sendDocument", base, a.token)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(media.Data))
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	if err := writer.WriteField("chat_id", fmt.Sprintf("%d", chatID)); err != nil {
+		return fmt.Errorf("telegram: write chat_id field: %w", err)
+	}
+
+	filename := media.FileName
+	if filename == "" {
+		filename = "document.bin"
+	}
+	part, err := writer.CreateFormFile("document", filename)
+	if err != nil {
+		return fmt.Errorf("telegram: create document field: %w", err)
+	}
+	if _, err := part.Write(media.Data); err != nil {
+		return fmt.Errorf("telegram: write document data: %w", err)
+	}
+
+	if media.Caption != "" {
+		if err := writer.WriteField("caption", media.Caption); err != nil {
+			return fmt.Errorf("telegram: write caption field: %w", err)
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("telegram: close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, &buf)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {

@@ -3,6 +3,8 @@ package feishu
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -28,14 +30,16 @@ const (
 )
 
 type Adapter struct {
-	webhookURL  string
-	secret      string
-	appID       string
-	appSecret   string
-	accessToken string
-	tokenExpiry time.Time
-	httpClient  *http.Client
-	logger      *slog.Logger
+	webhookURL        string
+	secret            string
+	appID             string
+	appSecret         string
+	verificationToken string
+	encryptKey        string
+	accessToken       string
+	tokenExpiry       time.Time
+	httpClient        *http.Client
+	logger            *slog.Logger
 
 	mu        sync.Mutex
 	running   bool
@@ -48,12 +52,14 @@ func New() *Adapter {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelInfo)}))
 
 	return &Adapter{
-		webhookURL: strings.TrimSpace(os.Getenv("FEISHU_WEBHOOK_URL")),
-		secret:     strings.TrimSpace(os.Getenv("FEISHU_SECRET")),
-		appID:      strings.TrimSpace(os.Getenv("FEISHU_APP_ID")),
-		appSecret:  strings.TrimSpace(os.Getenv("FEISHU_APP_SECRET")),
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		logger:     logger,
+		webhookURL:        strings.TrimSpace(os.Getenv("FEISHU_WEBHOOK_URL")),
+		secret:            strings.TrimSpace(os.Getenv("FEISHU_SECRET")),
+		appID:             strings.TrimSpace(os.Getenv("FEISHU_APP_ID")),
+		appSecret:         strings.TrimSpace(os.Getenv("FEISHU_APP_SECRET")),
+		verificationToken: strings.TrimSpace(os.Getenv("FEISHU_VERIFICATION_TOKEN")),
+		encryptKey:        strings.TrimSpace(os.Getenv("FEISHU_ENCRYPT_KEY")),
+		httpClient:        &http.Client{Timeout: 30 * time.Second},
+		logger:            logger,
 	}
 }
 
@@ -105,7 +111,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 	if whPort != "" {
 		addr := ":" + whPort
 		a.whServer = plugin.NewWebhookServer(addr, a.logger)
-		a.whServer.RegisterRoute("/feishu/webhook", a.handleWebhook)
+		a.whServer.RegisterRouteWithRequest("/feishu/webhook", a.handleWebhook)
 		a.whServer.SetOnMessage(func(msg plugin.IncomingMessage) {
 			a.mu.Lock()
 			callback := a.onMessage
@@ -283,13 +289,35 @@ func (a *Adapter) refreshToken(ctx context.Context) error {
 	return nil
 }
 
-func (a *Adapter) handleWebhook(ctx context.Context, body []byte, headers http.Header) (*plugin.IncomingMessage, error) {
+func (a *Adapter) handleWebhook(ctx context.Context, body []byte, r *http.Request) (*plugin.WebhookResponse, error) {
+	raw := body
+
+	// Encrypted envelope: {"encrypt": "<base64 ciphertext>"}. AES-256-CBC
+	// with key = SHA256(encrypt_key), IV = first 16 bytes of the ciphertext
+	// (the scheme used by the Lark/Feishu SDK openclaw relies on).
+	var envelope struct {
+		Encrypt string `json:"encrypt"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err == nil && envelope.Encrypt != "" {
+		if a.encryptKey == "" {
+			a.logger.Warn("feishu: received encrypted event but FEISHU_ENCRYPT_KEY is not set")
+			return nil, nil
+		}
+		plaintext, err := decryptFeishuEnvelope(envelope.Encrypt, a.encryptKey)
+		if err != nil {
+			a.logger.Warn("feishu: decrypt event failed", "error", err)
+			return nil, nil
+		}
+		raw = plaintext
+	}
+
 	var payload struct {
 		Challenge string `json:"challenge"`
 		Token     string `json:"token"`
 		Type      string `json:"type"`
 		Header    struct {
 			EventType string `json:"event_type"`
+			Token     string `json:"token"`
 		} `json:"header"`
 		Event struct {
 			Sender struct {
@@ -306,12 +334,25 @@ func (a *Adapter) handleWebhook(ctx context.Context, body []byte, headers http.H
 		} `json:"event"`
 	}
 
-	if err := json.Unmarshal(body, &payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, nil
 	}
 
+	// Verification token check: enforced only when configured.
+	if a.verificationToken != "" {
+		token := payload.Token
+		if token == "" {
+			token = payload.Header.Token
+		}
+		if token != a.verificationToken {
+			a.logger.Warn("feishu: webhook token mismatch")
+			return &plugin.WebhookResponse{StatusCode: http.StatusUnauthorized, Body: map[string]string{"error": "token mismatch"}}, nil
+		}
+	}
+
 	if payload.Type == "url_verification" {
-		return nil, nil
+		// Echo the challenge back so event subscription can be enabled.
+		return &plugin.WebhookResponse{Body: map[string]string{"challenge": payload.Challenge}}, nil
 	}
 
 	if payload.Header.EventType != "im.message.receive_v1" {
@@ -336,15 +377,44 @@ func (a *Adapter) handleWebhook(ctx context.Context, body []byte, headers http.H
 		senderID = payload.Event.Sender.SenderID.UserID
 	}
 
-	return &plugin.IncomingMessage{
+	return &plugin.WebhookResponse{Message: &plugin.IncomingMessage{
 		Platform:  PlatformName,
 		ChannelID: payload.Event.Message.ChatID,
 		UserID:    senderID,
 		UserName:  senderID,
 		Text:      text,
 		Timestamp: time.Now(),
-		Raw:       body,
-	}, nil
+		Raw:       raw,
+	}}, nil
+}
+
+// decryptFeishuEnvelope decrypts a Feishu encrypted callback body:
+// base64-decode the ciphertext, use the first 16 bytes as the IV, decrypt
+// with AES-256-CBC keyed by SHA256(encryptKey) and strip PKCS#7 padding.
+func decryptFeishuEnvelope(ciphertextB64, encryptKey string) ([]byte, error) {
+	ciphertext, err := base64.StdEncoding.DecodeString(ciphertextB64)
+	if err != nil {
+		return nil, fmt.Errorf("base64 decode: %w", err)
+	}
+	if len(ciphertext) < aes.BlockSize || len(ciphertext)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("invalid ciphertext length %d", len(ciphertext))
+	}
+
+	key := sha256.Sum256([]byte(encryptKey))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return nil, fmt.Errorf("new cipher: %w", err)
+	}
+
+	iv := ciphertext[:aes.BlockSize]
+	data := ciphertext[aes.BlockSize:]
+	mode := cipher.NewCBCDecrypter(block, iv)
+	mode.CryptBlocks(data, data)
+
+	if pad := int(data[len(data)-1]); pad > 0 && pad <= aes.BlockSize {
+		data = data[:len(data)-pad]
+	}
+	return data, nil
 }
 
 func signFeishu(timestamp, secret string) string {

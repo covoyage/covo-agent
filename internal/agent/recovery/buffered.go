@@ -11,22 +11,15 @@ import (
 // Messages are only flushed (delivered) if the final attempt fails.
 // If a retry succeeds, all buffered messages are silently discarded.
 type BufferedStatus struct {
-	mu        sync.Mutex
-	messages  []string
-	flushFn   func(string)
-	droppedFn func(string)
+	mu       sync.Mutex
+	messages []string
+	flushFn  func(string)
 }
 
 func NewBufferedStatus(flushFn func(string)) *BufferedStatus {
 	return &BufferedStatus{
 		flushFn: flushFn,
 	}
-}
-
-// SetDroppedCallback sets a callback for when buffered messages are dropped
-// (on successful retry). This is useful for logging/debugging.
-func (b *BufferedStatus) SetDroppedCallback(fn func(string)) {
-	b.droppedFn = fn
 }
 
 // Buffer adds a message to the buffer instead of sending it immediately.
@@ -56,8 +49,8 @@ func (b *BufferedStatus) Discard() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if len(b.messages) > 0 && b.droppedFn != nil {
-		b.droppedFn(fmt.Sprintf("discarded %d buffered retry message(s)", len(b.messages)))
+	if len(b.messages) == 0 {
+		return
 	}
 	b.messages = nil
 }

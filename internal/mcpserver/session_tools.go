@@ -21,7 +21,8 @@ const (
 
 // SessionToolProvider registers session/messaging MCP tools on a Server.
 type SessionToolProvider struct {
-	store *session.FileStore
+	store   *session.FileStore
+	gateway *gatewayClient
 }
 
 // NewSessionToolProvider creates a provider backed by the given sessions directory.
@@ -30,7 +31,13 @@ func NewSessionToolProvider(sessionsDir string) (*SessionToolProvider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init session store: %w", err)
 	}
-	return &SessionToolProvider{store: store}, nil
+	return &SessionToolProvider{store: store, gateway: newGatewayClient("")}, nil
+}
+
+// SetGatewaySocket overrides the gateway IPC socket path (defaults to
+// ~/.covo-agent/gateway.sock).
+func (p *SessionToolProvider) SetGatewaySocket(path string) {
+	p.gateway = newGatewayClient(path)
 }
 
 // RegisterTools installs all 10 session/messaging tools onto the server.
@@ -90,10 +97,10 @@ func (p *SessionToolProvider) RegisterTools(s *Server) {
 		},
 	}, p.attachmentsFetch)
 
-	// 5. messages_send (stub – needs running gateway)
+	// 5. messages_send
 	s.RegisterTool(mcpToolSchema{
 		Name:        "messages_send",
-		Description: "Send a message to a platform conversation. Requires a running covo-agent gateway.",
+		Description: "Send a message to a platform conversation through the running covo-agent gateway.",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"target", "message"},
@@ -116,10 +123,10 @@ func (p *SessionToolProvider) RegisterTools(s *Server) {
 		},
 	}, p.channelsList)
 
-	// 7. events_poll (stub)
+	// 7. events_poll
 	s.RegisterTool(mcpToolSchema{
 		Name:        "events_poll",
-		Description: "Poll for new events. Requires a running covo-agent gateway for real-time events.",
+		Description: "Poll for new gateway events (messages, replies, pairing, permission requests).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -130,10 +137,10 @@ func (p *SessionToolProvider) RegisterTools(s *Server) {
 		},
 	}, p.eventsPoll)
 
-	// 8. events_wait (stub)
+	// 8. events_wait
 	s.RegisterTool(mcpToolSchema{
 		Name:        "events_wait",
-		Description: "Block waiting for new events. Requires a running covo-agent gateway.",
+		Description: "Block waiting for new gateway events (long poll).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -147,7 +154,7 @@ func (p *SessionToolProvider) RegisterTools(s *Server) {
 	// 9. permissions_list_open
 	s.RegisterTool(mcpToolSchema{
 		Name:        "permissions_list_open",
-		Description: "List pending permission requests. Requires a running covo-agent gateway.",
+		Description: "List pending gateway permission requests awaiting a decision.",
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
@@ -157,7 +164,7 @@ func (p *SessionToolProvider) RegisterTools(s *Server) {
 	// 10. permissions_respond
 	s.RegisterTool(mcpToolSchema{
 		Name:        "permissions_respond",
-		Description: "Respond to a permission request. Requires a running covo-agent gateway.",
+		Description: "Respond to a pending gateway permission request.",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"id", "decision"},
@@ -455,13 +462,141 @@ func (p *SessionToolProvider) attachmentsFetch(ctx context.Context, args json.Ra
 	}, nil
 }
 
-// messagesSend stub – requires a running gateway.
-func (p *SessionToolProvider) messagesSend(_ context.Context, _ json.RawMessage) (any, error) {
-	return map[string]any{
-		"status":  "unavailable",
-		"code":    "gateway_required",
-		"message": "messages_send requires a running covo-agent gateway. Start it with `covo-agent gateway start`.",
-	}, nil
+// messagesSend sends an outbound message through the running gateway's IPC
+// API. When no gateway is listening the tool reports an actionable offline
+// status instead of pretending success.
+func (p *SessionToolProvider) messagesSend(ctx context.Context, args json.RawMessage) (any, error) {
+	var params struct {
+		Target  string `json:"target"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, fmt.Errorf("parse arguments: %w", err)
+	}
+	platform, channelID, err := parseSendTarget(params.Target)
+	if err != nil {
+		return nil, err
+	}
+	return p.gateway.Send(ctx, platform, channelID, params.Message)
+}
+
+// parseSendTarget splits a "platform:chat_id" target. With a single
+// configured gateway platform the platform part may be omitted.
+func parseSendTarget(target string) (platform, channelID string, err error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", "", fmt.Errorf("target must be \"platform:chat_id\" (or \"chat_id\" when a single platform is configured)")
+	}
+	if i := strings.Index(target, ":"); i > 0 {
+		return target[:i], target[i+1:], nil
+	}
+	return "", target, nil
+}
+
+// eventsPoll returns gateway events after the given cursor (no waiting).
+func (p *SessionToolProvider) eventsPoll(ctx context.Context, args json.RawMessage) (any, error) {
+	var params struct {
+		AfterCursor uint64 `json:"after_cursor"`
+		SessionKey  string `json:"session_key"`
+		Limit       int    `json:"limit"`
+	}
+	_ = json.Unmarshal(args, &params)
+	result, err := p.gateway.Events(ctx, params.AfterCursor, 0)
+	if err != nil {
+		return nil, err
+	}
+	return applyEventFilter(result, params.SessionKey, params.Limit), nil
+}
+
+// eventsWait long-polls for gateway events, blocking up to timeout_ms.
+func (p *SessionToolProvider) eventsWait(ctx context.Context, args json.RawMessage) (any, error) {
+	var params struct {
+		AfterCursor uint64 `json:"after_cursor"`
+		SessionKey  string `json:"session_key"`
+		TimeoutMS   int    `json:"timeout_ms"`
+	}
+	_ = json.Unmarshal(args, &params)
+	if params.TimeoutMS <= 0 {
+		params.TimeoutMS = 30_000
+	}
+	result, err := p.gateway.Events(ctx, params.AfterCursor, params.TimeoutMS/1000)
+	if err != nil {
+		return nil, err
+	}
+	return applyEventFilter(result, params.SessionKey, 0), nil
+}
+
+// applyEventFilter narrows events to an optional session key and applies a
+// limit, keeping the newest events when truncating.
+func applyEventFilter(result map[string]any, sessionKey string, limit int) map[string]any {
+	events, _ := result["events"].([]any)
+	if sessionKey == "" && limit <= 0 {
+		return result
+	}
+	var filtered []any
+	for _, e := range events {
+		m, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		if sessionKey != "" {
+			sk, _ := m["session_key"].(string)
+			if sk != "" && sk != sessionKey {
+				continue
+			}
+		}
+		filtered = append(filtered, m)
+	}
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[len(filtered)-limit:]
+	}
+	if filtered == nil {
+		filtered = []any{}
+	}
+	out := make(map[string]any, len(result))
+	for k, v := range result {
+		out[k] = v
+	}
+	out["events"] = filtered
+	return out
+}
+
+// permissionsListOpen lists pending gateway permission requests.
+func (p *SessionToolProvider) permissionsListOpen(ctx context.Context, _ json.RawMessage) (any, error) {
+	return p.gateway.PermissionsOpen(ctx)
+}
+
+// permissionsRespond delivers a decision for a pending permission request.
+// decision: allow-once | allow-always | deny (once/session/always/deny are
+// accepted as aliases).
+func (p *SessionToolProvider) permissionsRespond(ctx context.Context, args json.RawMessage) (any, error) {
+	var params struct {
+		ID       string `json:"id"`
+		Decision string `json:"decision"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, fmt.Errorf("parse arguments: %w", err)
+	}
+	choice, err := normalizePermissionDecision(params.Decision)
+	if err != nil {
+		return nil, err
+	}
+	return p.gateway.PermissionRespond(ctx, params.ID, choice)
+}
+
+func normalizePermissionDecision(decision string) (string, error) {
+	switch strings.TrimSpace(decision) {
+	case "allow-once", "once":
+		return "once", nil
+	case "session":
+		return "session", nil
+	case "allow-always", "always":
+		return "always", nil
+	case "deny":
+		return "deny", nil
+	default:
+		return "", fmt.Errorf("invalid decision %q: use allow-once, session, allow-always, or deny", decision)
+	}
 }
 
 // channelsList implements the channels_list tool.
@@ -521,46 +656,6 @@ func (p *SessionToolProvider) channelsList(ctx context.Context, args json.RawMes
 	}
 
 	return results, nil
-}
-
-// eventsPoll stub – requires a running gateway.
-func (p *SessionToolProvider) eventsPoll(_ context.Context, _ json.RawMessage) (any, error) {
-	return map[string]any{
-		"status":  "unavailable",
-		"code":    "gateway_required",
-		"events":  []any{},
-		"message": "events_poll requires a running covo-agent gateway.",
-	}, nil
-}
-
-// eventsWait stub – requires a running gateway.
-func (p *SessionToolProvider) eventsWait(_ context.Context, _ json.RawMessage) (any, error) {
-	return map[string]any{
-		"status":    "unavailable",
-		"code":      "gateway_required",
-		"timed_out": true,
-		"events":    []any{},
-		"message":   "events_wait requires a running covo-agent gateway.",
-	}, nil
-}
-
-// permissionsListOpen stub – requires a running gateway.
-func (p *SessionToolProvider) permissionsListOpen(_ context.Context, _ json.RawMessage) (any, error) {
-	return map[string]any{
-		"status":  "unavailable",
-		"code":    "gateway_required",
-		"pending": []any{},
-		"message": "permissions_list_open requires a running covo-agent gateway.",
-	}, nil
-}
-
-// permissionsRespond stub – requires a running gateway.
-func (p *SessionToolProvider) permissionsRespond(_ context.Context, _ json.RawMessage) (any, error) {
-	return map[string]any{
-		"status":  "unavailable",
-		"code":    "gateway_required",
-		"message": "permissions_respond requires a running covo-agent gateway.",
-	}, nil
 }
 
 // ---- helpers ----

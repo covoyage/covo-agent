@@ -161,13 +161,10 @@ type Config struct {
 }
 
 type SkillsConfig struct {
-	GuardAgentCreated bool              `yaml:"guard_agent_created"`
-	AdditionalDirs    []string          `yaml:"additional_dirs,omitempty"`
-	HubURL            string            `yaml:"hub_url,omitempty"`
-	URLs              []string          `yaml:"urls,omitempty"`
-	Disabled          []string          `yaml:"disabled,omitempty"`
-	Tier              string            `yaml:"tier,omitempty"`
-	Config            map[string]string `yaml:"config,omitempty"`
+	AdditionalDirs []string          `yaml:"additional_dirs,omitempty"`
+	URLs           []string          `yaml:"urls,omitempty"`
+	Disabled       []string          `yaml:"disabled,omitempty"`
+	Config         map[string]string `yaml:"config,omitempty"`
 }
 
 type ToolsConfig struct {
@@ -189,9 +186,6 @@ func DefaultConfig() *Config {
 		Provider: "openai",
 		Model:    "gpt-5.6",
 		Mode:     "general",
-		Skills: &SkillsConfig{
-			GuardAgentCreated: false,
-		},
 		Curator: &CuratorConfig{
 			Enabled:          true,
 			IntervalHours:    168,
@@ -376,18 +370,9 @@ func MergeConfig(global, project *Config) *Config {
 			out.Skills = project.Skills
 		} else {
 			sk := *out.Skills
-			if project.Skills.GuardAgentCreated {
-				sk.GuardAgentCreated = true
-			}
 			sk.AdditionalDirs = append(sk.AdditionalDirs, project.Skills.AdditionalDirs...)
 			sk.URLs = append(sk.URLs, project.Skills.URLs...)
-			if project.Skills.HubURL != "" {
-				sk.HubURL = project.Skills.HubURL
-			}
 			sk.Disabled = append(sk.Disabled, project.Skills.Disabled...)
-			if project.Skills.Tier != "" {
-				sk.Tier = project.Skills.Tier
-			}
 			if project.Skills.Config != nil {
 				if sk.Config == nil {
 					sk.Config = project.Skills.Config
