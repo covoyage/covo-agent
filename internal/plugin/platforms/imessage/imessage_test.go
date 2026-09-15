@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -216,6 +217,13 @@ func TestStartFailsOnMissingDB(t *testing.T) {
 	if err == nil {
 		a.Stop()
 		t.Fatal("expected Start error for missing chat.db")
+	}
+	if runtime.GOOS != "darwin" {
+		// The OS guard fires before the chat.db probe on non-macOS platforms.
+		if !strings.Contains(err.Error(), "only supported on macOS") {
+			t.Fatalf("error should mention the macOS-only guard: %v", err)
+		}
+		return
 	}
 	if !strings.Contains(err.Error(), "cannot open chat.db") || !strings.Contains(err.Error(), "Full Disk Access") {
 		t.Fatalf("error should mention chat.db and Full Disk Access: %v", err)
