@@ -62,7 +62,7 @@ func aesKeyFromEncodingKey(encodingAESKey string) ([]byte, error) {
 // (IV = first 16 bytes of key), plaintext = 16B random + 4B msg_len (big
 // endian) + msg + receiveid, PKCS7 padded to 32 bytes. Returns the message
 // and the trailing receiveid (callers must verify it against the configured
-// corp_id, mirroring hermes wecom_crypto.py's receive_id check).
+// corp_id, mirroring the reference adapter wecom_crypto.py's receive_id check).
 func decryptWeCom(aesKey []byte, ciphertextB64 string) (msg []byte, receiveID string, err error) {
 	data, err := base64.StdEncoding.DecodeString(ciphertextB64)
 	if err != nil {

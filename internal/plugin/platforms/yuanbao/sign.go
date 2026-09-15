@@ -1,4 +1,4 @@
-// sign.go — sign-token 鉴权（对齐 hermes-agent yuanbao.py SignManager）。
+// sign.go — sign-token 鉴权（对齐 参考实现-agent yuanbao.py SignManager）。
 //
 // POST {domain}/api/v5/robotLogic/sign-token，payload {app_key, nonce,
 // timestamp, signature}，其中 signature = HMAC-SHA256(
@@ -25,14 +25,14 @@ import (
 )
 
 const (
-	defaultAPIDomain  = "https://bot.yuanbao.tencent.com"
-	tokenPath         = "/api/v5/robotLogic/sign-token"
-	signRetryableCode = 10099
-	signMaxRetries    = 3
-	signRetryDelay    = 1 * time.Second
-	signHTTPTimeout   = 10 * time.Second
+	defaultAPIDomain   = "https://bot.yuanbao.tencent.com"
+	tokenPath          = "/api/v5/robotLogic/sign-token"
+	signRetryableCode  = 10099
+	signMaxRetries     = 3
+	signRetryDelay     = 1 * time.Second
+	signHTTPTimeout    = 10 * time.Second
 	cacheRefreshMargin = 60 * time.Second // 提前视为过期
-	defaultTokenTTL    = time.Hour         // duration 缺省时
+	defaultTokenTTL    = time.Hour        // duration 缺省时
 	beijingOffset      = 8 * time.Hour
 )
 
@@ -135,9 +135,14 @@ func (m *signManager) fetch(ctx context.Context, appKey, appSecret, apiDomain, r
 	return tokenData{}, fmt.Errorf("sign token failed after %d retries: %w", signMaxRetries, lastErr)
 }
 
-type retryableSignError struct{ code int; msg string }
+type retryableSignError struct {
+	code int
+	msg  string
+}
 
-func (e *retryableSignError) Error() string { return fmt.Sprintf("sign token retryable: code=%d, msg=%s", e.code, e.msg) }
+func (e *retryableSignError) Error() string {
+	return fmt.Sprintf("sign token retryable: code=%d, msg=%s", e.code, e.msg)
+}
 
 func asRetryableSign(err error, target **retryableSignError) bool {
 	if e, ok := err.(*retryableSignError); ok {

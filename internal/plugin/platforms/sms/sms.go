@@ -213,7 +213,7 @@ func (a *Adapter) SendMessage(ctx context.Context, channelID string, msg plugin.
 // sendSMS posts one message segment to the Twilio Messages API. When
 // TWILIO_MESSAGING_SERVICE_SID is configured it replaces the From number;
 // mediaURL, when non-empty, is attached as a MediaUrl form parameter
-// (structure aligned with openclaw extensions/sms twilio outbound).
+// (structure aligned with the reference implementation extensions/sms twilio outbound).
 func (a *Adapter) sendSMS(ctx context.Context, to string, body string, mediaURL string) error {
 	form := url.Values{}
 	form.Set("To", to)
@@ -288,7 +288,7 @@ func twilioErrorMessage(message string, raw []byte) string {
 }
 
 // splitSMS splits text into segments of at most maxLen runes. Segments carry
-// no "(i/n)" ordinal suffix, matching openclaw extensions/sms behaviour.
+// no "(i/n)" ordinal suffix, matching the reference implementation extensions/sms behaviour.
 func splitSMS(text string, maxLen int) []string {
 	runes := []rune(text)
 	if len(runes) <= maxLen {
@@ -309,7 +309,7 @@ func splitSMS(text string, maxLen int) []string {
 // handleWebhook receives Twilio inbound message webhooks, verifies the
 // X-Twilio-Signature header and forwards the message to the callback.
 // Media-only messages (empty Body with MediaUrlN fields) are forwarded with
-// the media URLs joined as the text, matching openclaw extensions/sms
+// the media URLs joined as the text, matching the reference implementation extensions/sms
 // inbound handling.
 func (a *Adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
@@ -400,7 +400,7 @@ func attachmentTypeFor(mimeType string) string {
 // validation. Twilio signs the complete URL including the query string.
 //
 // When publicBase is configured (TWILIO_PUBLIC_WEBHOOK_URL), it is used as
-// the base URL (fragment stripped, per openclaw resolveTwilioWebhookSignatureUrl)
+// the base URL (fragment stripped, per the reference implementation resolveTwilioWebhookSignatureUrl)
 // with the request's query string appended unless the configured URL already
 // carries one. Otherwise the base is reconstructed from the request, with
 // X-Forwarded-Proto / X-Forwarded-Host taking priority (TLS-terminating

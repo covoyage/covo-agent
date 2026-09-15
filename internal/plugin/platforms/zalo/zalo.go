@@ -1,5 +1,5 @@
 // Package zalo implements the Zalo Bot API platform adapter (protocol
-// aligned with openclaw extensions/zalo src/api.ts): REST message sending
+// aligned with the reference implementation extensions/zalo src/api.ts): REST message sending
 // via https://bot-api.zaloplatforms.com/bot{token}/{method} and webhook-based
 // message receiving authenticated with the x-bot-api-secret-token header.
 package zalo
@@ -165,7 +165,7 @@ func (a *Adapter) Send(ctx context.Context, channelID string, text string) error
 
 // SendMessage sends a text message via the Zalo Bot API:
 // POST {base}/bot{token}/sendMessage with {"chat_id": ..., "text": ...}
-// (protocol aligned with openclaw extensions/zalo src/api.ts).
+// (protocol aligned with the reference implementation extensions/zalo src/api.ts).
 func (a *Adapter) SendMessage(ctx context.Context, channelID string, msg plugin.OutgoingMessage) error {
 	if a.accessToken == "" {
 		return fmt.Errorf("zalo: bot token not configured")
@@ -221,7 +221,7 @@ func (a *Adapter) SendMessage(ctx context.Context, channelID string, msg plugin.
 // serveWebhook handles Zalo Bot API webhook pushes. When
 // ZALO_WEBHOOK_SECRET is configured, requests must carry a matching
 // X-Bot-Api-Secret-Token header. Only message.text.received events are
-// converted into incoming messages (event shape per openclaw
+// converted into incoming messages (event shape per the reference implementation
 // extensions/zalo monitor).
 func (a *Adapter) serveWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

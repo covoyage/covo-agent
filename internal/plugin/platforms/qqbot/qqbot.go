@@ -33,7 +33,7 @@ const (
 	maxChunkRunes = 4000
 	maxSendRetry  = 3
 
-	// passive-reply message id cache TTL (mirrors hermes adapter.py _last_msg_id).
+	// passive-reply message id cache TTL (mirrors the reference adapter adapter.py _last_msg_id).
 	msgIDTTL = 5 * time.Minute
 )
 
@@ -50,7 +50,7 @@ const (
 )
 
 // intents: C2C_GROUP_AT_MESSAGES (1<<25) | PUBLIC_GUILD_MESSAGES (1<<30) |
-// DIRECT_MESSAGE (1<<12), matching hermes adapter.py _send_identify.
+// DIRECT_MESSAGE (1<<12), matching the reference adapter adapter.py _send_identify.
 const intents = 1<<25 | 1<<30 | 1<<12
 
 // inbound event types we care about.
@@ -305,7 +305,7 @@ func (a *Adapter) sendChunk(ctx context.Context, token, channelID, kind, text, m
 		path = "/v2/groups/" + channelID + "/messages"
 	case "guild":
 		// Guild (channel) events: /channels/{channel_id}/messages
-		// (hermes adapter.py _send_guild_text).
+		// (the reference adapter adapter.py _send_guild_text).
 		path = "/channels/" + channelID + "/messages"
 	default:
 		// C2C events: /v2/users/{user_openid}/messages.

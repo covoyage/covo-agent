@@ -154,7 +154,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 }
 
 // TestLoginAndDMPoke verifies the chat-dm-action poke structure (aligned
-// with openclaw extensions/tlon send.ts sendDmWithStory).
+// with the reference implementation extensions/tlon send.ts sendDmWithStory).
 func TestLoginAndDMPoke(t *testing.T) {
 	fs := newFakeShip(t)
 	a := newTestAdapter(fs.srv.URL)
@@ -230,7 +230,7 @@ func TestLoginAndDMPoke(t *testing.T) {
 }
 
 // TestGroupPoke verifies the channel-action-1 poke structure for group
-// channels (aligned with openclaw send.ts sendGroupMessageWithStory).
+// channels (aligned with the reference implementation send.ts sendGroupMessageWithStory).
 func TestGroupPoke(t *testing.T) {
 	fs := newFakeShip(t)
 	a := newTestAdapter(fs.srv.URL)
@@ -411,9 +411,9 @@ func TestSubscribeIgnoresSelfEcho(t *testing.T) {
 			"diff": map[string]any{
 				"add": map[string]any{
 					"memo": map[string]any{
-						"author":   "~nus",
-						"sent":     time.Now().UnixMilli(),
-						"content":  []any{map[string]any{"inline": []any{"self echo"}}},
+						"author":  "~nus",
+						"sent":    time.Now().UnixMilli(),
+						"content": []any{map[string]any{"inline": []any{"self echo"}}},
 					},
 				},
 			},

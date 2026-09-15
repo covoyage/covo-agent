@@ -204,7 +204,7 @@ func (a *Adapter) SendMessage(ctx context.Context, channelID string, msg plugin.
 
 // sanitizeIrcOutboundText makes text safe for a PRIVMSG payload: CR/LF are
 // replaced with spaces and C0 control characters, DEL and C1 (0x80-0x9F) are
-// stripped, mirroring openclaw's sanitizeIrcOutboundText.
+// stripped, mirroring the reference implementation's sanitizeIrcOutboundText.
 func sanitizeIrcOutboundText(text string) string {
 	text = strings.ReplaceAll(text, "\r\n", " ")
 	text = strings.ReplaceAll(text, "\n", " ")

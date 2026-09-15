@@ -621,7 +621,7 @@ func parseMail(raw string) (*plugin.IncomingMessage, error) {
 
 // extractText walks the MIME tree of a message and returns the body as
 // plain text: the first text/plain part, or — for HTML-only mail — the
-// first text/html part converted via stripHTML (mirrors hermes
+// first text/html part converted via stripHTML (mirrors the reference adapter
 // adapter.py's _extract_text_body fallback).
 func extractText(body io.Reader, header textproto.MIMEHeader) (string, error) {
 	var plain, htmlText string
@@ -696,7 +696,7 @@ var (
 
 // stripHTML converts an HTML body to readable plain text: style/script
 // blocks are dropped entirely, block tags become newlines, remaining tags
-// are stripped, entities decoded and whitespace collapsed (mirrors hermes
+// are stripped, entities decoded and whitespace collapsed (mirrors the reference adapter
 // adapter.py's _strip_html).
 func stripHTML(s string) string {
 	s = stripStyleScriptRe.ReplaceAllString(s, "")
@@ -737,7 +737,7 @@ func decodeCTE(r io.Reader, cte string) ([]byte, error) {
 }
 
 // normalizeCharset lowercases and maps charset labels seen in the wild to
-// names this adapter can decode (mirrors hermes adapter.py's
+// names this adapter can decode (mirrors the reference adapter adapter.py's
 // _CHARSET_ALIASES: gb2312/gbk → gb18030 superset, RFC 1428 placeholder
 // labels → utf-8, latin aliases → iso-8859-1).
 func normalizeCharset(charset string) string {
@@ -762,7 +762,7 @@ func normalizeCharset(charset string) string {
 // decodeCharset converts raw bytes to a UTF-8 string, decoding the CJK and
 // latin charsets common in the wild (GB2312/GBK/GB18030, Big5, ISO-8859-*).
 // Decoding never fails the message: on any error the payload degrades to
-// latin-1 (mirrors hermes adapter.py's _safe_decode fallback chain).
+// latin-1 (mirrors the reference adapter adapter.py's _safe_decode fallback chain).
 func decodeCharset(data []byte, charset string) string {
 	switch normalizeCharset(charset) {
 	case "utf-8":
@@ -770,7 +770,7 @@ func decodeCharset(data []byte, charset string) string {
 			return string(data)
 		}
 		// Invalid bytes: replace rather than propagate garbage (the
-		// errors="replace" half of hermes's _safe_decode).
+		// errors="replace" half of the reference adapter's _safe_decode).
 		return strings.ToValidUTF8(string(data), "\uFFFD")
 	case "gb18030":
 		return decodeWith(simplifiedchinese.GB18030, data)

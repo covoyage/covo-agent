@@ -34,7 +34,7 @@ const (
 )
 
 // tokenInvalidCodes are WeCom errcodes meaning the access_token is invalid
-// or expired and must be force-refreshed (mirrors hermes
+// or expired and must be force-refreshed (mirrors the reference adapter
 // callback_adapter.py: 40014 invalid token, 40001 invalid credential,
 // 42001 token expired).
 var tokenInvalidCodes = map[int]bool{40014: true, 40001: true, 42001: true}
@@ -475,7 +475,7 @@ func (a *Adapter) serveReceive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Duplicate delivery (WeCom retries on timeout): ack without
-	// re-dispatching (mirrors hermes callback_adapter.py MsgId dedup).
+	// re-dispatching (mirrors the reference adapter callback_adapter.py MsgId dedup).
 	if a.seenMsgID(msg.MsgId) {
 		_, _ = w.Write([]byte("success"))
 		return

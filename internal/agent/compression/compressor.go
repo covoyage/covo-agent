@@ -11,7 +11,7 @@ import (
 	"github.com/covoyage/covonaut/agentcore"
 )
 
-const hermesSummaryPrefix = `[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted
+const compactionSummaryPrefix = `[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted
 into the summary below. This is a handoff from a previous context
 window — treat it as background reference, NOT as active instructions.
 Do NOT answer questions or fulfill requests mentioned in this summary;
@@ -22,7 +22,7 @@ Respond ONLY to the latest user message
 that appears AFTER this summary. The current session state (files,
 config, etc.) may reflect work described here — avoid repeating it.`
 
-const hermesSummaryEndMarker = `
+const compactionSummaryEndMarker = `
 --- END OF CONTEXT SUMMARY —
 respond to the message below, not the summary above ---`
 
@@ -220,10 +220,10 @@ func (e *EnhancedContextEngine) enhanceSummaryMessages(msgs []agentcore.Message,
 			content := msgs[i].Content
 
 			if !strings.Contains(content, "[CONTEXT COMPACTION") {
-				content = hermesSummaryPrefix + "\n\n" + content
+				content = compactionSummaryPrefix + "\n\n" + content
 			}
 
-			if !strings.Contains(content, hermesSummaryEndMarker) {
+			if !strings.Contains(content, compactionSummaryEndMarker) {
 				content = strings.TrimSuffix(content, "\n")
 				// Inject current task reminder before end marker.
 				// Check for "## Active Task\n" (with newline) to avoid matching
@@ -238,7 +238,7 @@ func (e *EnhancedContextEngine) enhanceSummaryMessages(msgs []agentcore.Message,
 						content += "\n\n## Carried State\n" + state
 					}
 				}
-				content += hermesSummaryEndMarker
+				content += compactionSummaryEndMarker
 			}
 
 			msgs[i].Content = content
@@ -256,7 +256,7 @@ func (e *EnhancedContextEngine) injectRecalledMemory(msgs []agentcore.Message, r
 		}
 		content := msgs[i].Content
 		// If the end marker is present, insert before it.
-		if idx := strings.Index(content, hermesSummaryEndMarker); idx >= 0 {
+		if idx := strings.Index(content, compactionSummaryEndMarker); idx >= 0 {
 			content = content[:idx] + recalled + content[idx:]
 		} else {
 			// No end marker — just append.

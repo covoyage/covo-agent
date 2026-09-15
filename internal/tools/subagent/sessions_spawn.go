@@ -220,7 +220,7 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 			if strings.TrimSpace(params.Task) == "" {
 				return nil, fmt.Errorf("task is required")
 			}
-			// background defaults to TRUE (grok-style): spawns return
+			// background defaults to TRUE: spawns return
 			// immediately and children run concurrently — sequential tool
 			// calls must not serialize children. Explicit false blocks.
 			background := params.Background == nil || bool(*params.Background)

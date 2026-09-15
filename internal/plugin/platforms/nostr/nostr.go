@@ -43,7 +43,7 @@ const (
 	reconnectMin    = 1 * time.Second
 	reconnectMax    = 30 * time.Second
 	stableConnAfter = time.Minute
-	maxChunkRunes   = 4000 // outbound text chunk limit, per openclaw gateway.ts textChunkLimit
+	maxChunkRunes   = 4000 // outbound text chunk limit, per the reference implementation gateway.ts textChunkLimit
 )
 
 type Adapter struct {
@@ -59,7 +59,7 @@ type Adapter struct {
 	pubkeyHex string
 	// lastEventAt is the created_at of the most recent inbound event; used
 	// as the subscription `since` cursor on reconnect so no events are
-	// missed (openclaw nostr-bus keeps a durable cursor; we keep it
+	// missed (the reference implementation nostr-bus keeps a durable cursor; we keep it
 	// in-process — restart resumes from "now").
 	lastEventAt int64
 	// sinceBaseline is the "now" of the first subscription; events older
@@ -215,7 +215,7 @@ func (a *Adapter) Send(ctx context.Context, channelID string, text string) error
 
 // SendMessage sends a NIP-04 encrypted kind:4 DM. channelID is the
 // recipient's public key (64-char x-only or 66-char compressed hex). Text
-// longer than maxChunkRunes (4000, per openclaw gateway.ts textChunkLimit)
+// longer than maxChunkRunes (4000, per the reference implementation gateway.ts textChunkLimit)
 // is split and sent as consecutive events.
 func (a *Adapter) SendMessage(ctx context.Context, channelID string, msg plugin.OutgoingMessage) error {
 	if msg.Text == "" {

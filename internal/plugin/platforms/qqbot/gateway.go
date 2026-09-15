@@ -94,7 +94,7 @@ func (a *Adapter) runGatewaySession(ctx context.Context, gwURL string) error {
 				return
 			case opInvalidSession:
 				// d=true: session resumable; d=false/absent: re-Identify from
-				// scratch (hermes adapter.py op 9 handling).
+				// scratch (the reference adapter adapter.py op 9 handling).
 				var resumable bool
 				_ = json.Unmarshal(payload.D, &resumable)
 				if !resumable {

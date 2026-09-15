@@ -166,7 +166,7 @@ func (a *Adapter) postMessage(ctx context.Context, channelID, text string, threa
 func (a *Adapter) uploadFile(ctx context.Context, channelID string, media *plugin.MediaInfo) error {
 	// files.upload is deprecated (server returns method_deprecated); use the
 	// three-step external upload flow: getUploadURLExternal -> upload bytes ->
-	// completeUploadExternal. Mirrors openclaw client-delivery.ts.
+	// completeUploadExternal. mirrors the reference implementation client-delivery.ts.
 	if media.Data == nil {
 		// URL-only media cannot use the external upload flow; post the link.
 		return a.postMessage(ctx, channelID, media.URL, "")
@@ -311,7 +311,7 @@ func (a *Adapter) apiCall(ctx context.Context, method string, params map[string]
 func (a *Adapter) socketModeLoop(ctx context.Context) {
 	// Reconnect loop: any dial failure or read error tears down the old
 	// connection and rebuilds with exponential backoff (1s -> 60s cap).
-	// Only ctx cancellation exits the loop. Mirrors openclaw's
+	// Only ctx cancellation exits the loop. mirrors the reference implementation's
 	// monitor/reconnect-policy.ts backoff approach.
 	backoff := reconnectInitial
 	for {

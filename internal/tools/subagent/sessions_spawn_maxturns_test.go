@@ -93,7 +93,7 @@ func TestSpawnUnknownPersonaSoftDegradation(t *testing.T) {
 	}
 }
 
-// TestSpawnDefaultBackgroundParallel verifies the grok-style default: two
+// TestSpawnDefaultBackgroundParallel verifies the default: two
 // sequential spawn calls (no explicit background) both return immediately
 // and their children run CONCURRENTLY, not serialized.
 func TestSpawnDefaultBackgroundParallel(t *testing.T) {

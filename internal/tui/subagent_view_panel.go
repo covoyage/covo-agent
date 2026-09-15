@@ -41,8 +41,8 @@ type SubagentViewPanel struct {
 }
 
 // NewSubagentViewPanel builds the transcript panel. onSteer/onInterrupt are
-// optional in-place controls for a running child (hermes-style dashboard
-// controls); nil disables the corresponding key.
+// optional in-place controls for a running child (dashboard-style controls);
+// nil disables the corresponding key.
 func NewSubagentViewPanel(entry SubagentViewEntry, onClose func(), onPeer func(dir int), onSteer func(string) bool, onInterrupt func() bool) *SubagentViewPanel {
 	return &SubagentViewPanel{entry: entry, onClose: onClose, onPeer: onPeer, onSteer: onSteer, onInterrupt: onInterrupt}
 }

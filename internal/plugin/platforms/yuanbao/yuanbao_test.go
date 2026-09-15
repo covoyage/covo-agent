@@ -612,7 +612,7 @@ func TestSendC2CAndGroupFrames(t *testing.T) {
 	if c2c == nil || grp == nil {
 		t.Fatal("send frames not received")
 	}
-	// C2C 帧：module = yuanbao_openclaw_proxy，data: 2 to_account, 3 from_account, 5 msg_body。
+	// C2C 帧：module = bizPkg 常量值，data: 2 to_account, 3 from_account, 5 msg_body。
 	if c2c.module != bizPkg || c2c.msgID == "" || !strings.HasPrefix(c2c.msgID, "c2c_") {
 		t.Fatalf("c2c head: %+v", c2c)
 	}

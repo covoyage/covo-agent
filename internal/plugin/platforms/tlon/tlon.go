@@ -1,7 +1,7 @@
 // Package tlon implements a Urbit (Tlon) ship platform adapter over the Eyre
 // HTTP channel API, speaking the current chat protocol (app "chat" /
 // app "channels"). The poke and subscribe payload structures are aligned
-// with openclaw extensions/tlon (src/urbit/send.ts, src/urbit/sse-client.ts
+// with the reference implementation extensions/tlon (src/urbit/send.ts, src/urbit/sse-client.ts
 // and src/monitor/).
 //
 // Environment:
@@ -204,7 +204,7 @@ const (
 
 // tlonTarget is a resolved outbound/inbound target. Group channels are
 // "<host>/<name>" (host includes the leading ~); everything else is a DM
-// ship (structure aligned with openclaw extensions/tlon targets.ts).
+// ship (structure aligned with the reference implementation extensions/tlon targets.ts).
 type tlonTarget struct {
 	kind     targetKind
 	ship     string // DM target ship, includes ~
@@ -253,7 +253,7 @@ func (a *Adapter) resolveTarget(channelID string) (tlonTarget, error) {
 // SendMessage posts a text message via a chat poke: DMs poke app "chat"
 // (mark "chat-dm-action"), group channels poke app "channels"
 // (mark "channel-action-1"). The payload structures are aligned with
-// openclaw extensions/tlon src/urbit/send.ts.
+// the reference implementation extensions/tlon src/urbit/send.ts.
 func (a *Adapter) SendMessage(ctx context.Context, channelID string, msg plugin.OutgoingMessage) error {
 	if msg.Text == "" {
 		return nil
@@ -277,7 +277,7 @@ func (a *Adapter) SendMessage(ctx context.Context, channelID string, msg plugin.
 	}
 
 	sentAt := time.Now().UnixMilli()
-	// Story: a single inline verse carrying the plain text (openclaw
+	// Story: a single inline verse carrying the plain text (the reference implementation
 	// markdownToStory for plain text yields [{inline: [text]}]).
 	story := []map[string]any{{"inline": []any{msg.Text}}}
 
@@ -285,7 +285,7 @@ func (a *Adapter) SendMessage(ctx context.Context, channelID string, msg plugin.
 	var payload map[string]any
 	if target.kind == kindDM {
 		// chat-dm-action: id is "<author>/<@ud sent>" (@ud = dots every 3
-		// digits), per openclaw send.ts sendDmWithStory.
+		// digits), per the reference implementation send.ts sendDmWithStory.
 		app = "chat"
 		mark = "chat-dm-action"
 		payload = map[string]any{
@@ -419,7 +419,7 @@ func (a *Adapter) cookie() string {
 }
 
 // channelUID generates a per-connection Eyre channel UID of the form
-// "~ship/epoch" (aligned with openclaw sse-client channel naming).
+// "~ship/epoch" (aligned with the reference implementation sse-client channel naming).
 func (a *Adapter) channelUID() string {
 	ship := strings.TrimPrefix(a.selfShip(), "~")
 	return fmt.Sprintf("~%s/%d", ship, time.Now().UnixNano())
@@ -665,7 +665,7 @@ func findMemos(v any) []map[string]any {
 }
 
 // storyToText renders a story (list of verses) to plain text, aligned with
-// openclaw tlon monitor utils extractMessageText for the common cases.
+// the reference implementation tlon monitor utils extractMessageText for the common cases.
 func storyToText(content any) string {
 	verses, ok := content.([]any)
 	if !ok {

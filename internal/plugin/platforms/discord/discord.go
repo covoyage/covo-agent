@@ -150,7 +150,7 @@ func (a *Adapter) createMessage(ctx context.Context, channelID, text string, rep
 func (a *Adapter) sendFile(ctx context.Context, channelID string, media *plugin.MediaInfo) error {
 	// Binary media must go out as multipart/form-data: payload_json carries
 	// the message JSON and files[0] carries the file bytes (with filename),
-	// mirroring openclaw's internal/rest-body.ts multipart serialization.
+	// mirroring the reference implementation's internal/rest-body.ts multipart serialization.
 	if media.Data == nil {
 		body := map[string]any{}
 		if media.URL != "" {

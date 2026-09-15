@@ -1,6 +1,6 @@
 // Package yuanbao implements a Tencent Yuanbao (腾讯元宝) platform adapter.
 //
-// 协议对齐 hermes-agent gateway/platforms/yuanbao*.py（Python 参考实现）：
+// 协议对齐 参考实现-agent gateway/platforms/yuanbao*.py（Python 参考实现）：
 //
 //   - 鉴权：POST {domain}/api/v5/robotLogic/sign-token，payload
 //     {app_key, nonce, timestamp, signature}，其中
@@ -18,26 +18,26 @@
 //     文本用 TIMTextElem）。
 //   - 断线重连指数退避（1s, 2s, 4s, … 上限 60s）；ctx 取消干净退出。
 //
-// 环境变量（与 hermes 配置的对应关系）：
+// 环境变量（与 参考实现 配置的对应关系）：
 //
-//	YUANBAO_APP_ID      app_key（hermes: app_id）——主配置
-//	YUANBAO_APP_SECRET  app_secret（hermes: app_secret）——主配置
+//	YUANBAO_APP_ID      app_key（参考实现: app_id）——主配置
+//	YUANBAO_APP_SECRET  app_secret（参考实现: app_secret）——主配置
 //	                    签名需要 app_key + app_secret 成对使用。
 //	YUANBAO_API_KEY     旧配置名，保留兼容：未设置 YUANBAO_APP_ID 时视为
 //	                    app_key。注意旧实现将其作为 REST bearer token
 //	                    （POST {base}/bot/{botID}/messages + Bearer），该
 //	                    web 端点约定已被证实与真实协议完全不符；sign-token
-//	                    签名实际需要的是 app_key（hermes app_id），而非
+//	                    签名实际需要的是 app_key（参考实现 app_id），而非
 //	                    bearer token。
 //	YUANBAO_BOT_ID      可选；sign-token 返回的 bot_id 会覆盖/补齐
-//	                    （hermes: bot_id 可选，由 sign-token 返回）。
+//	                    （参考实现: bot_id 可选，由 sign-token 返回）。
 //	YUANBAO_WS_URL      WS 网关地址，默认
 //	                    wss://bot-wss.yuanbao.tencent.com/wss/connection
 //	YUANBAO_API_DOMAIN  sign-token API 域名，默认 https://bot.yuanbao.tencent.com
 //	YUANBAO_ROUTE_ENV   可选路由环境（X-Route-Env 头 / AUTH_BIND env_name）
 //
 // channelID 约定：群聊为 "group:<group_code>"，单聊为对端用户 id（发送时也
-// 接受 "direct:<account>" 前缀，对齐 hermes 的 chat_id 路由）。入站回调中
+// 接受 "direct:<account>" 前缀，对齐 参考实现 的 chat_id 路由）。入站回调中
 // UserID 与单聊 channelID 均为对端账号（from_account）。
 package yuanbao
 
@@ -63,31 +63,31 @@ import (
 const (
 	PlatformName         = "yuanbao"
 	defaultWSURL         = "wss://bot-wss.yuanbao.tencent.com/wss/connection"
-	heartbeatInterval    = 30 * time.Second        // 对齐 HEARTBEAT_INTERVAL_SECONDS
-	pongTimeout          = 10 * time.Second        // 对齐心跳单次等待
-	heartbeatMissLimit   = 2                       // 连续丢 pong 阈值，超过触发重连
-	authTimeout          = 10 * time.Second        // AUTH_BIND 等待 BIND_ACK
-	defaultSendTimeout   = 30 * time.Second        // WS 业务请求超时
-	maxReconnectAttempts = 100                     // 对齐 MAX_RECONNECT_ATTEMPTS
-	maxBackoff           = 60 * time.Second        // 退避上限
-	bizID                = "ybBot"                 // AUTH_BIND biz_id
-	defaultSource        = "bot"                   // sign-token source 缺省值
-	appVersion           = "0.0.0"                 // X-AppVersion / X-Bot-Version
+	heartbeatInterval    = 30 * time.Second // 对齐 HEARTBEAT_INTERVAL_SECONDS
+	pongTimeout          = 10 * time.Second // 对齐心跳单次等待
+	heartbeatMissLimit   = 2                // 连续丢 pong 阈值，超过触发重连
+	authTimeout          = 10 * time.Second // AUTH_BIND 等待 BIND_ACK
+	defaultSendTimeout   = 30 * time.Second // WS 业务请求超时
+	maxReconnectAttempts = 100              // 对齐 MAX_RECONNECT_ATTEMPTS
+	maxBackoff           = 60 * time.Second // 退避上限
+	bizID                = "ybBot"          // AUTH_BIND biz_id
+	defaultSource        = "bot"            // sign-token source 缺省值
+	appVersion           = "0.0.0"          // X-AppVersion / X-Bot-Version
 )
 
 // Adapter 是元宝平台适配器（WS 长连接模式）。
 type Adapter struct {
-	appKey     string
-	appSecret  string
-	wsURL      string
-	apiDomain  string
-	routeEnv   string
-	logger     *slog.Logger
+	appKey    string
+	appSecret string
+	wsURL     string
+	apiDomain string
+	routeEnv  string
+	logger    *slog.Logger
 
 	// 以下字段可注入以便测试
-	sign      *signManager
-	botID     string
-	hbInterval time.Duration
+	sign        *signManager
+	botID       string
+	hbInterval  time.Duration
 	sendTimeout time.Duration
 
 	mu        sync.Mutex
@@ -96,11 +96,11 @@ type Adapter struct {
 	onMessage func(plugin.IncomingMessage)
 	wg        sync.WaitGroup
 
-	connMu   sync.Mutex
-	conn     *wsTransport
-	hbDone   chan struct{} // 每条连接的退出信号（心跳 goroutine 监听）
-	pending  map[string]chan *connMsg
-	authed   atomic.Bool // AUTH_BIND 完成（BIND_ACK code=0）
+	connMu  sync.Mutex
+	conn    *wsTransport
+	hbDone  chan struct{} // 每条连接的退出信号（心跳 goroutine 监听）
+	pending map[string]chan *connMsg
+	authed  atomic.Bool // AUTH_BIND 完成（BIND_ACK code=0）
 }
 
 func New() *Adapter {
@@ -517,7 +517,7 @@ func (a *Adapter) dispatchInbound(data []byte) {
 	go cb(msg)
 }
 
-// extractText 从 MsgBody 提取纯文本（对齐 hermes ExtractContentMiddleware
+// extractText 从 MsgBody 提取纯文本（对齐 参考实现 ExtractContentMiddleware
 // 的简化版：文本元素原样保留，媒体/未知元素输出占位符，空格连接）。
 func extractText(body []msgBodyElem) string {
 	var parts []string

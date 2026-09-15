@@ -294,7 +294,7 @@ func (a *Adapter) handleWebhook(ctx context.Context, body []byte, r *http.Reques
 
 	// Encrypted envelope: {"encrypt": "<base64 ciphertext>"}. AES-256-CBC
 	// with key = SHA256(encrypt_key), IV = first 16 bytes of the ciphertext
-	// (the scheme used by the Lark/Feishu SDK openclaw relies on).
+	// (the scheme used by the Lark/Feishu SDK the reference implementation relies on).
 	var envelope struct {
 		Encrypt string `json:"encrypt"`
 	}

@@ -69,7 +69,7 @@ func (footer *StickyFooter) SetPlanStore(store func() []PlanItem) {
 }
 
 // SetSubagentsProvider supplies the spawned sub-agent snapshot for the
-// footer's live sub-agent line (grok/hermes-style bottom strip). Return
+// footer's live sub-agent bottom strip. Return
 // nil/empty to hide the line.
 func (footer *StickyFooter) SetSubagentsProvider(store func() []FooterSubagent) {
 	footer.subagents = store
@@ -240,8 +240,8 @@ func (footer *StickyFooter) renderTodoLine(items []TodoItem, palette *theme.Pale
 	return core.PadToWidth(line, width)
 }
 
-// renderAsyncWorkLine renders the unified background-work strip (grok-style
-// tasks strip): live spawned sub-agents and background task count share one
+// renderAsyncWorkLine renders the unified background-work strip: live spawned
+// sub-agents and background task count share one
 // line, visible only while there is async work. The leading space aligns the
 // strip with the status line below it.
 func (footer *StickyFooter) renderAsyncWorkLine(entries []FooterSubagent, bgCount int, palette *theme.Palette, width int64) string {

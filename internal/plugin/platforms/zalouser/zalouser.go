@@ -1,6 +1,6 @@
 // Package zalouser implements the Zalo personal account platform.
 //
-// PROTOCOL NOTE (openclaw parity): openclaw's zalouser extension
+// PROTOCOL NOTE (reference parity): the reference implementation's zalouser extension
 // (extensions/zalouser) drives Zalo's private web protocol via zca-js —
 // QR-code login producing cookie + imei + userAgent credentials and a
 // WebSocket listener for inbound events. That private protocol cannot be
@@ -9,7 +9,7 @@
 // webhook for receiving. Personal-account tokens must be obtained through
 // the Zalo Open Platform (open.zalo.me); this path has NOT been verified
 // against a real personal account. For full personal-account support,
-// follow openclaw/extensions/zalouser.
+// follow the reference implementation/extensions/zalouser.
 package zalouser
 
 import (

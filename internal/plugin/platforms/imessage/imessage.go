@@ -201,7 +201,7 @@ func (a *Adapter) SendMessage(ctx context.Context, channelID string, msg plugin.
 
 // isChatTarget reports whether a target is a chat guid (e.g. "iMessage;+chatXXXX"
 // for group chats) rather than a buddy handle. Chat guids are service
-// independent, matching openclaw's chat_id/chat_identifier routing.
+// independent, matching the reference implementation's chat_id/chat_identifier routing.
 func isChatTarget(target string) bool {
 	return strings.Contains(target, "+chat") || strings.HasPrefix(target, "chat")
 }
@@ -335,7 +335,7 @@ type messageRow struct {
 // resolveChatTarget picks the channel ID for a message's chat. Direct chats
 // are addressed by chat_identifier (the buddy handle); group chats whose
 // chat_identifier is of the "iMessage;+chatXXXX" form are addressed by the
-// chat guid instead, matching openclaw's target kind handling.
+// chat guid instead, matching the reference implementation's target kind handling.
 func resolveChatTarget(chatIdentifier, chatGUID, roomName string) (channelID string, isGroup bool) {
 	id := chatIdentifier
 	if strings.Contains(id, "+chat") && chatGUID != "" {

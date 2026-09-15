@@ -78,12 +78,12 @@ func TestDetectRepetitionLoop(t *testing.T) {
 			// A ~140-rune sentence repeated just twice back-to-back: below
 			// repetitionMinCycles (4) but should still be flagged because a
 			// long unit only needs repetitionLongUnitCycles (2) repeats.
-			text: strings.Repeat("covo-agent is a Go project (108k LOC, 450 files) and clearly shares lineage/inspiration with hermes-agent. Let me dig into its internal architecture. ", 2),
+			text: strings.Repeat("covo-agent is a Go project (108k LOC, 450 files) and clearly shares lineage/inspiration with the reference implementation. Let me dig into its internal architecture. ", 2),
 			want: true,
 		},
 		{
 			name: "long paragraph repeated once is not flagged",
-			text: "covo-agent is a Go project (108k LOC, 450 files) and clearly shares lineage/inspiration with hermes-agent. Let me dig into its internal architecture. ",
+			text: "covo-agent is a Go project (108k LOC, 450 files) and clearly shares lineage/inspiration with the reference implementation. Let me dig into its internal architecture. ",
 			want: false,
 		},
 		{

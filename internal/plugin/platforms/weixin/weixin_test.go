@@ -243,7 +243,7 @@ func TestSendMessageWithoutContextToken(t *testing.T) {
 	}
 }
 
-// TestSendMessageSessionExpiredRetriesWithoutToken mirrors hermes
+// TestSendMessageSessionExpiredRetriesWithoutToken mirrors the reference adapter
 // _send_text_chunk: on errcode -14 retry once without the context_token.
 func TestSendMessageSessionExpiredRetriesWithoutToken(t *testing.T) {
 	var mu sync.Mutex

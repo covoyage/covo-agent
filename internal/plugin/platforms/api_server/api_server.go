@@ -27,7 +27,7 @@ const (
 	channelsFileName = "api_server_channels.json"
 
 	// idempotencyTTL bounds how long an Idempotency-Key result is replayed
-	// for duplicate POSTs (mirrors hermes api_server_runs.py retention).
+	// for duplicate POSTs (mirrors the reference adapter api_server_runs.py retention).
 	idempotencyTTL = 10 * time.Minute
 
 	// maxTextBytes caps the text accepted through the OpenAI-compatible
@@ -341,7 +341,7 @@ func (a *Adapter) saveChannels() {
 }
 
 // checkAuth validates the optional Bearer token in constant time
-// (mirrors hermes api_server.py's hmac.compare_digest usage).
+// (mirrors the reference adapter api_server.py's hmac.compare_digest usage).
 func (a *Adapter) checkAuth(r *http.Request) bool {
 	if a.authToken == "" {
 		return true

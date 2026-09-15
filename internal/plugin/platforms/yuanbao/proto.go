@@ -1,6 +1,6 @@
 // proto.go — 元宝 WebSocket 协议编解码。
 //
-// 协议对齐 hermes-agent gateway/platforms/yuanbao_proto.py（手写 protobuf
+// 协议对齐 参考实现-agent gateway/platforms/yuanbao_proto.py（手写 protobuf
 // wire-format，encoding/binary 级别实现，不引入第三方 protobuf 库）。
 //
 // 每个 WebSocket 帧 = 一条 ConnMsg protobuf（标准 protobuf；magic+len 二进制
@@ -11,7 +11,7 @@
 //	          string module=5; bool need_ack=6; int32 status=10 }
 //
 // data 为业务 payload（InboundMessagePush / SendC2CMessageReq /
-// SendGroupMessageReq / ...，服务名前缀 yuanbao_openclaw_proxy）。
+// SendGroupMessageReq / ...，服务名前缀见 bizPkg 常量）。
 package yuanbao
 
 import (
@@ -41,7 +41,7 @@ const (
 	moduleConnAccess = "conn_access"
 	bizPkg           = "yuanbao_openclaw_proxy" // TS client 使用短名（非完整包路径）
 
-	instanceID = 17 // openclaw instance_id（固定值，对齐 HERMES_INSTANCE_ID）
+	instanceID = 17 // 固定值，与参考实现保持一致
 )
 
 var seqCounter atomic.Uint32
@@ -457,7 +457,7 @@ func decodeMsgContent(data []byte) *msgContent {
 
 // msgBodyElem 对齐 MsgBodyElement：1 msg_type (e.g. "TIMTextElem"), 2 msg_content。
 type msgBodyElem struct {
-	MsgType   string
+	MsgType    string
 	MsgContent msgContent
 }
 

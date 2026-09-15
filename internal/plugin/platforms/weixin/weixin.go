@@ -1,7 +1,7 @@
 // Package weixin implements the WeChat personal-account (个人号) bot platform
 // over Tencent's iLink Bot API.
 //
-// 协议对齐 hermes-agent gateway/platforms/weixin.py（iLink Bot API）：
+// 协议对齐 参考实现-agent gateway/platforms/weixin.py（iLink Bot API）：
 // inbound is a long-poll loop against ilink/bot/getupdates with an opaque
 // cursor (get_updates_buf); outbound is ilink/bot/sendmessage which must echo
 // the peer's latest context_token captured from an inbound message.
@@ -39,7 +39,7 @@ import (
 const (
 	PlatformName = "weixin"
 
-	// iLink Bot API base (hermes weixin.py ILINK_BASE_URL).
+	// iLink Bot API base (the reference adapter weixin.py ILINK_BASE_URL).
 	defaultILinkBase = "https://ilinkai.weixin.qq.com"
 
 	epGetUpdates   = "ilink/bot/getupdates"
@@ -56,7 +56,7 @@ const (
 	retryDelay           = 2 * time.Second
 	backoffDelay         = 30 * time.Second
 
-	// msg payload constants (hermes weixin.py).
+	// msg payload constants (the reference adapter weixin.py).
 	msgTypeBot      = 2
 	msgStateFinish  = 2
 	itemTypeText    = 1
@@ -66,7 +66,7 @@ const (
 	maxSendAttempts = 4
 
 	// retryBackoff is the linear retry backoff base (injectable in tests).
-	// contextTokenTTL bounds the per-peer context_token cache. hermes
+	// contextTokenTTL bounds the per-peer context_token cache. the reference adapter
 	// persists tokens indefinitely on disk; we keep an in-memory cache with
 	// a generous TTL as tokens are refreshed on every inbound message.
 	contextTokenTTL = 24 * time.Hour
@@ -207,7 +207,7 @@ func (a *Adapter) SendMessage(ctx context.Context, channelID string, msg plugin.
 
 // sendChunk posts one text chunk via ilink/bot/sendmessage. On session
 // expiry (-14, or -2 with "unknown error") it retries once without the
-// context_token, matching hermes weixin.py _send_text_chunk.
+// context_token, matching the reference adapter weixin.py _send_text_chunk.
 func (a *Adapter) sendChunk(ctx context.Context, to, text, contextToken string) error {
 	var lastErr error
 	retriedWithoutToken := false
@@ -248,7 +248,7 @@ func (a *Adapter) sendChunk(ctx context.Context, to, text, contextToken string) 
 	return lastErr
 }
 
-// buildTextMessage mirrors hermes _send_message/_send_items: a bot text
+// buildTextMessage mirrors the reference adapter _send_message/_send_items: a bot text
 // message that echoes the peer's context_token for passive delivery.
 func buildTextMessage(to, text, contextToken, clientID string) map[string]any {
 	message := map[string]any{
@@ -270,7 +270,7 @@ func buildTextMessage(to, text, contextToken, clientID string) map[string]any {
 	return message
 }
 
-// apiPost performs an iLink API POST with the hermes header set and the
+// apiPost performs an iLink API POST with the the reference adapter header set and the
 // base_info channel-version envelope.
 func (a *Adapter) apiPost(ctx context.Context, endpoint string, payload map[string]any, timeoutMS int64) (map[string]any, error) {
 	payload["base_info"] = map[string]any{"channel_version": ilinkChannelVersion}
@@ -321,7 +321,7 @@ func (a *Adapter) apiPost(ctx context.Context, endpoint string, payload map[stri
 	return result, nil
 }
 
-// randomUIN mirrors hermes _headers: base64 of a random 4-byte big-endian int.
+// randomUIN mirrors the reference adapter _headers: base64 of a random 4-byte big-endian int.
 func (a *Adapter) randomUIN() string {
 	var buf [4]byte
 	a.rngMu.Lock()
@@ -360,7 +360,7 @@ func (a *Adapter) pollLoop(ctx context.Context) {
 			a.logger.Warn("weixin: getupdates error", "ret", ret, "errcode", errcode,
 				"errmsg", stringField(resp, "errmsg"), "streak", consecutiveErrors)
 			if isSessionExpired(resp, ret, errcode) {
-				// Session expired: pause before retrying (hermes sleeps 10 min).
+				// Session expired: pause before retrying (the reference adapter sleeps 10 min).
 				if !a.sleepWithContext(ctx, 10*time.Minute) {
 					return
 				}
@@ -447,7 +447,7 @@ func (a *Adapter) processMessage(msg map[string]any) {
 }
 
 // extractText pulls the first text item out of an inbound item_list,
-// mirroring hermes _extract_text (text-only handling for this adapter).
+// mirroring the reference adapter _extract_text (text-only handling for this adapter).
 func extractText(msg map[string]any) string {
 	items, ok := msg["item_list"].([]any)
 	if !ok {
@@ -517,7 +517,7 @@ func intField(m map[string]any, key string) int {
 	}
 }
 
-// isSessionExpired mirrors hermes _is_session_expired: errcode/ret -14, or a
+// isSessionExpired mirrors the reference adapter _is_session_expired: errcode/ret -14, or a
 // -2 "unknown error" which signals a stale session rather than rate limiting.
 func isSessionExpired(resp map[string]any, ret, errcode int) bool {
 	if ret == sessionExpired || errcode == sessionExpired {
@@ -570,7 +570,7 @@ func (a *Adapter) getContextToken(userID string) string {
 }
 
 // newClientID generates a fresh client_id per outbound message
-// (hermes: "hermes-weixin-<uuid>").
+// (reference: "the reference adapter-weixin-<uuid>").
 func newClientID() string {
 	var buf [16]byte
 	_, _ = rand.Read(buf[:])

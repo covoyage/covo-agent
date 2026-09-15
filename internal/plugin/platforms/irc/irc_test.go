@@ -389,7 +389,7 @@ func TestSanitizeIrcOutboundText(t *testing.T) {
 		{"line1\r\nline2", "line1 line2"},
 		{"line1\nline2", "line1 line2"},
 		{"a\x02b", "ab"},                      // C0 control stripped
-		{"a\tb", "ab"},                        // tab stripped (matches openclaw)
+		{"a\tb", "ab"},                        // tab stripped (matches the reference implementation)
 		{"a\x7fb", "ab"},                      // DEL stripped
 		{"a\u0085b", "ab"},                    // C1 NEL stripped
 		{"a\u009fb", "ab"},                    // C1 upper bound stripped
