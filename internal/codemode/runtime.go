@@ -15,6 +15,12 @@ import (
 const (
 	defaultTimeout = 60 * time.Second
 	maxOutputBytes = 100 * 1024 // 100KB
+
+	// DefaultMaxToolCalls caps nested tool invocations per run_code
+	// execution when the caller does not specify a limit. Each nested call
+	// re-enters the full hook and approval chain, so an unbounded loop would
+	// both burn resources and spam approval prompts.
+	DefaultMaxToolCalls = 100
 )
 
 // ToolExecutor is a function that executes a tool by name with the given arguments.
@@ -36,9 +42,16 @@ type RunResult struct {
 //   - Child writes user output to stdout (fmt.Println etc.)
 //   - Parent reads requests from stderr pipe, writes responses to stdin
 //   - Parent captures stdout to a strings.Builder
-func Execute(ctx context.Context, tools []ToolInfo, userCode string, executor ToolExecutor, timeout time.Duration) (*RunResult, error) {
+//
+// maxToolCalls bounds nested tool invocations; values <= 0 select
+// DefaultMaxToolCalls. Requests past the limit receive an error response
+// instead of executing, letting the program react and exit gracefully.
+func Execute(ctx context.Context, tools []ToolInfo, userCode string, executor ToolExecutor, timeout time.Duration, maxToolCalls int) (*RunResult, error) {
 	if timeout <= 0 {
 		timeout = defaultTimeout
+	}
+	if maxToolCalls <= 0 {
+		maxToolCalls = DefaultMaxToolCalls
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -86,7 +99,7 @@ func Execute(ctx context.Context, tools []ToolInfo, userCode string, executor To
 	stderrScanner.Buffer(make([]byte, maxOutputBytes), maxOutputBytes)
 	stdinWriter := bufio.NewWriter(stdin)
 
-	ipcErr, stderrOutput := handleToolCalls(ctx, stderrScanner, stdinWriter, executor)
+	ipcErr, stderrOutput := handleToolCalls(ctx, stderrScanner, stdinWriter, executor, maxToolCalls)
 	_ = ipcErr // non-nil only on scanner errors, not compilation errors
 
 	// Force-kill on timeout
@@ -134,9 +147,12 @@ func Execute(ctx context.Context, tools []ToolInfo, userCode string, executor To
 
 // handleToolCalls reads tool call requests from the child's stderr,
 // executes them via the executor, and writes responses to the child's stdin.
+// maxToolCalls caps how many requests are executed; excess requests get an
+// error response so the child can exit gracefully.
 // Returns any error and accumulated non-JSON stderr output.
-func handleToolCalls(ctx context.Context, scanner *bufio.Scanner, writer *bufio.Writer, executor ToolExecutor) (error, string) {
+func handleToolCalls(ctx context.Context, scanner *bufio.Scanner, writer *bufio.Writer, executor ToolExecutor, maxToolCalls int) (error, string) {
 	var stderrLines []string
+	callCount := 0
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -149,6 +165,17 @@ func handleToolCalls(ctx context.Context, scanner *bufio.Scanner, writer *bufio.
 			stderrLines = append(stderrLines, string(line))
 			continue
 		}
+
+		if callCount >= maxToolCalls {
+			// Over budget: answer with an error instead of executing so the
+			// child sees a tool failure it can handle, not a silent stall.
+			respBytes, _ := json.Marshal(ToolCallResponse{
+				Error: fmt.Sprintf("tool call limit exceeded (%d); terminate the program", maxToolCalls),
+			})
+			writeResponse(writer, respBytes)
+			continue
+		}
+		callCount++
 
 		result, execErr := executor(ctx, req.Tool, req.Args)
 

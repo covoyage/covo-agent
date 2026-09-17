@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/covoyage/covo-agent/internal/agent/approval"
@@ -139,7 +140,7 @@ type CovoAgent struct {
 	compressionSwitch       *compression.CompressionProviderSwitch
 	doomloopDetector        *doomloop.Detector
 	doomloopTurn            int  // current turn counter for doom loop tracking
-	doomloopDetected        bool // whether a doom loop was detected this turn
+	doomloopDetected        atomic.Bool // whether a doom loop was detected this turn
 	doomloopBudgetExhausted bool // when true, all tool calls are blocked
 	hunkTracker             *hunk.Tracker
 	rolloutRecorder         *rollout.Recorder
@@ -369,6 +370,48 @@ func envInt(name string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+// terminalToolConfigFromEnv builds the persistent terminal config. Set
+// TERMINAL_TOOLS=off to disable the family entirely; TERMINAL_SHELL
+// overrides the shell used for new sessions.
+// ResolveExecMode maps an execution.mode setting to an executor mode.
+// Parallel is the default and the widest setting: every tool call joins the
+// bounded rolling pool unless the tool explicitly declared
+// ConcurrencySafe=false, in which case it runs alone as a serial barrier.
+// "mixed" selects strict declarative scheduling (undeclared tools fail
+// closed to serial barriers) and "serial" downgrades to fully serial
+// execution. A config value takes precedence over the EXECUTION_MODE
+// environment variable, which honors "serial" and "mixed" when no config
+// value is set.
+func ResolveExecMode(cfgMode string) agentcore.ExecutionMode {
+	switch cfgMode {
+	case "serial":
+		return agentcore.ModeSerial
+	case "mixed":
+		return agentcore.ModeMixed
+	}
+	if cfgMode == "" {
+		switch os.Getenv("EXECUTION_MODE") {
+		case "serial":
+			return agentcore.ModeSerial
+		case "mixed":
+			return agentcore.ModeMixed
+		}
+	}
+	return agentcore.ModeParallel
+}
+
+func terminalToolConfigFromEnv() *tools.TerminalToolConfig {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("TERMINAL_TOOLS"))) {
+	case "off", "false", "0", "no":
+		return nil
+	}
+	shell := strings.TrimSpace(os.Getenv("TERMINAL_SHELL"))
+	if shell == "" {
+		return &tools.TerminalToolConfig{}
+	}
+	return &tools.TerminalToolConfig{Shell: shell}
 }
 
 // filterInjectableParentMessages returns the subset of parent conversation
@@ -689,6 +732,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 		SpawnNotifyFunc:   cfg.SpawnNotifyFunc,
 		ToolProfile:       cfg.ToolProfile,
 		WorkDir:           cfg.WorkingDir,
+		ProviderName:      cfg.ProviderName,
 		WebFetchTransport: NewSafeClient().Transport,
 	})
 
@@ -924,6 +968,10 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 
 	ca.core = agentcore.New(agentCfg)
 
+	// Stamp per-tool concurrency declarations for mixed execution mode.
+	// Undeclared tools stay fail-closed (exclusive); see concurrency.go.
+	agenttools.ApplyConcurrencyDeclarations(ca.core)
+
 	// Wire BackgroundReviewer to curator for post-session self-improvement
 	ca.backgroundReviewer = NewBackgroundReviewerFromFunc(
 		func(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
@@ -1064,15 +1112,14 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelWarn)}))
 	}
 
-	execMode := agentcore.ModeSerial
-	switch cfg.ExecutionMode {
-	case "parallel":
-		execMode = agentcore.ModeParallel
-	default:
-		if os.Getenv("EXECUTION_MODE") == "parallel" {
-			execMode = agentcore.ModeParallel
-		}
-	}
+	// Parallel is the default: every tool call joins the bounded rolling
+	// pool, so concurrent execution is the norm without user configuration.
+	// Tools that explicitly declared ConcurrencySafe=false still run alone
+	// as serial barriers inside the parallel executor. Opt out further with
+	// execution.mode: mixed (undeclared tools fail closed to serial
+	// barriers) or serial (fully sequential), via config or the
+	// EXECUTION_MODE environment variable.
+	execMode := ResolveExecMode(cfg.ExecutionMode)
 
 	concurrency := cfg.Concurrency
 	if concurrency <= 0 {
@@ -1083,7 +1130,7 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		}
 	}
 	if concurrency <= 0 {
-		concurrency = 5
+		concurrency = 10
 	}
 
 	computerUse := envBool("COMPUTER_USE_ENABLED", false)
@@ -1109,6 +1156,11 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		WriteFile:  &tools.WriteFileToolConfig{Operations: ca.fsOps},
 		Browser:    browserToolConfigFromEnv(),
 		WebSearch:  webSearchToolConfigFromAgent(cfg.ProviderName),
+		// Persistent terminal sessions: PTY-backed shells whose working
+		// directory, environment, and background jobs survive across calls,
+		// complementing the per-invocation bash tool. Env opt-out keeps
+		// existing setups unchanged.
+		Terminal: terminalToolConfigFromEnv(),
 		ExecuteCode: &tools.ExecuteCodeToolConfig{
 			PythonCommand:  os.Getenv("EXECUTE_CODE_PYTHON"),
 			CommandTimeout: envDurationSeconds("EXECUTE_CODE_TIMEOUT", 0),
@@ -1633,6 +1685,7 @@ func (ca *CovoAgent) Rebuild(mode AgentMode, provider agentcore.Provider, provid
 	}
 	ca.cfg = ca.buildAgentConfig(cfg)
 	ca.core = agentcore.New(ca.cfg)
+	agenttools.ApplyConcurrencyDeclarations(ca.core)
 
 	// Re-wrap the context engine in EnhancedContextEngine (carried state,
 	// boundary markers, compression switch).

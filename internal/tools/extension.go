@@ -89,6 +89,7 @@ type Extension struct {
 	tools             []*agentcore.Tool
 	toolProfile       string
 	workDir           string
+	providerName      string
 	parentMessages    func() []agentcore.Message
 	phaseTransition   toolsplanning.PhaseTransitioner
 	externalAgents    *externalagent.Registry
@@ -134,6 +135,11 @@ type ExtensionConfig struct {
 	// WorkDir is the default working directory used for external agent
 	// delegation tasks (external_agent tool). May be empty.
 	WorkDir string
+
+	// ProviderName is the active LLM provider (anthropic, gemini, ...). Used
+	// to decide whether read_image can attach images directly to results or
+	// must fall back to vision-model analysis. May be empty.
+	ProviderName string
 
 	// ParentMessages returns the parent agent's current conversation messages,
 	// used by "state" and "full" context modes for sessions_spawn. May be nil
@@ -614,6 +620,10 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 
 		// Batch 29: run_code (Code Mode — execute Go programs with tool SDK)
 		BuildRunCodeToolWithRegistry(agent),
+
+		// Batch 30: read_image (multimodal direct injection on capable
+		// providers, vision-model analysis otherwise)
+		BuildReadImageTool(e.providerName, e.imageAnalyzer),
 	}
 
 	if os.Getenv("FAL_KEY") != "" {

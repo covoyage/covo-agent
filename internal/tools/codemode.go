@@ -88,7 +88,10 @@ func BuildRunCodeToolWithRegistry(agent *agentcore.Agent) *agentcore.Tool {
 			}
 			tools := codemode.ToolsFromDefinitions(defs)
 
-			result, err := codemode.Execute(runCtx, tools, params.Code, nestedRunCodeExecutor(agent), timeout)
+			// maxToolCalls 0 selects codemode.DefaultMaxToolCalls (100):
+			// nested calls re-enter the approval chain, so a runaway loop
+			// must not be able to spam it indefinitely.
+			result, err := codemode.Execute(runCtx, tools, params.Code, nestedRunCodeExecutor(agent), timeout, 0)
 			if err != nil {
 				return nil, err
 			}

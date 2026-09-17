@@ -102,7 +102,7 @@ func TestExecute_BasicProgram(t *testing.T) {
 		fmt.Println("error:", err)
 		return
 	}
-	fmt.Println("got:", result)`, executor, 0)
+	fmt.Println("got:", result)`, executor, 0, 0)
 	if err != nil {
 		t.Fatalf("execute failed: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestExecute_BasicProgram(t *testing.T) {
 }
 
 func TestExecute_CompilationError(t *testing.T) {
-	_, err := Execute(context.Background(), nil, `this is not valid go code !!!`, nil, 0)
+	_, err := Execute(context.Background(), nil, `this is not valid go code !!!`, nil, 0, 0)
 	if err == nil {
 		t.Fatal("expected error for invalid code")
 	}
@@ -149,7 +149,7 @@ func TestExecute_MultipleToolCalls(t *testing.T) {
 	r2, err := ToolCallStr("beta", map[string]any{})
 	if err != nil { fmt.Println("err2:", err); return }
 	fmt.Println(r1, r2)`
-	result, err := Execute(context.Background(), tools, code, executor, 0)
+	result, err := Execute(context.Background(), tools, code, executor, 0, 0)
 	if err != nil {
 		t.Fatalf("execute failed: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestExecute_ToolError(t *testing.T) {
 	} else {
 		fmt.Println("should have failed")
 	}`
-	result, err := Execute(context.Background(), tools, code, executor, 0)
+	result, err := Execute(context.Background(), tools, code, executor, 0, 0)
 	if err != nil {
 		t.Fatalf("execute failed: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestExecute_ToolError(t *testing.T) {
 func TestExecute_RuntimeError(t *testing.T) {
 	tools := []ToolInfo{}
 	code := `panic("oops")`
-	result, err := Execute(context.Background(), tools, code, nil, 0)
+	result, err := Execute(context.Background(), tools, code, nil, 0, 0)
 	if err == nil {
 		t.Fatal("expected error for runtime panic")
 	}
@@ -200,5 +200,36 @@ func TestExecute_RuntimeError(t *testing.T) {
 	}
 	if result.ExitCode == 0 {
 		t.Errorf("exit code should be non-zero, got %d", result.ExitCode)
+	}
+}
+
+func TestExecute_MaxToolCalls(t *testing.T) {
+	tools := []ToolInfo{
+		{Name: "ping", Description: "Counts calls", Parameters: map[string]any{
+			"type": "object", "properties": map[string]any{},
+		}},
+	}
+	executor := func(ctx context.Context, name string, args json.RawMessage) (any, error) {
+		return "pong", nil
+	}
+	// The program issues 3 calls but only 2 are allowed: the first two
+	// succeed, the third gets an error response the program can print.
+	code := `for i := 0; i < 3; i++ {
+	r, err := ToolCallStr("ping", map[string]any{})
+	if err != nil {
+		fmt.Printf("call%d: %v\n", i, err)
+	} else {
+		fmt.Printf("call%d: %s\n", i, r)
+	}
+}`
+	result, err := Execute(context.Background(), tools, code, executor, 0, 2)
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+	if !strings.Contains(result.Output, "call0: pong") || !strings.Contains(result.Output, "call1: pong") {
+		t.Errorf("first two calls should succeed, got: %s", result.Output)
+	}
+	if !strings.Contains(result.Output, "tool call limit exceeded") {
+		t.Errorf("third call should report the limit, got: %s", result.Output)
 	}
 }

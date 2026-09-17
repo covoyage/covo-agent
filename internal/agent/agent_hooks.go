@@ -471,7 +471,7 @@ func (ca *CovoAgent) doomloopAfterHook() agentcore.AfterHook {
 			call.Error = err.Error()
 		}
 		if det := ca.doomloopDetector.RecordToolCall(call); det != nil {
-			ca.doomloopDetected = true
+			ca.doomloopDetected.Store(true)
 			nudge := det.GetRecoveryNudge()
 			if nudge == "" {
 				return
@@ -896,7 +896,7 @@ func (h *doomloopLifecycleHook) BeforeAgentRun(_ context.Context, _ *agentcore.A
 	// a budget-exhausted agent from a previous run gets a fresh start when the
 	// user sends a new message.
 	h.ca.doomloopBudgetExhausted = false
-	h.ca.doomloopDetected = false
+	h.ca.doomloopDetected.Store(false)
 	h.ca.doomloopTurn = 0
 	return nil
 }
@@ -909,12 +909,12 @@ func (h *doomloopLifecycleHook) AfterTurn(_ context.Context, _ *agentcore.AgentR
 
 	// If no doom loop was detected this turn, reset the detector completely
 	// (including recovery budget) — the agent successfully navigated.
-	if !h.ca.doomloopDetected {
+	if !h.ca.doomloopDetected.Load() {
 		h.ca.doomloopDetector.Reset()
 		h.ca.doomloopBudgetExhausted = false
 	} else {
 		// Preserve recovery budget across turns, but clear per-turn history
 		h.ca.doomloopDetector.ResetForNewTurn()
 	}
-	h.ca.doomloopDetected = false
+	h.ca.doomloopDetected.Store(false)
 }

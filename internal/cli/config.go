@@ -35,7 +35,7 @@ type AuxiliaryConfig struct {
 }
 
 type ExecutionConfig struct {
-	Mode        string `yaml:"mode,omitempty"` // "serial" or "parallel"
+	Mode        string `yaml:"mode,omitempty"` // "parallel" (default), "mixed", or "serial"
 	Concurrency int    `yaml:"concurrency,omitempty"`
 }
 
