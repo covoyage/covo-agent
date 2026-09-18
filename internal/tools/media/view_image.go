@@ -34,14 +34,8 @@ func BuildViewImageTool(workDir string, analyze ImageAnalyzer) *agentcore.Tool {
 // transport for http(s) image URLs (SSRF-safe when the caller passes one).
 func BuildViewImageToolWithTransport(workDir string, analyze ImageAnalyzer, transport http.RoundTripper) *agentcore.Tool {
 	return &agentcore.Tool{
-		Name: "view_image",
-		Description: strings.Join([]string{
-			"Analyze png/jpeg/gif/webp image(s) with the vision model.",
-			"Pass path for one image, or paths for several (max 8). Local workspace paths or http(s) URLs.",
-			"Remote fetches require a safe transport (SSRF-checked) and are capped at 4MB each.",
-			"Screenshots from computer_use can be passed by path.",
-			"For video files, use video_analyze (ffmpeg stills) instead of this tool.",
-		}, "\n"),
+		Name:        "view_image",
+		Description: "Analyze png/jpeg/gif/webp image(s) with the vision model. Prefer the unified read tool.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -69,60 +63,82 @@ func BuildViewImageToolWithTransport(workDir string, analyze ImageAnalyzer, tran
 			if err := json.Unmarshal(args, &params); err != nil {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
 			}
-			paths := collectImagePaths(params.Path, params.Paths)
-			if len(paths) == 0 {
-				return nil, fmt.Errorf("path or paths is required")
-			}
-			if len(paths) > viewImageMaxImages {
-				return nil, fmt.Errorf("at most %d images per call", viewImageMaxImages)
-			}
-			prompt := strings.TrimSpace(params.Prompt)
-			if prompt == "" {
-				prompt = "Describe this image. Call out any text, UI, errors, or details useful for a coding agent."
-			}
-			if analyze == nil {
-				return nil, fmt.Errorf("vision model is not configured")
-			}
-			if len(paths) == 1 {
-				return describeOneImage(ctx, paths[0], workDir, transport, analyze, prompt, viewImageMaxChars)
-			}
-			perCap := viewImageMultiChars
-			images := make([]map[string]any, 0, len(paths))
-			var combined strings.Builder
-			anyOK := false
-			truncated := false
-			for i, p := range paths {
-				if ctx.Err() != nil {
-					return nil, ctx.Err()
-				}
-				item, err := describeOneImage(ctx, p, workDir, transport, analyze, prompt, perCap)
-				if err != nil {
-					images = append(images, map[string]any{"path": p, "error": err.Error()})
-					continue
-				}
-				anyOK = true
-				if t, _ := item["truncated"].(bool); t {
-					truncated = true
-				}
-				images = append(images, item)
-				if combined.Len() > 0 {
-					combined.WriteByte('\n')
-				}
-				fmt.Fprintf(&combined, "Image %d (%s): %s", i+1, item["path"], item["description"])
-			}
-			if !anyOK {
-				return nil, fmt.Errorf("vision model failed on all %d images", len(paths))
-			}
-			summary, sumTrunc := truncateRunes(combined.String(), viewImageMaxChars)
-			return map[string]any{
-				"images":      images,
-				"count":       len(images),
-				"prompt":      prompt,
-				"description": summary,
-				"truncated":   truncated || sumTrunc,
-			}, nil
+			return AnalyzeImages(ctx, AnalyzeImagesInput{
+				Path:      params.Path,
+				Paths:     params.Paths,
+				Prompt:    params.Prompt,
+				WorkDir:   workDir,
+				Analyze:   analyze,
+				Transport: transport,
+			})
 		},
 	}
+}
+
+// AnalyzeImagesInput is the programmatic entry for one or more images.
+type AnalyzeImagesInput struct {
+	Path      string
+	Paths     []string
+	Prompt    string
+	WorkDir   string
+	Analyze   ImageAnalyzer
+	Transport http.RoundTripper
+}
+
+// AnalyzeImages describes one or more images with the vision model.
+func AnalyzeImages(ctx context.Context, in AnalyzeImagesInput) (any, error) {
+	paths := collectImagePaths(in.Path, in.Paths)
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("path or paths is required")
+	}
+	if len(paths) > viewImageMaxImages {
+		return nil, fmt.Errorf("at most %d images per call", viewImageMaxImages)
+	}
+	prompt := strings.TrimSpace(in.Prompt)
+	if prompt == "" {
+		prompt = "Describe this image. Call out any text, UI, errors, or details useful for a coding agent."
+	}
+	if in.Analyze == nil {
+		return nil, fmt.Errorf("vision model is not configured")
+	}
+	if len(paths) == 1 {
+		return describeOneImage(ctx, paths[0], in.WorkDir, in.Transport, in.Analyze, prompt, viewImageMaxChars)
+	}
+	perCap := viewImageMultiChars
+	images := make([]map[string]any, 0, len(paths))
+	var combined strings.Builder
+	anyOK := false
+	truncated := false
+	for i, p := range paths {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		item, err := describeOneImage(ctx, p, in.WorkDir, in.Transport, in.Analyze, prompt, perCap)
+		if err != nil {
+			images = append(images, map[string]any{"path": p, "error": err.Error()})
+			continue
+		}
+		anyOK = true
+		if t, _ := item["truncated"].(bool); t {
+			truncated = true
+		}
+		images = append(images, item)
+		if combined.Len() > 0 {
+			combined.WriteByte('\n')
+		}
+		fmt.Fprintf(&combined, "Image %d (%s): %s", i+1, item["path"], item["description"])
+	}
+	if !anyOK {
+		return nil, fmt.Errorf("vision model failed on all %d images", len(paths))
+	}
+	summary, sumTrunc := truncateRunes(combined.String(), viewImageMaxChars)
+	return map[string]any{
+		"images":      images,
+		"count":       len(images),
+		"prompt":      prompt,
+		"description": summary,
+		"truncated":   truncated || sumTrunc,
+	}, nil
 }
 
 func collectImagePaths(path string, paths []string) []string {

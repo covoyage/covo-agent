@@ -12,13 +12,13 @@ Regenerate with: go test ./internal/agent -run TestToolCatalog -update-tool-cata
 | `audit_query` | Query the persistent audit log of agent tool calls and lifecycle events. | safe |
 | `audit_read` | Read file contents like 'read', but with automatic sensitive-path blocking. | safe |
 | `bash` | Execute a bash command in the current working directory. | undeclared |
-| `browser` | Control a web browser. | undeclared |
+| `browser` | Control the agent's Chromium session for page interaction: navigate, snapshot, click, type, scroll. | undeclared |
 | `canvas` | Render HTML, SVG, or Mermaid content in a browser for visual inspection. | undeclared |
 | `clarify` | Ask the user a clarifying question and wait for their answer before proceeding. | undeclared |
 | `close_agent` | Explicitly close a completed or interrupted sub-agent. | undeclared |
 | `code_graph` | Build a dependency graph of Go packages in the workspace (Go only, not a general code graph). | safe |
 | `code_navigate` | Precise code navigation and diagnostics via the language server (LSP). | undeclared |
-| `computer_use` | Control desktop applications via accessibility APIs. | undeclared |
+| `computer_use` | Control visible desktop apps via accessibility APIs. | undeclared |
 | `context_compress` | Check if the conversation context is approaching token limits and trigger automatic summarization of older messages. | undeclared |
 | `context_compress_config` | View or update the context compression threshold. | undeclared |
 | `create_goal` | Create a new session-level goal. | undeclared |
@@ -65,13 +65,12 @@ Regenerate with: go test ./internal/agent -run TestToolCatalog -update-tool-cata
 | `moa` | Mixture of Agents — queries one or more LLMs in parallel and synthesizes the best answer. | undeclared |
 | `monitor` | Monitor a long-running process and stream its output line-by-line. | undeclared |
 | `move` | Move or rename a file or directory. | undeclared |
+| `open_url` | Open a URL in the user's default system browser (visible window: Safari/Chrome/Firefox). | undeclared |
 | `parse_duration` | Parse human-readable duration strings into milliseconds. | undeclared |
 | `patch` | Apply a patch to a file by replacing an exact string with another. | undeclared |
-| `pdf` | Extract text content from PDF documents for analysis. | undeclared |
 | `process` | Manage background processes (spawned via the 'spawn' action). | undeclared |
 | `reaction` | Show an emoji reaction in this conversation UI. | undeclared |
-| `read` | Read a file's contents. | safe |
-| `read_image` | Load an image from a local file path or HTTP(S) URL so the model can see it. | undeclared |
+| `read` | Read a file, image, PDF, Jupyter notebook, or video. | safe |
 | `remote_exec` | Execute commands on a remote machine via SSH. | undeclared |
 | `run_code` | Execute a complete Go program with access to all agent tools. | undeclared |
 | `sandbox` | Run shell commands in the configured sandbox. | undeclared |
@@ -116,9 +115,7 @@ Regenerate with: go test ./internal/agent -run TestToolCatalog -update-tool-cata
 | `transcribe` | Transcribe speech from audio or video files to text. | undeclared |
 | `update_goal` | Update the status of the current session goal. | undeclared |
 | `update_plan` | Ordered plan for the current task (not a durable tracker; use todo for this turn, kanban/goal to persist). | undeclared |
-| `video_analyze` | Analyze visual content of a video by sampling still frames with ffmpeg. | undeclared |
 | `view` | View directory structure as a tree. | safe |
-| `view_image` | Analyze png/jpeg/gif/webp image(s) with the vision model. | safe |
 | `vision_analyze` | Analyze an image using a vision-capable LLM. | safe |
 | `web_fetch` | Fetch content from a URL with HTTP GET and return readable text. | safe |
 | `web_search` | Search the web. | safe |

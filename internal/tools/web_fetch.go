@@ -109,6 +109,7 @@ func buildWebFetchTool(transport http.RoundTripper, cache *webFetchCache) *agent
 			"HTML is converted to markdown by default. Does not POST or PUT.",
 			"Use this to read documentation, API GET responses, or any web page.",
 			"Does not execute JavaScript; use browser tools for JS-heavy pages.",
+			"Does not open a visible window; use open_url when the user only wants to see the site.",
 			"If the result has blocked=true (anti-bot, captcha, Cloudflare, 401/403/429),",
 			"do not treat text as page content — switch to browser navigate, or stop.",
 			"",

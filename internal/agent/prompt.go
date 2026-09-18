@@ -51,9 +51,14 @@ If a tool call fails, analyze why it failed and try a different approach. For ex
 
 	webResearchGuidance = `For current facts, local project progress, policy/news, prices, releases, or anything likely to have changed since your training data, use web_search before answering. Prefer web_search for discovery, then web_fetch on the most relevant official or primary-source pages.
 
-web_fetch is a lightweight HTTP fetcher (no JavaScript). It works for most static HTML pages. If web_fetch returns a BLOCKED error (anti-bot, captcha, Cloudflare, rate-limited), switch to browser (action=navigate) which uses a real Chrome browser with JavaScript rendering and anti-detection measures.
+web_fetch is a lightweight HTTP fetcher (no JavaScript). It works for most static HTML pages. If web_fetch returns a BLOCKED error (anti-bot, captcha, Cloudflare, rate-limited), switch to browser (action=navigate) for JavaScript rendering.
 
-Browser tools are for JavaScript-heavy pages, login flows, interactive content, or as fallback when web_fetch is blocked. Do not start with browser navigation for ordinary factual lookups.
+Keep these tools separate:
+- open_url: show a page in the user's OS default browser. Stop there; it does not give the agent DOM control.
+- browser: click, type, snapshot, and scrape page content in the agent's Chromium session (headless by default; AGENT_BROWSER_HEADED=1 / BROWSER_HEADLESS=false makes that window visible). This is not Safari / the OS default browser.
+- computer_use: desktop chrome only (address bar, permission prompts, extension popups, native dialogs). Do not use it to click page content.
+
+Do not start with browser navigation for ordinary factual lookups. Prefer web_search then web_fetch.
 
 If web_search is unavailable, not present in your tools, or fails because the network/default search backend is unavailable, do not imply that you searched or inspected search results. Do not say things like "search results were not relevant", "I found no direct result", or "let me try another search engine". Do not introduce related-sounding entities that the user did not mention. If a browser page shows a captcha, verification, anti-bot, or "验证码" page, stop immediately; do not retry the same or another search engine.
 
@@ -61,7 +66,7 @@ If web_search returns garbled, empty, or obviously anti-crawled results (e.g., s
 
 CRITICAL — NO SEARCH RETRY LOOPS: If web_search or web_fetch returns a verification page, captcha, anti-bot block, or empty/irrelevant results, you MUST stop searching immediately. Do NOT try alternative search engines, do NOT rephrase the query and retry, do NOT generate fictional search attempts. A maximum of 2 search attempts is allowed per topic. After that, tell the user: "Web search is currently unavailable due to anti-bot protections. Please provide the specific URL you'd like me to look up, or we can proceed without web search." Under no circumstances should you loop through multiple search engines or query variations — this wastes time and produces no results.
 
-web_search is expected to work out of the box: it auto-selects credentialed backends when API keys are present, otherwise falls back to keyless DuckDuckGo and Bing RSS. If it fails, say that web search failed and include the tool error. Ask the user for specific URLs only if needed. Mention optional search-backend environment variables such as ` + "`WEB_SEARCH_PROVIDER`, `SERPAPI_API_KEY`, `BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY`, `SEARXNG_URL`, `GEMINI_API_KEY`, or `WEB_SEARCH_API_URL`" + ` only as an optional reliability improvement, not as a prerequisite for basic use.
+web_search is expected to work out of the box: it auto-selects credentialed backends when API keys are present, otherwise the keyless engine commonly used in the current region (then another as fallback). If it fails, say that web search failed and include the tool error. Ask the user for specific URLs only if needed. Mention optional search-backend environment variables such as ` + "`WEB_SEARCH_PROVIDER`, `WEB_SEARCH_REGION`, `SERPAPI_API_KEY`, `BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY`, `SEARXNG_URL`, `GEMINI_API_KEY`, or `WEB_SEARCH_API_URL`" + ` only as an optional reliability improvement, not as a prerequisite for basic use.
 
 For Chinese local-government or construction-project questions, search in Chinese and try several targeted queries. Prefer official domains, public-resource trading pages, planning/natural-resources bureaus, district/town government pages, and project owner announcements. Use site: filters when useful, such as site:.gov.cn, site:shanghai.gov.cn, site:pudong.gov.cn, or known public bidding domains. Cross-check dates and clearly cite which source each claim came from. If search yields weak evidence, say what was found and what remains uncertain instead of guessing.`
 

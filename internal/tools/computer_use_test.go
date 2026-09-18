@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -96,5 +97,14 @@ func TestComputerUseFrameStale(t *testing.T) {
 	computerFrames.set(computerFrame{ID: "f1", Captured: time.Now().Add(-time.Minute)})
 	if _, err := computerFrames.require("f1"); err == nil {
 		t.Fatal("expected stale frame")
+	}
+}
+
+func TestComputerUseFocusAppRequiresName(t *testing.T) {
+	tool := buildComputerUseTool()
+	raw, _ := json.Marshal(map[string]any{"action": "focus_app"})
+	_, err := tool.Func(context.Background(), raw)
+	if err == nil || !strings.Contains(err.Error(), "app is required") {
+		t.Fatalf("expected app required, got %v", err)
 	}
 }

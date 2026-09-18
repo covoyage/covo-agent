@@ -63,9 +63,13 @@ func buildComputerUseTool() *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "computer_use",
 		Description: strings.Join([]string{
-			"Control desktop applications via accessibility APIs.",
-			"Actions: screenshot, wait, list_apps, get_app_state, click, scroll, drag,",
+			"Control visible desktop apps via accessibility APIs.",
+			"Actions: screenshot, wait, list_apps, get_app_state, focus_app, click, scroll, drag,",
 			"type_text, press_key, set_value, secondary_action.",
+			"",
+			"For page content (navigate, click a link, fill a form) use browser, not this tool.",
+			"Reserve computer_use for desktop chrome: address bar, permission prompts,",
+			"extension popups, native dialogs, and anything on screen that is not page DOM.",
 			"",
 			"Call screenshot before click/drag/secondary_action. Coordinates are pixels",
 			"in that screenshot (top-left origin). Frames expire after 30s.",
@@ -79,12 +83,12 @@ func buildComputerUseTool() *agentcore.Tool {
 					"type": "string",
 					"enum": []string{
 						"screenshot", "wait",
-						"list_apps", "get_app_state", "click",
+						"list_apps", "get_app_state", "focus_app", "click",
 						"scroll", "drag", "type_text", "press_key",
 						"set_value", "secondary_action",
 					},
 				},
-				"app":      map[string]any{"type": "string", "description": "App name."},
+				"app":      map[string]any{"type": "string", "description": "App name (list_apps/get_app_state/focus_app)."},
 				"x":        map[string]any{"type": "integer", "description": "X coordinate in the last screenshot."},
 				"y":        map[string]any{"type": "integer", "description": "Y coordinate in the last screenshot."},
 				"text":     map[string]any{"type": "string", "description": "Text to type."},
@@ -112,6 +116,8 @@ func buildComputerUseTool() *agentcore.Tool {
 				return listApps()
 			case "get_app_state":
 				return getAppState(p.App)
+			case "focus_app":
+				return focusApp(p.App)
 			case "click":
 				if _, err := computerFrames.require(p.FrameID); err != nil {
 					return nil, err
@@ -365,6 +371,34 @@ return "frontmost="&frontmost of p&"|windows="&count of windows of p`, escapeApp
 		return map[string]any{"app": app, "title": title, "responding": responding, "frontmost": title != ""}, nil
 	}
 	return nil, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+}
+
+func focusApp(app string) (any, error) {
+	app = strings.TrimSpace(app)
+	if app == "" {
+		return nil, fmt.Errorf("app is required for focus_app")
+	}
+	var err error
+	switch runtime.GOOS {
+	case "darwin":
+		err = runDesktop("osascript", "-e", fmt.Sprintf(`tell application "%s" to activate`, escapeAppleScriptString(app)))
+	case "linux":
+		if lookPath("wmctrl") {
+			err = runDesktop("wmctrl", "-a", app)
+		} else {
+			err = runDesktop("xdotool", "search", "--name", app, "windowactivate")
+		}
+	case "windows":
+		err = runDesktop("powershell", "-NoProfile", "-Command", fmt.Sprintf(
+			`$p=Get-Process | Where-Object { $_.MainWindowTitle -like '*%s*' -or $_.ProcessName -like '*%s*' } | Select-Object -First 1; if(-not $p){ throw 'app not found' }; Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class W { [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); }'; [W]::SetForegroundWindow($p.MainWindowHandle)`,
+			escapePSString(app), escapePSString(app)))
+	default:
+		return nil, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"focused": true, "app": app}, nil
 }
 
 func click(x, y int) (any, error) {

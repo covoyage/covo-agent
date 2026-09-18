@@ -341,7 +341,7 @@ var DefaultPlanModeAllowedTools = map[string]bool{
 	// Read-only file/search tools
 	"read": true, "grep": true, "glob": true, "ls": true,
 	"search_files": true,
-	"web_search":   true, "web_fetch": true,
+	"web_search":   true, "web_fetch": true, "open_url": true,
 	"session_search": true, "diffs": true,
 	"git_status": true, "git_log": true, "git_diff": true,
 	// Planning workflow tools (do not mutate files)
@@ -360,7 +360,7 @@ var LeanDirectTools = map[string]bool{
 	"read": true, "edit": true, "write_file": true, "ls": true,
 	"search_files": true,
 	"bash":         true, "git_status": true, "git_diff": true, "git_log": true,
-	"web_fetch": true, "todo": true, "update_plan": true, "clarify": true,
+	"web_fetch": true, "open_url": true, "todo": true, "update_plan": true, "clarify": true,
 	"exit_plan_mode": true, "session_search": true, "diffs": true,
 	"apply_patch": true, "edit_block": true, "skill": true,
 	"tool_search": true, "tool_describe": true, "tool_call": true,

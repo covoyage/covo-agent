@@ -25,7 +25,6 @@ var profileCategories = map[string][]string{
 	"sessions_spawn":         {"coding"},
 	"sessions_spawn_batch":   {"coding"},
 	"sessions_send":          {"coding"},
-	"pdf":                    {"coding"},
 	"transcribe":             {"coding"},
 	"secrets":                {"coding"},
 	"tool_search":            {"coding"},
@@ -84,11 +83,9 @@ var profileCategories = map[string][]string{
 	"parse_duration":    {"coding"},
 
 	// --- web ---
-	"web_fetch":     {"coding"},
-	"view_image":    {"coding", "messaging"},
-	"video_analyze": {"coding", "messaging"},
-	"reaction":      {"coding", "messaging"},
-	"append_file":   {"coding"},
+	"web_fetch":   {"coding"},
+	"reaction":    {"coding", "messaging"},
+	"append_file": {"coding"},
 
 	// --- context compression ---
 	"context_compress":        {"coding"},

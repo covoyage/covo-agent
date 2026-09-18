@@ -54,6 +54,7 @@ func BuildReadImageTool(providerName string, analyze toolsmedia.ImageAnalyzer) *
 		Name: "read_image",
 		Description: strings.Join([]string{
 			"Load an image from a local file path or HTTP(S) URL so the model can see it.",
+			"Prefer read for a local image path; use this tool for HTTP(S) URLs or when you already know the file is an image.",
 			directExplanation(direct),
 		}, " "),
 		Parameters: map[string]any{
@@ -73,52 +74,56 @@ func BuildReadImageTool(providerName string, analyze toolsmedia.ImageAnalyzer) *
 			if err := json.Unmarshal(args, &params); err != nil {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
 			}
-			if strings.TrimSpace(params.Path) == "" {
-				return nil, fmt.Errorf("path is required")
-			}
-
-			data, mime, err := readImageBytes(ctx, strings.TrimSpace(params.Path))
-			if err != nil {
-				return nil, err
-			}
-
-			if !direct {
-				if analyze != nil {
-					dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(data))
-					analysis, analyzeErr := analyze(ctx,
-						"Describe this image in detail: its content, any text it contains, and anything visually notable.",
-						mime, dataURL)
-					if analyzeErr != nil {
-						return nil, fmt.Errorf("vision analysis failed: %w", analyzeErr)
-					}
-					return map[string]any{
-						"loaded":    true,
-						"path":      params.Path,
-						"mime_type": mime,
-						"analysis":  analysis,
-						"note":      "the current provider cannot ingest images directly; this is a vision-model description",
-					}, nil
-				}
-				return map[string]any{
-					"loaded":    true,
-					"path":      params.Path,
-					"mime_type": mime,
-					"size":      len(data),
-					"note": "the current provider cannot ingest images directly; " +
-						"call vision_analyze with this path to have a vision model describe it",
-				}, nil
-			}
-
-			dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(data))
-			return &imageToolResult{
-				text: fmt.Sprintf("Image %s attached (%s, %.1f KB).",
-					params.Path, mime, float64(len(data))/1024),
-				blocks: []agentcore.ContentBlock{
-					{Kind: agentcore.BlockKindImage, URL: dataURL, MediaType: mime},
-				},
-			}, nil
+			return AnalyzeImage(ctx, strings.TrimSpace(params.Path), providerName, analyze)
 		},
 	}
+}
+
+// AnalyzeImage loads a local path or HTTP(S) URL and either attaches the
+// pixels to the tool result (multimodal providers) or falls back to a
+// vision-model description.
+func AnalyzeImage(ctx context.Context, path, providerName string, analyze toolsmedia.ImageAnalyzer) (any, error) {
+	if path == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+	data, mime, err := readImageBytes(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	if !providerIngestsImages(providerName) {
+		if analyze != nil {
+			dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(data))
+			analysis, analyzeErr := analyze(ctx,
+				"Describe this image in detail: its content, any text it contains, and anything visually notable.",
+				mime, dataURL)
+			if analyzeErr != nil {
+				return nil, fmt.Errorf("vision analysis failed: %w", analyzeErr)
+			}
+			return map[string]any{
+				"loaded":    true,
+				"path":      path,
+				"mime_type": mime,
+				"analysis":  analysis,
+				"note":      "the current provider cannot ingest images directly; this is a vision-model description",
+			}, nil
+		}
+		return map[string]any{
+			"loaded":    true,
+			"path":      path,
+			"mime_type": mime,
+			"size":      len(data),
+			"note": "the current provider cannot ingest images directly; " +
+				"call vision_analyze with this path to have a vision model describe it",
+		}, nil
+	}
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(data))
+	return &imageToolResult{
+		text: fmt.Sprintf("Image %s attached (%s, %.1f KB).",
+			path, mime, float64(len(data))/1024),
+		blocks: []agentcore.ContentBlock{
+			{Kind: agentcore.BlockKindImage, URL: dataURL, MediaType: mime},
+		},
+	}, nil
 }
 
 func directExplanation(direct bool) string {
@@ -168,7 +173,7 @@ func readImageBytes(ctx context.Context, path string) ([]byte, string, error) {
 	case "image/png", "image/jpeg", "image/gif", "image/webp":
 		return data, mime, nil
 	case "application/pdf":
-		return nil, "", fmt.Errorf("%s is a PDF, not an image; use the pdf tooling instead", filepath.Base(path))
+		return nil, "", fmt.Errorf("%s is a PDF, not an image; use read on the PDF path instead", filepath.Base(path))
 	default:
 		return nil, "", fmt.Errorf("unsupported image type %s for %s", mime, path)
 	}

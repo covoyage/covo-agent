@@ -1,6 +1,6 @@
 ---
 name: computer-use
-description: "Use when driving the desktop GUI: screenshot first, inspect with view_image, then click/type using that frame_id."
+description: "Use when driving the desktop GUI: screenshot first, inspect with read, then click/type using that frame_id."
 version: 1.0.0
 author: Covo Agent
 license: MIT
@@ -22,13 +22,16 @@ can steal focus. Prefer terminal tools (`process`, `tmux`) when a CLI exists.
 - You must confirm what is on screen before clicking
 - Accessibility-driven click/type after a fresh screenshot
 
-Do **not** use for: shell commands, browser automation that already has a
-browser tool, or anything you can do with `read`/`edit` in the workspace.
+Do **not** use for: shell commands, page content in a browser (`browser`
+navigate/click/type), or anything you can do with `read`/`edit` in the
+workspace. `open_url` only shows a page in the OS default browser — it does
+not mean this tool should drive that window. Reserve `computer_use` for
+desktop chrome (address bar, permission prompts, native dialogs).
 
 ## Canonical loop
 
 1. `computer_use` `action=screenshot` — save PNG, get `path`, `width`, `height`, `frame_id`.
-2. `view_image` on that `path` (optional `prompt` to locate a control).
+2. `read` on that `path` (optional `prompt` to locate a control).
 3. Click/drag/right-click **only** with that `frame_id`. Coordinates are pixels
    in the screenshot, origin top-left.
 4. `action=wait` (`ms`, max 10000) after UI changes, then screenshot again.
@@ -36,14 +39,14 @@ browser tool, or anything you can do with `read`/`edit` in the workspace.
 
 ```
 computer_use action=screenshot
-view_image path:<returned path> prompt:"Where is the Save button? Give pixel x,y."
+read path:<returned path> prompt:"Where is the Save button? Give pixel x,y."
 computer_use action=click x:<x> y:<y> frame_id:<id>
 computer_use action=wait ms=800
 computer_use action=screenshot
 ```
 
 Screenshot files live under the process temp dir `covo-computer/` (PNG path is
-in the tool result). `view_image` accepts that directory.
+in the tool result). `read` accepts that directory.
 
 ## Actions
 
@@ -76,7 +79,7 @@ Platforms: macOS osascript, Linux xdotool/wmctrl (screenshot: grim or ImageMagic
 ## Common Pitfalls
 
 1. Clicking without `frame_id` after a new screenshot — the previous frame is invalid.
-2. Using `view_image` on a remote URL — only local paths (workspace or `covo-computer/`).
+2. Using `read` on a remote URL for desktop inspection — only local paths (workspace or `covo-computer/`).
 3. Assuming the user's mouse stays put — it will move.
 4. Waiting longer than 10s in one `wait` call — loop screenshot/wait instead.
 

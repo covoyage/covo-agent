@@ -89,11 +89,9 @@ type Extension struct {
 	tools             []*agentcore.Tool
 	toolProfile       string
 	workDir           string
-	providerName      string
 	parentMessages    func() []agentcore.Message
 	phaseTransition   toolsplanning.PhaseTransitioner
 	externalAgents    *externalagent.Registry
-	imageAnalyzer     toolsmedia.ImageAnalyzer
 }
 
 // ExtensionConfig configures the agent tools extension.
@@ -137,8 +135,7 @@ type ExtensionConfig struct {
 	WorkDir string
 
 	// ProviderName is the active LLM provider (anthropic, gemini, ...). Used
-	// to decide whether read_image can attach images directly to results or
-	// must fall back to vision-model analysis. May be empty.
+	// by media helpers that attach images directly on multimodal providers. May be empty.
 	ProviderName string
 
 	// ParentMessages returns the parent agent's current conversation messages,
@@ -337,10 +334,9 @@ func (e *Extension) SetInboxStore(s *inbox.Store) {
 	e.inboxStore = s
 }
 
-// SetImageAnalyzer wires the vision callback used by view_image and video_analyze.
-func (e *Extension) SetImageAnalyzer(fn toolsmedia.ImageAnalyzer) {
-	e.imageAnalyzer = fn
-}
+// SetImageAnalyzer is kept for callers that still wire a vision callback.
+// Unified read dispatches through the agent-layer media handler instead.
+func (e *Extension) SetImageAnalyzer(fn toolsmedia.ImageAnalyzer) {}
 
 // InboxStore returns the inbox store for agent-layer integration (e.g.
 // auto-drain on turn start). May be nil if construction failed.
@@ -442,8 +438,7 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		buildMoATool(MoAConfig{Provider: provider, DefaultModel: model}),
 		// Batch 2: cronjob (media tools registered below when backends exist)
 		buildCronjobTool(e.cronStore),
-		// Batch 3: pdf, update_plan, exit_plan_mode, transcribe
-		toolsmedia.BuildPdfTool(),
+		// Batch 3: update_plan, exit_plan_mode, transcribe
 		toolsplanning.BuildUpdatePlanTool(e.planStore),
 		toolsplanning.BuildExitPlanModeTool(e.planStore, e.phaseTransition),
 		toolsmedia.BuildTranscribeTool(),
@@ -470,8 +465,6 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		buildMCPTool(e.mcpStore),
 		// Batch 6: process, monitor, sandbox, swarm, swarm_orchestrate, secrets
 		toolssandbox.BuildProcessTool(e.processStore),
-		toolsmedia.BuildViewImageToolWithTransport(e.workDir, e.imageAnalyzer, e.webFetchTransport),
-		toolsmedia.BuildVideoAnalyzeToolWithTransport(e.workDir, e.imageAnalyzer, e.webFetchTransport),
 		toolssandbox.BuildMonitorTool(e.processStore),
 		toolssandbox.BuildSandboxTool(e.sandbox),
 		toolswarm.BuildSwarmTool(e.swarmBoard),
@@ -577,6 +570,7 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		toolscontext.BuildContextCompressTool(e.compressor),
 		toolscontext.BuildContextCompressConfigTool(e.compressor),
 		BuildWebFetchTool(e.webFetchTransport),
+		BuildOpenURLTool(),
 		buildReactionTool(),
 
 		// append_file
@@ -620,10 +614,6 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 
 		// Batch 29: run_code (Code Mode — execute Go programs with tool SDK)
 		BuildRunCodeToolWithRegistry(agent),
-
-		// Batch 30: read_image (multimodal direct injection on capable
-		// providers, vision-model analysis otherwise)
-		BuildReadImageTool(e.providerName, e.imageAnalyzer),
 	}
 
 	if os.Getenv("FAL_KEY") != "" {

@@ -25,8 +25,9 @@ func TestResolveToolsets_Composite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// coding includes: filesystem(10), search(4), shell(3), git(3), patch(2), documents(1), review(1), code_execution(1) = 25
-	expectedCount := 10 + 4 + 3 + 3 + 2 + 1 + 1 + 1 // 25
+	// coding includes: filesystem(10), search(4), shell(3), git(3), patch(2),
+	// documents(read, already in filesystem), review(1), code_execution(1) = 24
+	expectedCount := 10 + 4 + 3 + 3 + 2 + 1 + 1 // 24
 	if len(tools) != expectedCount {
 		t.Fatalf("expected %d tools, got %d: %v", expectedCount, len(tools), tools)
 	}
@@ -36,7 +37,7 @@ func TestResolveToolsets_Composite(t *testing.T) {
 	for _, name := range tools {
 		toolSet[name] = true
 	}
-	for _, want := range []string{"read", "grep", "bash", "git_status", "patch", "pdf"} {
+	for _, want := range []string{"read", "grep", "bash", "git_status", "patch"} {
 		if !toolSet[want] {
 			t.Errorf("missing expected tool: %s", want)
 		}
@@ -58,7 +59,7 @@ func TestResolveToolsets_Full(t *testing.T) {
 	for _, name := range tools {
 		toolSet[name] = true
 	}
-	for _, want := range []string{"read", "web_fetch", "tts", "memory", "todo", "pdf", "video_generate", "execute_code", "computer_use"} {
+	for _, want := range []string{"read", "web_fetch", "open_url", "tts", "memory", "todo", "video_generate", "execute_code", "computer_use"} {
 		if !toolSet[want] {
 			t.Errorf("missing expected tool in full: %s", want)
 		}

@@ -45,13 +45,13 @@ var Toolsets = map[string]ToolsetDef{
 	},
 	"web": {
 		Name:        "web",
-		Description: "Web search and content extraction",
-		Tools:       []string{"web_fetch"},
+		Description: "Web search, content extraction, and opening URLs in the user's default browser",
+		Tools:       []string{"web_fetch", "open_url"},
 	},
 	"vision": {
 		Name:        "vision",
-		Description: "Image and video analysis",
-		Tools:       []string{"view_image", "video_analyze"},
+		Description: "Image and video analysis via the unified read tool",
+		Tools:       []string{"read"},
 	},
 	"patch": {
 		Name:        "patch",
@@ -80,8 +80,8 @@ var Toolsets = map[string]ToolsetDef{
 	},
 	"documents": {
 		Name:        "documents",
-		Description: "Document analysis and extraction",
-		Tools:       []string{"pdf"},
+		Description: "Document analysis and extraction via the unified read tool",
+		Tools:       []string{"read"},
 	},
 	"review": {
 		Name:        "review",
@@ -95,7 +95,7 @@ var Toolsets = map[string]ToolsetDef{
 	},
 	"browser": {
 		Name:        "browser",
-		Description: "Browser automation for specific URLs, interactive pages, login flows, and JavaScript-heavy pages. Not a replacement for web search.",
+		Description: "Agent Chromium automation for interactive pages, login flows, and JavaScript-heavy pages. Not a replacement for web search. Use open_url only to show a page in the OS default browser.",
 		Tools:       []string{"browser"},
 	},
 	"code_execution": {

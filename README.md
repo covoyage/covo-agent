@@ -224,7 +224,7 @@ Terminal diffs and code blocks are syntax-highlighted by default: diff-semantic 
 | `.covo-agent.yaml` | Project-level overrides |
 | `~/.covo-agent/sessions/` | Persistent sessions and lifecycle sidecars |
 | `~/.covo-agent/skills/` | Installed and user-created skills |
-| `~/.covo-agent/covo-agent.log` | Interactive runtime warnings and diagnostics |
+| `~/.covo-agent/covo-agent.log` | Live runtime log; rotated daily to `covo-agent-YYYY-MM-DD.log` (kept 7 days by default) |
 | `~/.covo-agent/profiles/` | Isolated profile data |
 
 ## Safety
@@ -319,7 +319,7 @@ Common checks include:
 - Git and browser availability;
 - terminal color, clipboard, multiplexer, and keyboard capabilities.
 
-Interactive warnings are written to `~/.covo-agent/covo-agent.log` so they do not corrupt the alternate-screen TUI.
+Interactive warnings are written to `~/.covo-agent/covo-agent.log` so they do not corrupt the alternate-screen TUI. The live file rotates at local midnight to `covo-agent-YYYY-MM-DD.log`; dated files older than 7 days are deleted. Set `logging.retain_days` in `config.yaml` or `COVO_LOG_RETAIN_DAYS` to change the window.
 
 ## Development
 

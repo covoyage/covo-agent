@@ -38,6 +38,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/telemetry"
 	agenttools "github.com/covoyage/covo-agent/internal/tools"
 	"github.com/covoyage/covo-agent/internal/tools/fileops"
+	toolsmedia "github.com/covoyage/covo-agent/internal/tools/media"
 	toolsstandingorders "github.com/covoyage/covo-agent/internal/tools/standingorders"
 	toolssubagent "github.com/covoyage/covo-agent/internal/tools/subagent"
 	"github.com/covoyage/covo-agent/internal/toolset"
@@ -139,9 +140,9 @@ type CovoAgent struct {
 	auxClient               *AuxiliaryClient
 	compressionSwitch       *compression.CompressionProviderSwitch
 	doomloopDetector        *doomloop.Detector
-	doomloopTurn            int  // current turn counter for doom loop tracking
+	doomloopTurn            int         // current turn counter for doom loop tracking
 	doomloopDetected        atomic.Bool // whether a doom loop was detected this turn
-	doomloopBudgetExhausted bool // when true, all tool calls are blocked
+	doomloopBudgetExhausted bool        // when true, all tool calls are blocked
 	hunkTracker             *hunk.Tracker
 	rolloutRecorder         *rollout.Recorder
 	rolloutStore            *rollout.Store
@@ -296,7 +297,7 @@ func firstEnv(keys ...string) string {
 func browserToolConfigFromEnv() *tools.BrowserToolConfig {
 	cloudProvider := browserCloudProviderFromEnv()
 	cfg := &tools.BrowserToolConfig{
-		Headless:            envBool("BROWSER_HEADLESS", true),
+		Headless:            browserHeadlessFromEnv(),
 		AllowPrivate:        envBool("BROWSER_ALLOW_PRIVATE_URLS", false),
 		CommandTimeout:      envDurationSeconds("BROWSER_COMMAND_TIMEOUT", 0),
 		CDPURL:              os.Getenv("BROWSER_CDP_URL"),
@@ -346,6 +347,21 @@ func envBool(name string, fallback bool) bool {
 		return fallback
 	}
 	return parsed
+}
+
+// browserHeadlessFromEnv matches Hermes: local browser is headless unless the
+// user opts into a visible automation window. AGENT_BROWSER_HEADED=1 / true
+// (or BROWSER_HEADLESS=false) launches a headed Chromium the agent still
+// drives via CDP — not the OS default browser.
+func browserHeadlessFromEnv() bool {
+	headed := strings.TrimSpace(os.Getenv("AGENT_BROWSER_HEADED"))
+	if headed != "" {
+		parsed, err := strconv.ParseBool(headed)
+		if err == nil {
+			return !parsed
+		}
+	}
+	return envBool("BROWSER_HEADLESS", true)
 }
 
 func envDurationSeconds(name string, fallback time.Duration) time.Duration {
@@ -1150,6 +1166,50 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		}
 		readCfg.MaxBytes = maxBytes
 	}
+	readCfg.MediaHandler = func(ctx context.Context, kind tools.ReadMediaKind, paths []string, input tools.ReadToolInput) (any, error) {
+		var analyze toolsmedia.ImageAnalyzer
+		if ca.auxClient != nil {
+			analyze = ca.auxClient.DescribeImage
+		}
+		transport := NewSafeClient().Transport
+		switch kind {
+		case tools.ReadMediaImage:
+			if len(paths) == 1 && !isRemoteMediaPath(paths[0]) && strings.TrimSpace(input.Prompt) == "" {
+				return agenttools.AnalyzeImage(ctx, paths[0], cfg.ProviderName, analyze)
+			}
+			return toolsmedia.AnalyzeImages(ctx, toolsmedia.AnalyzeImagesInput{
+				Paths:     paths,
+				Prompt:    input.Prompt,
+				WorkDir:   cfg.WorkingDir,
+				Analyze:   analyze,
+				Transport: transport,
+			})
+		case tools.ReadMediaPDF:
+			if len(paths) != 1 {
+				return nil, fmt.Errorf("pdf read accepts one path")
+			}
+			if input.Info {
+				return toolsmedia.PDFInfo(ctx, paths[0], transport)
+			}
+			return toolsmedia.ExtractPDF(ctx, paths[0], input.Pages, input.MaxPages, transport)
+		case tools.ReadMediaVideo:
+			if len(paths) != 1 {
+				return nil, fmt.Errorf("video read accepts one path")
+			}
+			return toolsmedia.AnalyzeVideo(ctx, toolsmedia.AnalyzeVideoInput{
+				Path:         paths[0],
+				Prompt:       input.Prompt,
+				Frames:       input.Frames,
+				StartSeconds: input.StartSeconds,
+				EndSeconds:   input.EndSeconds,
+				WorkDir:      cfg.WorkingDir,
+				Analyze:      analyze,
+				Transport:    transport,
+			})
+		default:
+			return nil, fmt.Errorf("unsupported read media kind %q", kind)
+		}
+	}
 	toolExt := tools.NewExtension(tools.ExtensionConfig{
 		WorkingDir: cfg.WorkingDir,
 		Read:       readCfg,
@@ -1421,17 +1481,6 @@ func (ca *CovoAgent) registerToolChecks(avail *toolset.ToolAvailability) {
 		return "edge-tts not installed", false
 	})
 
-	// PDF requires pdftotext or python3
-	avail.RegisterCheck("pdf", func() (string, bool) {
-		if _, err := lookPathSafe("pdftotext"); err == nil {
-			return "", true
-		}
-		if _, err := lookPathSafe("python3"); err == nil {
-			return "", true // fallback to pypdf
-		}
-		return "neither pdftotext nor python3 found", false
-	})
-
 	// transcribe requires whisper-cli, whisper python, or OPENAI_API_KEY
 	avail.RegisterCheck("transcribe", func() (string, bool) {
 		if _, err := lookPathSafe("whisper-cli"); err == nil {
@@ -1444,13 +1493,6 @@ func (ca *CovoAgent) registerToolChecks(avail *toolset.ToolAvailability) {
 			return "", true
 		}
 		return "no transcription backend available (install whisper.cpp, openai-whisper, or set OPENAI_API_KEY)", false
-	})
-
-	avail.RegisterCheck("video_analyze", func() (string, bool) {
-		if _, err := lookPathSafe("ffmpeg"); err == nil {
-			return "", true
-		}
-		return "ffmpeg not installed", false
 	})
 
 	// sandbox requires docker, ssh, or falls back to local
@@ -1467,6 +1509,11 @@ func (ca *CovoAgent) registerToolChecks(avail *toolset.ToolAvailability) {
 
 func lookPathSafe(name string) (string, error) {
 	return exec.LookPath(name)
+}
+
+func isRemoteMediaPath(path string) bool {
+	lower := strings.ToLower(strings.TrimSpace(path))
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }
 
 func splitAndTrim(s string) []string {

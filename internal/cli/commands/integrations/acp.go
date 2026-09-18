@@ -3,16 +3,16 @@ package integrations
 import (
 	"context"
 	"fmt"
-	"github.com/covoyage/covo-agent/internal/cli"
-	"github.com/covoyage/covo-agent/internal/cli/commands/setup"
+	"io"
 	"log"
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	acpadapt "github.com/covoyage/covo-agent/internal/acp"
+	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/cli/commands/setup"
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/spf13/cobra"
 )
@@ -55,18 +55,24 @@ func NewACPCommand() *cobra.Command {
 				return fmt.Errorf("ensure home dir: %w", err)
 			}
 
-			logFile, err := os.OpenFile(filepath.Join(homeDir, "covo-agent.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			if err := cli.LoadDotEnv(); err != nil {
+				log.Printf("load .env: %v", err)
+			}
+			retainDays := 0
+			if loaded, err := cli.LoadConfig(); err == nil && loaded != nil && loaded.Logging != nil {
+				retainDays = loaded.Logging.RetainDays
+			}
+			logFile, err := logutil.OpenAppLog(homeDir, logutil.ResolveRetainDays(retainDays))
+			var logWriter io.Writer = logFile
 			if err != nil {
 				log.Printf("open log file: %v", err)
-				logFile = os.Stderr
+				logWriter = os.Stderr
+			} else {
+				defer logFile.Close()
 			}
-			logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{
+			logger := slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{
 				Level: logutil.ResolveLevel(slog.LevelWarn),
 			}))
-
-			if err := cli.LoadDotEnv(); err != nil {
-				logger.Warn("load .env", "err", err)
-			}
 
 			if !cli.HasProviderConfigured() {
 				return fmt.Errorf("no provider configured. Run: covo-agent --setup")

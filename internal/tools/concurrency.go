@@ -32,7 +32,6 @@ var toolConcurrencyDeclarations = map[string]bool{
 	"web_search":     true,
 	"web_fetch":      true,
 	"vision_analyze": true,
-	"view_image":     true,
 
 	// --- covonaut builtin layer: persistent terminal (read-only views) ---
 	"terminal_list": true,

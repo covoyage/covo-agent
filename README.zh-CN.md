@@ -224,7 +224,7 @@ Profile 使用独立的数据目录：
 | `.covo-agent.yaml` | 项目级覆盖配置 |
 | `~/.covo-agent/sessions/` | 持久会话和生命周期 Sidecar |
 | `~/.covo-agent/skills/` | 已安装及用户创建的技能 |
-| `~/.covo-agent/covo-agent.log` | 交互运行告警和诊断日志 |
+| `~/.covo-agent/covo-agent.log` | 当前运行日志；按天轮转为 `covo-agent-YYYY-MM-DD.log`（默认保留 7 天） |
 | `~/.covo-agent/profiles/` | 隔离的 Profile 数据 |
 
 ## 安全机制
@@ -319,7 +319,7 @@ covo-agent doctor --fix
 - Git 与浏览器可用性；
 - 终端颜色、剪贴板、Multiplexer 和键盘能力。
 
-交互模式下的告警会写入 `~/.covo-agent/covo-agent.log`，避免破坏 Alternate Screen TUI 的输入框和布局。
+交互模式下的告警会写入 `~/.covo-agent/covo-agent.log`，避免破坏 Alternate Screen TUI 的输入框和布局。当天日志会在本地午夜轮转为 `covo-agent-YYYY-MM-DD.log`，超过 7 天的日期文件会被删除。可用 `config.yaml` 的 `logging.retain_days` 或环境变量 `COVO_LOG_RETAIN_DAYS` 调整保留天数。
 
 ## 开发
 

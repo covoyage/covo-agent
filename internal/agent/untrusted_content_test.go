@@ -3,6 +3,8 @@ package agent
 import (
 	"strings"
 	"testing"
+
+	"github.com/covoyage/covonaut/agentcore"
 )
 
 func TestIsUntrustedTool(t *testing.T) {
@@ -12,11 +14,10 @@ func TestIsUntrustedTool(t *testing.T) {
 	}{
 		{"web_search", true},
 		{"web_fetch", true},
-		{"video_analyze", true},
+		{"read", false},
 		{"mcp", true},
 		{"browser_navigate", true},
 		{"browser_extract", true},
-		{"read", false},
 		{"edit", false},
 		{"bash", false},
 		{"session_search", false},
@@ -28,6 +29,18 @@ func TestIsUntrustedTool(t *testing.T) {
 				t.Errorf("isUntrustedTool(%q) = %v, want %v", tt.name, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestReadTouchesRemote(t *testing.T) {
+	if readTouchesRemote(agentcore.ToolCall{Name: "read", Arguments: `{"path":"main.go"}`}) {
+		t.Fatal("local read should not be treated as remote")
+	}
+	if !readTouchesRemote(agentcore.ToolCall{Name: "read", Arguments: `{"path":"https://example.com/a.png"}`}) {
+		t.Fatal("https read should be treated as remote")
+	}
+	if readTouchesRemote(agentcore.ToolCall{Name: "web_fetch", Arguments: `{"url":"https://example.com"}`}) {
+		t.Fatal("non-read tools are handled by isUntrustedTool, not readTouchesRemote")
 	}
 }
 

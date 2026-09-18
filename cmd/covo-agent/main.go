@@ -3,10 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/covoyage/covo-agent/internal/cli"
 	"github.com/covoyage/covo-agent/internal/crash"
+	"github.com/covoyage/covo-agent/internal/logutil"
 )
 
 func main() {
@@ -28,6 +28,6 @@ func newCrashHandler() *crash.Handler {
 		return nil
 	}
 	h := crash.New(home)
-	h.SetLogFile(filepath.Join(home, "covo-agent.log"))
+	h.SetLogFile(logutil.AppLogPath(home))
 	return h
 }

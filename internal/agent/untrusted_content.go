@@ -9,10 +9,9 @@ import (
 
 // untrustedToolNames are tools whose output is attacker-controllable.
 var untrustedToolNames = map[string]bool{
-	"web_search":    true,
-	"web_fetch":     true,
-	"video_analyze": true, // remote video and on-screen text are attacker-controllable
-	"mcp":           true, // MCP tool dispatches to external servers
+	"web_search": true,
+	"web_fetch":  true,
+	"mcp":        true, // MCP tool dispatches to external servers
 }
 
 // untrustedToolPrefixes match by prefix (e.g. browser_*).
@@ -21,6 +20,14 @@ var untrustedToolPrefixes = []string{
 }
 
 const untrustedWrapMinChars = 32
+
+func readTouchesRemote(tc agentcore.ToolCall) bool {
+	if tc.Name != "read" {
+		return false
+	}
+	args := strings.ToLower(string(tc.Arguments))
+	return strings.Contains(args, "http://") || strings.Contains(args, "https://")
+}
 
 func isUntrustedTool(name string) bool {
 	if untrustedToolNames[name] {
@@ -65,7 +72,7 @@ func (ca *CovoAgent) untrustedWrapAfterToolCall() func(
 		if result.Err != nil || result.Result == "" {
 			return nil
 		}
-		if !isUntrustedTool(tc.Name) {
+		if !isUntrustedTool(tc.Name) && !readTouchesRemote(tc) {
 			return nil
 		}
 		modified := *result

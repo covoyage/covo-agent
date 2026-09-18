@@ -7,7 +7,6 @@ import (
 	"log"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -186,10 +185,17 @@ func RunInteractive(opts *RunOptions, runtime *cli.CommandRuntime) {
 	s.run()
 }
 
+func loggingRetainDays(cfg *cli.Config) int {
+	if cfg != nil && cfg.Logging != nil {
+		return cfg.Logging.RetainDays
+	}
+	return 0
+}
+
 // run boots the agent and the TUI, then blocks until the app finishes.
 func (s *interactiveSession) run() {
-	// Redirect logs to a file to prevent stderr output from corrupting the TUI
-	logFile, err := os.OpenFile(filepath.Join(s.homeDir, "covo-agent.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// Redirect logs to a rotating file to prevent stderr from corrupting the TUI.
+	logFile, err := logutil.OpenAppLog(s.homeDir, logutil.ResolveRetainDays(loggingRetainDays(s.cfg)))
 	var logWriter io.Writer = logFile
 	if err != nil {
 		log.Printf("open log file: %v", err)

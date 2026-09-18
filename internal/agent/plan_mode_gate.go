@@ -12,7 +12,7 @@ import (
 var SideQuestionAllowedTools = map[string]bool{
 	"read": true, "read_file": true, "grep": true, "glob": true,
 	"ls": true, "list": true, "search": true, "web_search": true,
-	"web_fetch": true, "view_image": true, "video_analyze": true, "code_navigate": true, "search_files": true, "find": true,
+	"web_fetch": true, "code_navigate": true, "search_files": true, "find": true,
 }
 
 // PlanModeAllowedTools are tools explicitly permitted in Plan mode.
@@ -24,7 +24,7 @@ var PlanModeAllowedTools = map[string]bool{
 	// Read-only file/search tools
 	"read": true, "grep": true, "glob": true, "ls": true,
 	"search_files": true,
-	"web_search":   true, "web_fetch": true, "view_image": true, "video_analyze": true,
+	"web_search":   true, "web_fetch": true,
 	"session_search": true, "diffs": true,
 	"git_status": true, "git_log": true, "git_diff": true,
 	// Planning workflow tools (do not mutate files)

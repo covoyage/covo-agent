@@ -3,8 +3,7 @@ package integrations
 import (
 	"context"
 	"fmt"
-	"github.com/covoyage/covo-agent/internal/cli"
-	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
+	"io"
 	"log"
 	"log/slog"
 	"os"
@@ -14,6 +13,8 @@ import (
 	"time"
 
 	"github.com/covoyage/covo-agent/internal/agent"
+	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
 	"github.com/covoyage/covo-agent/internal/evolution"
 	"github.com/covoyage/covo-agent/internal/logutil"
 	mcpserver "github.com/covoyage/covo-agent/internal/mcpserver"
@@ -234,22 +235,27 @@ func cmdMCPServe() {
 		log.Fatalf("ensure home dir: %v", err)
 	}
 
-	logFile, err := os.OpenFile(filepath.Join(homeDir, "covo-agent.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err := cli.LoadDotEnv(); err != nil {
+		log.Printf("load .env: %v", err)
+	}
+	retainDays := 0
+	cfg, cfgErr := cli.LoadConfig()
+	if cfgErr == nil && cfg != nil && cfg.Logging != nil {
+		retainDays = cfg.Logging.RetainDays
+	}
+	logFile, err := logutil.OpenAppLog(homeDir, logutil.ResolveRetainDays(retainDays))
+	var logWriter io.Writer = logFile
 	if err != nil {
 		log.Printf("open log file: %v", err)
-		logFile = os.Stderr
+		logWriter = os.Stderr
+	} else {
+		defer logFile.Close()
 	}
-	logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{
+	logger := slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{
 		Level: logutil.ResolveLevel(slog.LevelWarn),
 	}))
-
-	if err := cli.LoadDotEnv(); err != nil {
-		logger.Warn("load .env", "err", err)
-	}
-
-	cfg, err := cli.LoadConfig()
-	if err != nil {
-		log.Fatalf("load config: %v", err)
+	if cfgErr != nil {
+		log.Fatalf("load config: %v", cfgErr)
 	}
 
 	if !cli.HasProviderConfigured() {

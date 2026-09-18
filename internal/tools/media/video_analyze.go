@@ -54,7 +54,7 @@ func BuildVideoAnalyzeToolWithTransport(workDir string, analyze ImageAnalyzer, t
 	return &agentcore.Tool{
 		Name: "video_analyze",
 		Description: strings.Join([]string{
-			"Analyze visual content of a video by sampling still frames with ffmpeg.",
+			"Analyze visual content of a video by sampling still frames with ffmpeg. Prefer the unified read tool.",
 			"Pass a workspace-relative or absolute local path, or an http(s) URL.",
 			"Remote fetches require a safe transport (SSRF-checked) and are capped at 50MB.",
 			"This is visual-only (scenes, on-screen text, UI, motion cues). Use transcribe for speech.",
@@ -97,107 +97,133 @@ func BuildVideoAnalyzeToolWithTransport(workDir string, analyze ImageAnalyzer, t
 			if err := json.Unmarshal(args, &params); err != nil {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
 			}
-			path := strings.TrimSpace(params.Path)
-			if path == "" {
-				return nil, fmt.Errorf("path is required")
-			}
-			n := params.Frames
-			if n == 0 {
-				n = videoAnalyzeDefaultFrames
-			}
-			if n < videoAnalyzeMinFrames || n > videoAnalyzeMaxFrames {
-				return nil, fmt.Errorf("frames must be between %d and %d", videoAnalyzeMinFrames, videoAnalyzeMaxFrames)
-			}
-			if _, err := lookPath("ffmpeg"); err != nil {
-				return nil, fmt.Errorf("ffmpeg is required for video_analyze")
-			}
-			if analyze == nil {
-				return nil, fmt.Errorf("vision model is not configured")
-			}
-
-			localPath, source, size, cleanup, err := materializeVideo(ctx, path, workDir, transport)
-			if err != nil {
-				return nil, err
-			}
-			if cleanup != nil {
-				defer cleanup()
-			}
-
-			start, end := 0.0, 0.0
-			if params.StartSeconds != nil {
-				start = *params.StartSeconds
-			}
-			if params.EndSeconds != nil {
-				end = *params.EndSeconds
-			}
-			if start < 0 {
-				return nil, fmt.Errorf("start_seconds must be >= 0")
-			}
-			if end < 0 {
-				return nil, fmt.Errorf("end_seconds must be >= 0")
-			}
-			if end > 0 && end <= start {
-				return nil, fmt.Errorf("end_seconds must be greater than start_seconds")
-			}
-
-			stills, err := extractVideoFrames(ctx, localPath, n, start, end)
-			if err != nil {
-				return nil, err
-			}
-			if len(stills) == 0 {
-				return nil, fmt.Errorf("ffmpeg produced no frames")
-			}
-
-			prompt := strings.TrimSpace(params.Prompt)
-			framePrompt := videoFramePrompt(prompt)
-
-			out := make([]videoFrame, 0, len(stills))
-			var combined strings.Builder
-			anyOK := false
-			for i, still := range stills {
-				if ctx.Err() != nil {
-					return nil, ctx.Err()
-				}
-				item := videoFrame{Index: i + 1, Seconds: still.seconds}
-				if len(still.png) == 0 {
-					item.Error = "empty frame"
-					out = append(out, item)
-					continue
-				}
-				dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(still.png)
-				desc, aerr := analyze(ctx, framePrompt, "image/png", dataURL)
-				if aerr != nil {
-					item.Error = aerr.Error()
-					out = append(out, item)
-					continue
-				}
-				desc, _ = truncateRunes(desc, videoAnalyzeFrameMaxChars)
-				item.Description = desc
-				anyOK = true
-				if combined.Len() > 0 {
-					combined.WriteByte('\n')
-				}
-				fmt.Fprintf(&combined, "Frame %d @ %.2fs: %s", item.Index, item.Seconds, desc)
-				out = append(out, item)
-			}
-			if !anyOK {
-				return nil, fmt.Errorf("vision model failed on all %d frames", len(stills))
-			}
-			summary, truncated := truncateRunes(combined.String(), videoAnalyzeTotalMaxChars)
-			if prompt == "" {
-				prompt = defaultVideoPrompt
-			}
-			return map[string]any{
-				"path":        source,
-				"bytes":       size,
-				"frames":      n,
-				"sampled":     out,
-				"prompt":      prompt,
-				"description": summary,
-				"truncated":   truncated,
-			}, nil
+			return AnalyzeVideo(ctx, AnalyzeVideoInput{
+				Path:         strings.TrimSpace(params.Path),
+				Prompt:       params.Prompt,
+				Frames:       params.Frames,
+				StartSeconds: params.StartSeconds,
+				EndSeconds:   params.EndSeconds,
+				WorkDir:      workDir,
+				Analyze:      analyze,
+				Transport:    transport,
+			})
 		},
 	}
+}
+
+// AnalyzeVideoInput is the programmatic entry for sampling a video into stills.
+type AnalyzeVideoInput struct {
+	Path         string
+	Prompt       string
+	Frames       int
+	StartSeconds *float64
+	EndSeconds   *float64
+	WorkDir      string
+	Analyze      ImageAnalyzer
+	Transport    http.RoundTripper
+}
+
+// AnalyzeVideo samples a video into stills and describes them with the vision model.
+func AnalyzeVideo(ctx context.Context, in AnalyzeVideoInput) (any, error) {
+	path := strings.TrimSpace(in.Path)
+	if path == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+	n := in.Frames
+	if n == 0 {
+		n = videoAnalyzeDefaultFrames
+	}
+	if n < videoAnalyzeMinFrames || n > videoAnalyzeMaxFrames {
+		return nil, fmt.Errorf("frames must be between %d and %d", videoAnalyzeMinFrames, videoAnalyzeMaxFrames)
+	}
+	if _, err := lookPath("ffmpeg"); err != nil {
+		return nil, fmt.Errorf("ffmpeg is required for video_analyze")
+	}
+	if in.Analyze == nil {
+		return nil, fmt.Errorf("vision model is not configured")
+	}
+
+	localPath, source, size, cleanup, err := materializeVideo(ctx, path, in.WorkDir, in.Transport)
+	if err != nil {
+		return nil, err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	start, end := 0.0, 0.0
+	if in.StartSeconds != nil {
+		start = *in.StartSeconds
+	}
+	if in.EndSeconds != nil {
+		end = *in.EndSeconds
+	}
+	if start < 0 {
+		return nil, fmt.Errorf("start_seconds must be >= 0")
+	}
+	if end < 0 {
+		return nil, fmt.Errorf("end_seconds must be >= 0")
+	}
+	if end > 0 && end <= start {
+		return nil, fmt.Errorf("end_seconds must be greater than start_seconds")
+	}
+
+	stills, err := extractVideoFrames(ctx, localPath, n, start, end)
+	if err != nil {
+		return nil, err
+	}
+	if len(stills) == 0 {
+		return nil, fmt.Errorf("ffmpeg produced no frames")
+	}
+
+	prompt := strings.TrimSpace(in.Prompt)
+	framePrompt := videoFramePrompt(prompt)
+
+	out := make([]videoFrame, 0, len(stills))
+	var combined strings.Builder
+	anyOK := false
+	for i, still := range stills {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		item := videoFrame{Index: i + 1, Seconds: still.seconds}
+		if len(still.png) == 0 {
+			item.Error = "empty frame"
+			out = append(out, item)
+			continue
+		}
+		dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(still.png)
+		desc, aerr := in.Analyze(ctx, framePrompt, "image/png", dataURL)
+		if aerr != nil {
+			item.Error = aerr.Error()
+			out = append(out, item)
+			continue
+		}
+		desc, _ = truncateRunes(desc, videoAnalyzeFrameMaxChars)
+		item.Description = desc
+		anyOK = true
+		if combined.Len() > 0 {
+			combined.WriteByte('\n')
+		}
+		fmt.Fprintf(&combined, "Frame %d @ %.2fs: %s", item.Index, item.Seconds, desc)
+		out = append(out, item)
+	}
+	if !anyOK {
+		return nil, fmt.Errorf("vision model failed on all %d frames", len(stills))
+	}
+	summary, truncated := truncateRunes(combined.String(), videoAnalyzeTotalMaxChars)
+	if prompt == "" {
+		prompt = defaultVideoPrompt
+	}
+	return map[string]any{
+		"path":        source,
+		"bytes":       size,
+		"frames":      n,
+		"sampled":     out,
+		"prompt":      prompt,
+		"description": summary,
+		"truncated":   truncated,
+	}, nil
 }
 
 const defaultVideoPrompt = "Describe what is happening visually in this video. Note scene changes, on-screen text, UI, people, objects, and notable motion. Do not transcribe speech; use transcribe for audio."

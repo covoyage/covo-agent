@@ -158,6 +158,14 @@ type Config struct {
 	FileTools       *FileToolsConfig           `yaml:"file_tools,omitempty"`
 	CustomProviders []CustomProvider           `yaml:"custom_providers,omitempty"`
 	CustomModes     []CustomModeConfig         `yaml:"custom_modes,omitempty"`
+	Logging         *LoggingConfig             `yaml:"logging,omitempty"`
+}
+
+// LoggingConfig controls application log files under the home directory.
+type LoggingConfig struct {
+	// RetainDays is how many calendar days of logs to keep, including today.
+	// Default 7. Override with COVO_LOG_RETAIN_DAYS.
+	RetainDays int `yaml:"retain_days,omitempty"`
 }
 
 type SkillsConfig struct {

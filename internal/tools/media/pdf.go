@@ -5,20 +5,26 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/covoyage/covonaut/agentcore"
 )
+
+const pdfDownloadMaxBytes = 50 * 1024 * 1024
 
 func BuildPdfTool() *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "pdf",
 		Description: strings.Join([]string{
 			"Extract text content from PDF documents for analysis.",
+			"Prefer read for a local PDF path (it dispatches here). Use this tool when you need action=info or an explicit page range.",
 			"Supports local files and page range selection.",
 			"",
 			"Uses pdftotext (poppler-utils) for extraction. Falls back to Python PyPDF2 if unavailable.",
@@ -84,9 +90,9 @@ func BuildPdfTool() *agentcore.Tool {
 
 			switch params.Action {
 			case "info":
-				return pdfInfo(ctx, path)
+				return PDFInfo(ctx, path, nil)
 			case "extract":
-				return pdfExtract(ctx, path, params.Pages, params.MaxPages)
+				return ExtractPDF(ctx, path, params.Pages, params.MaxPages, nil)
 			default:
 				return nil, fmt.Errorf("unknown action %q", params.Action)
 			}
@@ -94,7 +100,15 @@ func BuildPdfTool() *agentcore.Tool {
 	}
 }
 
-func pdfInfo(ctx context.Context, path string) (any, error) {
+func PDFInfo(ctx context.Context, path string, transport http.RoundTripper) (any, error) {
+	local, cleanup, err := materializePDF(ctx, path, transport)
+	if err != nil {
+		return nil, err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	path = local
 	// Try pdfinfo first
 	if _, err := exec.LookPath("pdfinfo"); err == nil {
 		cmd := exec.CommandContext(ctx, "pdfinfo", path)
@@ -124,14 +138,77 @@ func pdfInfo(ctx context.Context, path string) (any, error) {
 	}, nil
 }
 
-func pdfExtract(ctx context.Context, path, pages string, maxPages int) (any, error) {
-	// Try pdftotext first (poppler-utils)
-	if _, err := exec.LookPath("pdftotext"); err == nil {
-		return pdfExtractPdftotext(ctx, path, pages, maxPages)
+// ExtractPDF extracts text from a local PDF or http(s) URL. pages is an
+// optional range such as "1-5"; maxPages defaults to 50 when <= 0.
+func ExtractPDF(ctx context.Context, path, pages string, maxPages int, transport http.RoundTripper) (any, error) {
+	local, cleanup, err := materializePDF(ctx, path, transport)
+	if err != nil {
+		return nil, err
 	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if maxPages <= 0 {
+		maxPages = 50
+	}
+	if _, err := exec.LookPath("pdftotext"); err == nil {
+		return pdfExtractPdftotext(ctx, local, pages, maxPages)
+	}
+	return pdfExtractPython(ctx, local, pages, maxPages)
+}
 
-	// Fallback: Python PyPDF2
-	return pdfExtractPython(ctx, path, pages, maxPages)
+func materializePDF(ctx context.Context, path string, transport http.RoundTripper) (local string, cleanup func(), err error) {
+	if strings.HasPrefix(strings.ToLower(path), "http://") || strings.HasPrefix(strings.ToLower(path), "https://") {
+		return fetchRemotePDF(ctx, path, transport)
+	}
+	if strings.HasPrefix(path, "~") {
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, path[1:])
+	}
+	if _, err := os.Stat(path); err != nil {
+		return "", nil, fmt.Errorf("file not found: %s", path)
+	}
+	return path, nil, nil
+}
+
+func fetchRemotePDF(ctx context.Context, rawURL string, transport http.RoundTripper) (local string, cleanup func(), err error) {
+	if transport == nil {
+		return "", nil, fmt.Errorf("remote PDFs require a safe HTTP transport")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", nil, fmt.Errorf("build request: %w", err)
+	}
+	client := &http.Client{Timeout: 60 * time.Second, Transport: transport}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", nil, fmt.Errorf("fetch pdf: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", nil, fmt.Errorf("fetch pdf: HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, pdfDownloadMaxBytes+1))
+	if err != nil {
+		return "", nil, fmt.Errorf("read pdf: %w", err)
+	}
+	if len(data) > pdfDownloadMaxBytes {
+		return "", nil, fmt.Errorf("pdf exceeds %d bytes", pdfDownloadMaxBytes)
+	}
+	f, err := os.CreateTemp("", "covo-read-*.pdf")
+	if err != nil {
+		return "", nil, err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", nil, err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return "", nil, err
+	}
+	return f.Name(), func() { _ = os.Remove(f.Name()) }, nil
 }
 
 func pdfExtractPdftotext(ctx context.Context, path, pages string, maxPages int) (any, error) {

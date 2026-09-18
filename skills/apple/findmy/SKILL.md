@@ -1,6 +1,6 @@
 ---
 name: findmy
-description: "Use when locating Apple devices or AirTags on macOS: no findmy CLI; optional Find My.app + screenshot + view_image."
+description: "Use when locating Apple devices or AirTags on macOS: no findmy CLI; optional Find My.app + screenshot + read."
 version: 1.2.0
 author: Covo Agent
 license: MIT
@@ -32,10 +32,10 @@ computer_use action=list_apps
 # osascript -e 'tell application "FindMy" to activate'
 computer_use action=wait ms=2000
 computer_use action=screenshot
-view_image path:<screenshot path> prompt:"List devices/items visible and any location or status text. Do not invent missing devices."
+read path:<screenshot path> prompt:"List devices/items visible and any location or status text. Do not invent missing devices."
 ```
 
-Report only what `view_image` describes. If the window is blank, permission-blocked,
+Report only what `read` describes. If the window is blank, permission-blocked,
 or the screenshot is the wrong display, say so and stop.
 
 Play sound, mark lost, or erase a device: tell the user to do it in Find My.app.
