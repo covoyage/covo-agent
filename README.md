@@ -11,7 +11,7 @@
 ## Highlights
 
 - **Interactive terminal workflow**: streaming responses, tool activity, mouse selection, session history, model picker, themes, and shell completion.
-- **Multiple execution modes**: interactive TUI, one-shot output, and policy-controlled headless runs.
+- **Multiple execution modes**: interactive TUI, `-p/--print` for one-shot output, and `exec` for policy-controlled non-interactive runs.
 - **Coding tools**: file search and editing, patch application, shell execution, code analysis, review, test generation, Git worktrees, and checkpoints.
 - **Persistent context**: sessions, memory providers, skills, goals, snapshots, commitments, profiles, and project-level configuration.
 - **Provider flexibility**: OpenAI, Anthropic, Gemini, Xiaomi, OpenRouter, and OpenAI-compatible custom providers.
@@ -104,45 +104,62 @@ Start the interactive TUI in a project directory:
 ```bash
 cd your-project
 covo-agent
+covo-agent "Find a failing test, fix it, and run the relevant tests."
+covo-agent --continue
+covo-agent --session
+covo-agent init .
 ```
 
 Run a single prompt without the TUI:
 
 ```bash
-covo-agent --oneshot "summarize the current repository"
-covo-agent -z "review the uncommitted changes" --json
+covo-agent -p "summarize the current repository"
+covo-agent --print "review the uncommitted changes" --json
 ```
 
 Run a constrained headless task:
 
 ```bash
-covo-agent --headless \
-  -z "find the cause of the failing tests" \
+covo-agent exec "find the cause of the failing tests" \
   --tools read,grep,glob,bash \
   --allow 'bash:go test *' \
-  --deny 'bash:rm *'
+  --deny 'bash:rm *' \
+  --permission smart \
+  --add-dir ../shared-lib \
+  --output-format streaming-json
 ```
 
 ## Execution Modes
 
 | Mode | Example | Use case |
 | --- | --- | --- |
-| Interactive TUI | `covo-agent` | Iterative coding, tools, approvals, and session navigation |
-| One-shot | `covo-agent -z "prompt"` | Scripts and a single terminal response |
-| One-shot JSON | `covo-agent -z "prompt" --json` | Structured automation output |
-| Headless | `covo-agent --headless -z "prompt"` | Non-interactive agent runs with explicit policies |
+| Interactive TUI | `covo-agent` or `covo-agent "prompt"` | Iterative coding, tools, approvals, and session navigation |
+| Resume | `covo-agent --continue` | Continue the latest session in this directory |
+| Init | `covo-agent init .` | Create `AGENTS.md` project guidance |
+| Print | `covo-agent -p "prompt"` | Scripts and a single terminal response |
+| Print JSON | `covo-agent -p "prompt" --json` | Structured automation output |
+| Exec | `covo-agent exec "prompt"` | Non-interactive agent runs with explicit policies |
+| Exec JSON stream | `covo-agent exec "prompt" --output-format streaming-json` | NDJSON events for text, tools, and errors |
+| Structured output | `covo-agent -p "prompt" --output-schema schema.json` | Final answer must match a JSON Schema |
 
 Useful root flags include:
 
 ```text
 --provider <name>          Override the configured provider
 --model <name>             Override the configured model
+-c, --continue             Resume the latest session in this directory
+--session                  Open the session picker on startup
 --mode general|code        Select the agent mode
 --session-id <id>          Resume or create a named session
 --sandbox <profile>        workspace, read-only, strict, devbox, off, or custom
 --system-prompt <text>     Replace the default system prompt
+--output-format            text, json, or streaming-json
+--output-schema            JSON Schema for the final answer
 --append-system-prompt     Append text to the default system prompt
+--permission               TUI: ask|auto|full; exec: smart|full|off
+--add-dir <path>           Extra workspace directory (repeatable, max 16)
 --yolo                     Bypass approval prompts (high risk)
+-p, --print                Run one prompt and print the result (no TUI)
 ```
 
 Use `covo-agent --help` for the complete and current flag list.
@@ -156,7 +173,7 @@ Use `covo-agent --help` for the complete and current flag list.
 | Coding workflow | `analyze`, `review`, `pr`, `testgen`, `worktree` |
 | Integrations | `mcp`, `acp`, `lsp`, `gateway`, `pairing`, `plugin`, `ext`, `package` |
 | Personalization | `profile`, `language`, `theme`, `features`, `template` |
-| Automation | `cron`, `heartbeat`, `completion` |
+| Automation | `exec`, `cron`, `heartbeat`, `completion` |
 
 Every command has its own help page:
 
@@ -229,10 +246,10 @@ Terminal diffs and code blocks are syntax-highlighted by default: diff-semantic 
 
 ## Safety
 
-Tool actions that can mutate files, execute commands, or affect external systems pass through approval and policy layers. For automation, use explicit allow and deny rules and a sandbox profile. The `--allow`/`--deny` patterns only apply to `--headless` runs; interactive sessions use the approval gate instead.
+Tool actions that can mutate files, execute commands, or affect external systems pass through approval and policy layers. For automation, use explicit allow and deny rules and a sandbox profile. The `--allow`/`--deny` patterns only apply to `exec` runs; interactive sessions use the approval gate instead.
 
 ```bash
-covo-agent --headless -z "run the test suite and fix one failure" \
+covo-agent exec "run the test suite and fix one failure" \
   --sandbox workspace \
   --allow 'edit:*' \
   --allow 'bash:go test *' \

@@ -14,6 +14,7 @@ import (
 	toolsstandingorders "github.com/covoyage/covo-agent/internal/tools/standingorders"
 	toolsworktree "github.com/covoyage/covo-agent/internal/tools/worktree"
 	"github.com/covoyage/covo-agent/internal/toolset"
+	"github.com/covoyage/covo-agent/internal/workspace"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -155,6 +156,21 @@ func (ca *CovoAgent) WorktreeManager() *toolsworktree.WorktreeManager {
 
 func (ca *CovoAgent) ToolsetFilter() *toolset.ToolsetFilter {
 	return ca.toolsetFilter
+}
+
+// ExtraWorkspaceRoots returns additional directories treated as workspace roots.
+func (ca *CovoAgent) ExtraWorkspaceRoots() []string {
+	return append([]string(nil), ca.extraWorkspaceRoots...)
+}
+
+// AddWorkspaceRoot adds a directory to the extra workspace-root list.
+func (ca *CovoAgent) AddWorkspaceRoot(path string) (string, error) {
+	roots, abs, err := workspace.AddExtraRoot(ca.workDir, ca.extraWorkspaceRoots, path)
+	if err != nil {
+		return "", err
+	}
+	ca.extraWorkspaceRoots = roots
+	return abs, nil
 }
 
 // SnapshotManager returns the file-level snapshot manager, enabling /undo,

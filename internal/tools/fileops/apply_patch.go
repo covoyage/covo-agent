@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/covoyage/covonaut/agentcore"
+	"github.com/covoyage/covonaut/tools"
 )
 
 type patchOpType string
@@ -438,7 +439,7 @@ func applyPatchOps(ops []patchOp, workspaceDir string) (map[string]any, error) {
 		case patchDelete:
 			path := resolvePatchPath(op.filePath, workspaceDir)
 			mutErr := withFileMutationLock(path, func() error {
-				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				if err := tools.TrashPath(path); err != nil && !os.IsNotExist(err) {
 					return err
 				}
 				return nil

@@ -203,12 +203,8 @@ func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core
 			},
 			// File/folder providers — trigger on "@file" and "@folder" for
 			// interactive filesystem navigation.
-			agentui.NewFilePathBrowser("@file", s.workingDir, func() bool {
-				return cli.IsEnabled("fuzzy-file-search")
-			}),
-			agentui.NewFilePathBrowser("@folder", s.workingDir, func() bool {
-				return cli.IsEnabled("fuzzy-file-search")
-			}),
+			newWorkspaceFileBrowser("@file", s.workingDir),
+			newWorkspaceFileBrowser("@folder", s.workingDir),
 			&component.StaticProvider{
 				TriggerStr:  "@",
 				Suggestions: atSuggestions,
@@ -264,6 +260,18 @@ func (s *interactiveSession) buildChatApp(slashSuggestions, atSuggestions []core
 		ed.SetTextFn(agentui.StylePasteChips)
 	}
 	return app
+}
+
+func extraWorkspaceRoots() []string {
+	return shared.RuntimeState.ExtraWorkspaceRoots()
+}
+
+func newWorkspaceFileBrowser(trigger, workingDir string) *agentui.FilePathBrowser {
+	browser := agentui.NewFilePathBrowser(trigger, workingDir, func() bool {
+		return cli.IsEnabled("fuzzy-file-search")
+	})
+	browser.SetExtraRoots(extraWorkspaceRoots)
+	return browser
 }
 
 // handleImagePaste reads an image from the clipboard and injects a reference
@@ -530,6 +538,14 @@ func (s *interactiveSession) pumpFooterStatus() {
 
 // printWelcome appends the welcome banner to the chat history.
 func (s *interactiveSession) printWelcome() {
+	if len(s.restoredMessages) > 0 {
+		shared.RestoreChatHistory(s.app, s.restoredMessages)
+		if id := s.currentSessionID(); len(id) >= 8 {
+			loadUIBus().PrintSystem(i18n.T("system.session_resumed", "id", id[:8]))
+			loadUIBus().StatusBar().SetMode(i18n.T("app.session_title", "id", id[:8]))
+		}
+		return
+	}
 	welcomeInfo := agentui.WelcomeInfo{
 		Provider:   s.providerType,
 		Model:      s.model,

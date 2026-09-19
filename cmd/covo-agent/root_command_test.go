@@ -12,8 +12,9 @@ func TestRootCommandRegistersLegacyCommands(t *testing.T) {
 	root := newRootCommand()
 	want := []string{
 		"acp", "analyze", "auth", "backup", "commitments", "completion",
-		"config", "cron", "doctor", "dreaming", "ext", "features", "gateway",
-		"heartbeat", "language", "lsp", "mcp", "memory", "migrate", "model",
+		"config", "cron", "doctor", "dreaming", "exec", "ext", "features", "gateway",
+		"init",
+		"heartbeat", "init", "language", "lsp", "mcp", "memory", "migrate", "model",
 		"package", "pairing", "plugin", "pr", "profile", "restore", "review",
 		"session", "setup", "skill", "status", "template", "testgen", "theme",
 		"update", "version", "worktree",
@@ -55,6 +56,31 @@ func TestRootCommandParsesOneshotShorthand(t *testing.T) {
 	}
 }
 
+func TestRootCommandParsesPrintShorthand(t *testing.T) {
+	root := newRootCommand()
+	if err := root.ParseFlags([]string{"-p", "summarize this"}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+	got, err := root.Flags().GetString("print")
+	if err != nil {
+		t.Fatalf("read print flag: %v", err)
+	}
+	if got != "summarize this" {
+		t.Fatalf("print = %q, want %q", got, "summarize this")
+	}
+}
+
+func TestRootCommandRegistersExec(t *testing.T) {
+	root := newRootCommand()
+	cmd, _, err := root.Find([]string{"exec"})
+	if err != nil {
+		t.Fatalf("find exec: %v", err)
+	}
+	if cmd == root || cmd.Name() != "exec" {
+		t.Fatalf("exec was not registered")
+	}
+}
+
 func TestRootCommandHelpUsesCobraCommandTree(t *testing.T) {
 	root := newRootCommand()
 	var output bytes.Buffer
@@ -66,7 +92,7 @@ func TestRootCommandHelpUsesCobraCommandTree(t *testing.T) {
 		t.Fatalf("execute help: %v", err)
 	}
 	help := output.String()
-	for _, text := range []string{"Available Commands:", "completion", "gateway", "--oneshot"} {
+	for _, text := range []string{"Available Commands:", "completion", "gateway", "exec", "init", "--print", "--oneshot", "--permission", "--add-dir", "--continue"} {
 		if !strings.Contains(help, text) {
 			t.Errorf("help output missing %q", text)
 		}
@@ -85,12 +111,39 @@ func TestCompletionSupportsAllCobraShells(t *testing.T) {
 	}
 }
 
+func TestRootCommandAcceptsPositionalPrompt(t *testing.T) {
+	root := newRootCommand()
+	if err := root.ParseFlags([]string{}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+	if err := root.Args(root, []string{"fix the tests"}); err != nil {
+		t.Fatalf("positional prompt should be allowed: %v", err)
+	}
+	if err := root.Args(root, []string{"one", "two"}); err == nil {
+		t.Fatal("expected error for extra positional args")
+	}
+}
+
+func TestRootCommandParsesContinueFlag(t *testing.T) {
+	root := newRootCommand()
+	if err := root.ParseFlags([]string{"-c"}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+	got, err := root.Flags().GetBool("continue")
+	if err != nil {
+		t.Fatalf("read continue: %v", err)
+	}
+	if !got {
+		t.Fatal("expected --continue")
+	}
+}
+
 func TestNoBuiltinCommandUsesDisableFlagParsing(t *testing.T) {
 	root := newRootCommand()
 	builtins := map[string]struct{}{
 		"acp": {}, "analyze": {}, "auth": {}, "backup": {}, "commitments": {}, "completion": {},
-		"config": {}, "cron": {}, "doctor": {}, "dreaming": {}, "ext": {}, "features": {}, "gateway": {},
-		"heartbeat": {}, "language": {}, "lsp": {}, "mcp": {}, "memory": {}, "migrate": {}, "model": {},
+		"config": {}, "cron": {}, "doctor": {}, "dreaming": {}, "exec": {}, "ext": {}, "features": {}, "gateway": {},
+		"heartbeat": {}, "init": {}, "language": {}, "lsp": {}, "mcp": {}, "memory": {}, "migrate": {}, "model": {},
 		"package": {}, "pairing": {}, "plugin": {}, "pr": {}, "profile": {}, "restore": {}, "review": {},
 		"session": {}, "setup": {}, "skill": {}, "status": {}, "template": {}, "testgen": {}, "theme": {},
 		"update": {}, "version": {}, "worktree": {},

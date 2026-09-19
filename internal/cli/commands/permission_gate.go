@@ -154,7 +154,7 @@ func (pg *PermissionGate) Checker() func(ctx context.Context, toolName string, a
 		}
 
 		// YOLO bypass — skip all tool approval prompts.
-		if pg.YoloMode {
+		if pg.YoloMode || shared.RuntimeState.SessionYolo() {
 			return true
 		}
 
@@ -379,7 +379,7 @@ func (pg *PermissionGate) AutoApprovedCategories() []ApprovalCategory {
 // approval configuration.
 func (pg *PermissionGate) FormatApprovalStatus() string {
 	var b strings.Builder
-	if pg.YoloMode {
+	if pg.YoloMode || shared.RuntimeState.SessionYolo() {
 		b.WriteString("🔴 YOLO mode is ON — all approvals bypassed.\n")
 	}
 	b.WriteString("Per-category auto-approval:\n")

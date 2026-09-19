@@ -48,14 +48,17 @@ func IsPathSafe(path string, homeDir string) error {
 }
 
 func IsPathSafeWithWorkspace(path string, homeDir string, workDir string, workspaceOnly bool) error {
+	return IsPathSafeWithWorkspaces(path, homeDir, workDir, nil, workspaceOnly)
+}
+
+func IsPathSafeWithWorkspaces(path string, homeDir string, workDir string, extraRoots []string, workspaceOnly bool) error {
 	real, err := resolvePath(path)
 	if err != nil {
 		return fmt.Errorf("cannot resolve path %q: %w", path, err)
 	}
 
-	// Workspace boundary check
 	if workspaceOnly && workDir != "" {
-		if err := IsInWorkspace(real, workDir); err != nil {
+		if err := IsInWorkspaces(real, workDir, extraRoots...); err != nil {
 			return err
 		}
 	}
@@ -74,14 +77,35 @@ func IsPathSafeWithWorkspace(path string, homeDir string, workDir string, worksp
 
 // IsInWorkspace checks whether the resolved path is within the workspace directory.
 func IsInWorkspace(resolvedPath, workDir string) error {
-	absWS, err := filepath.Abs(workDir)
+	return IsInWorkspaces(resolvedPath, workDir)
+}
+
+// IsInWorkspaces checks whether the resolved path is inside the primary
+// workspace or any extra root.
+func IsInWorkspaces(resolvedPath, workDir string, extraRoots ...string) error {
+	if inRoot(resolvedPath, workDir) {
+		return nil
+	}
+	for _, root := range extraRoots {
+		if inRoot(resolvedPath, root) {
+			return nil
+		}
+	}
+	return fmt.Errorf("path %q is outside the workspace directory %q", resolvedPath, workDir)
+}
+
+func inRoot(resolvedPath, root string) bool {
+	if root == "" {
+		return false
+	}
+	absWS, err := filepath.Abs(root)
 	if err != nil {
-		return fmt.Errorf("cannot resolve workspace directory %q: %w", workDir, err)
+		return false
 	}
-	if !strings.HasPrefix(resolvedPath, absWS+string(filepath.Separator)) && resolvedPath != absWS {
-		return fmt.Errorf("path %q is outside the workspace directory %q", resolvedPath, absWS)
+	if resolved, err := filepath.EvalSymlinks(absWS); err == nil {
+		absWS = resolved
 	}
-	return nil
+	return resolvedPath == absWS || strings.HasPrefix(resolvedPath, absWS+string(filepath.Separator))
 }
 
 func IsWriteSafe(path string, homeDir string) error {
@@ -89,14 +113,17 @@ func IsWriteSafe(path string, homeDir string) error {
 }
 
 func IsWriteSafeWithWorkspace(path string, homeDir string, workDir string, workspaceOnly bool) error {
+	return IsWriteSafeWithWorkspaces(path, homeDir, workDir, nil, workspaceOnly)
+}
+
+func IsWriteSafeWithWorkspaces(path string, homeDir string, workDir string, extraRoots []string, workspaceOnly bool) error {
 	real, err := resolvePath(path)
 	if err != nil {
 		return fmt.Errorf("cannot resolve path %q: %w", path, err)
 	}
 
-	// Workspace boundary check
 	if workspaceOnly && workDir != "" {
-		if err := IsInWorkspace(real, workDir); err != nil {
+		if err := IsInWorkspaces(real, workDir, extraRoots...); err != nil {
 			return err
 		}
 	}

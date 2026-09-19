@@ -154,6 +154,30 @@ func TestValidateOptions_InvalidOutputFormat(t *testing.T) {
 	}
 }
 
+func TestValidateOptions_StreamJSONAlias(t *testing.T) {
+	opts := &Options{Prompt: "hello", OutputFormat: "stream-json"}
+	if err := ValidateOptions(opts); err != nil {
+		t.Fatalf("stream-json alias should be valid: %v", err)
+	}
+	if opts.OutputFormat != "streaming-json" {
+		t.Fatalf("OutputFormat = %q", opts.OutputFormat)
+	}
+}
+
+func TestValidateOptions_JSONFormat(t *testing.T) {
+	opts := &Options{Prompt: "hello", OutputFormat: "json"}
+	if err := ValidateOptions(opts); err != nil {
+		t.Fatalf("json format should be valid: %v", err)
+	}
+}
+
+func TestValidateOptions_BadOutputSchema(t *testing.T) {
+	opts := &Options{Prompt: "hello", OutputSchema: "[]"}
+	if err := ValidateOptions(opts); err == nil {
+		t.Fatal("expected invalid schema error")
+	}
+}
+
 func TestValidateOptions_InvalidReasoningEffort(t *testing.T) {
 	opts := &Options{
 		Prompt:          "hello",
@@ -172,6 +196,27 @@ func TestValidateOptions_ConflictingTools(t *testing.T) {
 	}
 	if err := ValidateOptions(opts); err == nil {
 		t.Error("expected error for conflicting tools")
+	}
+}
+
+func TestValidateOptions_PermissionAskRejected(t *testing.T) {
+	opts := &Options{Prompt: "hello", Permission: "ask"}
+	if err := ValidateOptions(opts); err == nil {
+		t.Fatal("exec permission ask should fail")
+	}
+}
+
+func TestValidateOptions_PermissionSmart(t *testing.T) {
+	opts := &Options{Prompt: "hello", Permission: "smart"}
+	if err := ValidateOptions(opts); err != nil {
+		t.Fatalf("smart should be valid: %v", err)
+	}
+}
+
+func TestValidateOptions_AddDirMissing(t *testing.T) {
+	opts := &Options{Prompt: "hello", AddDir: []string{t.TempDir() + "/missing-extra-root"}}
+	if err := ValidateOptions(opts); err == nil {
+		t.Fatal("expected missing add-dir error")
 	}
 }
 

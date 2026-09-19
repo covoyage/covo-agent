@@ -524,7 +524,39 @@ func (s *Store) EnsureSession(ctx context.Context, sessionID, cwd string) error 
 		INSERT OR IGNORE INTO sessions (id, cwd, created_at, updated_at)
 		VALUES (?, ?, unixepoch(), unixepoch())
 	`, sessionID, cwd)
+	if err != nil {
+		return err
+	}
+	if cwd == "" {
+		return nil
+	}
+	_, err = s.db.ExecContext(ctx, `
+		UPDATE sessions SET cwd = ? WHERE id = ? AND (cwd IS NULL OR cwd = '')
+	`, cwd, sessionID)
 	return err
+}
+
+// LatestSessionID returns the most recently updated non-empty session for cwd.
+func (s *Store) LatestSessionID(ctx context.Context, cwd string) (string, error) {
+	if cwd == "" {
+		return "", nil
+	}
+	var id string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT s.id
+		FROM sessions s
+		WHERE s.cwd = ?
+		  AND COALESCE((SELECT COUNT(*) FROM messages WHERE session_id = s.id), 0) > 0
+		ORDER BY s.updated_at DESC
+		LIMIT 1
+	`, cwd).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("latest session: %w", err)
+	}
+	return id, nil
 }
 
 // EnsureSessionWithParent creates a session row with a parent_id reference.

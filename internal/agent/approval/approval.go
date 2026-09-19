@@ -179,6 +179,27 @@ func (s *System) IsYolo() bool {
 	return s.config.YoloMode || s.IsSessionYolo("cli")
 }
 
+// Mode returns the current approval mode.
+func (s *System) Mode() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.config.Mode
+}
+
+// SetMode updates the approval mode (manual, smart, or off).
+func (s *System) SetMode(mode string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.config.Mode = mode
+}
+
+// SetYoloMode enables or disables process-level YOLO bypass.
+func (s *System) SetYoloMode(enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.config.YoloMode = enabled
+}
+
 // --- Session approvals ---
 
 // ApproveSession grants session-scoped approval for a pattern.

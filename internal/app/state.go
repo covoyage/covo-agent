@@ -25,9 +25,11 @@ const (
 // RuntimeState contains the concurrent, process-level settings shared by the
 // CLI, agent callbacks, and TUI event loop.
 type RuntimeState struct {
-	sessionYolo   atomic.Bool
-	fastMode      atomic.Bool
-	footerEnabled atomic.Bool
+	sessionYolo     atomic.Bool
+	fastMode        atomic.Bool
+	footerEnabled   atomic.Bool
+	permissionMode  atomic.Pointer[string]
+	extraWorkspaces atomic.Pointer[[]string]
 
 	reasoningEffort atomic.Pointer[string]
 	personality     atomic.Pointer[string]
@@ -62,6 +64,27 @@ func (state *RuntimeState) SetSessionYolo(enabled bool) {
 }
 func (state *RuntimeState) ToggleSessionYolo() bool {
 	return toggleBool(&state.sessionYolo)
+}
+
+func (state *RuntimeState) PermissionMode() string {
+	return loadString(&state.permissionMode, "ask")
+}
+
+func (state *RuntimeState) SetPermissionMode(mode string) {
+	state.storeString(&state.permissionMode, mode)
+}
+
+func (state *RuntimeState) ExtraWorkspaceRoots() []string {
+	value := state.extraWorkspaces.Load()
+	if value == nil {
+		return nil
+	}
+	return append([]string(nil), (*value)...)
+}
+
+func (state *RuntimeState) SetExtraWorkspaceRoots(roots []string) {
+	copied := append([]string(nil), roots...)
+	state.extraWorkspaces.Store(&copied)
 }
 
 func (state *RuntimeState) FastMode() bool { return state.fastMode.Load() }

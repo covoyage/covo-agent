@@ -24,7 +24,7 @@ Regenerate with: go test ./internal/agent -run TestToolCatalog -update-tool-cata
 | `create_goal` | Create a new session-level goal. | undeclared |
 | `cronjob` | Manage scheduled cron jobs that run agent prompts on a recurring schedule. | undeclared |
 | `dashboard` | Show a live monitoring panel of all subagents: active, completed, and failed. | undeclared |
-| `delete` | Delete a file or directory. | undeclared |
+| `delete` | Delete a file or directory. Files and directories are moved to the platform trash so they can be restored. | undeclared |
 | `deploy` | Deploy a static site or application to a target environment. | undeclared |
 | `diffs` | Generate a unified diff between two texts, or apply a unified patch. | undeclared |
 | `edit` | Edit a single file using exact text replacement. | undeclared |

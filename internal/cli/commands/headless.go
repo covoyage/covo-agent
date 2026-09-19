@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
@@ -54,6 +55,11 @@ func RunHeadless(opts *headless.Options) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelError)}))
 	workingDir, _ := os.Getwd()
+	yolo := opts.Yolo || os.Getenv("COVO_YOLO") == "1" || os.Getenv("COVO_YOLO") == "true"
+	permMode, extraRoots, err := applyCLIPermissionAndDirs(opts.Permission, opts.AddDir, workingDir, false, yolo)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
 
 	// --tools / --disallowed-tools hide tools from the model and hard-block
 	// hallucinated calls; empty lists mean no filtering.
@@ -63,6 +69,15 @@ func RunHeadless(opts *headless.Options) {
 	}
 	skillCfgGet, skillCfgSet := shared.SkillConfigFns(cfg)
 
+	outputSchema, err := headless.ParseOutputSchema(opts.OutputSchema)
+	if err != nil {
+		log.Fatalf("output schema: %v", err)
+	}
+	var responseFormat *agentcore.ResponseFormat
+	if outputSchema != nil {
+		responseFormat = agentcore.NewJSONSchemaResponseFormat("output", outputSchema)
+	}
+
 	covoAgent, err := agent.NewCovoAgent(agent.CovoAgentConfig{
 		Mode:                     mode,
 		Provider:                 llm,
@@ -71,7 +86,7 @@ func RunHeadless(opts *headless.Options) {
 		WorkingDir:               workingDir,
 		HomeDir:                  homeDir,
 		Logger:                   logger,
-		ApprovalCfg:              shared.ApprovalConfigFromCLI(cfg, true), // auto-approve in headless
+		ApprovalCfg:              shared.ApprovalConfigFromCLI(cfg, permMode == agent.PermissionFull),
 		ToolProfile:              shared.RuntimeState.ActiveProfile(),
 		ToolNameFilter:           toolNameFilter,
 		ThinkingCfg:              shared.ThinkingConfigFromCLI(cfg),
@@ -86,14 +101,17 @@ func RunHeadless(opts *headless.Options) {
 		SkillConfigGet:           skillCfgGet,
 		SkillConfigSet:           skillCfgSet,
 		LeanTools:                shared.LeanToolsEnabled(cfg),
+		ResponseFormat:           responseFormat,
+		ExtraWorkspaceRoots:      extraRoots,
 	})
 	if err != nil {
 		log.Fatalf("create agent: %v", err)
 	}
 	defer covoAgent.Close()
 
-	if covoAgent.ApprovalSystem() != nil {
-		covoAgent.ApprovalSystem().SetNonInteractive(true)
+	if sys := covoAgent.ApprovalSystem(); sys != nil {
+		sys.SetNonInteractive(true)
+		agent.ApplyPermissionMode(sys, permMode)
 	}
 
 	// Apply permission gate patterns for auto-approval/denial
@@ -137,19 +155,21 @@ func RunHeadless(opts *headless.Options) {
 		}
 	}()
 
-	// Streaming JSON output
+	format := headless.NormalizeOutputFormat(opts.OutputFormat)
+
 	var writer *headless.StreamingWriter
-	if opts.OutputFormat == "streaming-json" {
+	if format == "streaming-json" {
 		writer = headless.NewStreamingWriter(os.Stdout)
+		unsub := headless.BindStreamingWriter(covoAgent.Core(), writer)
+		defer unsub()
 	}
 
-	// For text output, use mdstream for incremental ANSI rendering
 	var renderer *mdstream.Renderer
-	if opts.OutputFormat != "streaming-json" {
+	if format == "text" {
 		renderer = mdstream.NewRenderer()
 		renderer.SetSyntaxHighlighting(diffrender.SyntaxEnabled())
 		unsub := covoAgent.Core().On(agentcore.EventMessageDelta, func(ev agentcore.Event) {
-			if delta, ok := ev.(*agentcore.MessageDeltaEvent); ok && delta.Delta != "" {
+			if delta, ok := ev.(*agentcore.MessageDeltaEvent); ok && delta.Delta != "" && delta.Kind != agentcore.BlockKindThinking {
 				out := renderer.Feed(delta.Delta)
 				if out != "" {
 					fmt.Print(out)
@@ -160,37 +180,69 @@ func RunHeadless(opts *headless.Options) {
 	}
 
 	result, err := covoAgent.RunDirect(ctx, opts.Prompt)
-	if err != nil {
-		if renderer != nil {
-			flushed := renderer.Flush()
-			if flushed != "" {
-				fmt.Print(flushed)
-			}
-		}
-		if writer != nil {
-			_ = writer.WriteError(err.Error())
-			_ = writer.WriteDone()
-		} else {
-			telemetry.ShutdownOtel(context.Background())
-			log.Fatalf("agent run: %v", err)
-		}
-		return
-	}
-
 	if renderer != nil {
 		flushed := renderer.Flush()
 		if flushed != "" {
 			fmt.Print(flushed)
 		}
-		fmt.Println()
+		if err == nil {
+			fmt.Println()
+		}
+	}
+	if err != nil {
+		if writer != nil {
+			_ = writer.WriteError(err.Error())
+			_ = writer.WriteDone()
+			return
+		}
+		telemetry.ShutdownOtel(context.Background())
+		log.Fatalf("agent run: %v", err)
 	}
 
-	if writer != nil {
-		_ = writer.WriteText(result, 0)
+	payload := result
+	if outputSchema != nil {
+		payload = headless.ExtractJSONPayload(result)
+		if valErr := agentcore.ValidateJSON(outputSchema, payload); valErr != nil {
+			msg := fmt.Sprintf("structured output invalid: %v", valErr)
+			if writer != nil {
+				_ = writer.WriteError(msg)
+				_ = writer.WriteDone()
+				return
+			}
+			telemetry.ShutdownOtel(context.Background())
+			log.Fatalf("%s", msg)
+		}
+	}
+
+	switch format {
+	case "streaming-json":
 		_ = writer.WriteDone()
-	} else {
-		if renderer == nil {
-			fmt.Print(result)
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if outputSchema != nil {
+			var parsed any
+			if unmarshalErr := json.Unmarshal([]byte(payload), &parsed); unmarshalErr != nil {
+				log.Fatalf("decode structured output: %v", unmarshalErr)
+			}
+			if encodeErr := enc.Encode(parsed); encodeErr != nil {
+				log.Fatalf("encode output: %v", encodeErr)
+			}
+			return
+		}
+		usage := covoAgent.Core().State().TotalUsage()
+		out := oneshotJSONResult{
+			Result:   result,
+			Provider: providerStr,
+			Model:    modelStr,
+			Tokens: tokenInfo{
+				Prompt:     usage.PromptTokens,
+				Completion: usage.CompletionTokens,
+				Total:      usage.TotalTokens,
+			},
+		}
+		if encodeErr := enc.Encode(out); encodeErr != nil {
+			log.Fatalf("encode output: %v", encodeErr)
 		}
 	}
 }

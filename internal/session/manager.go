@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/covoyage/covonaut/agentcore"
@@ -53,9 +54,52 @@ func (m *Manager) CurrentID() string {
 
 func (m *Manager) NewSession(ctx context.Context, cwd string) (string, error) {
 	sessionID := generateSessionID()
-	// Defer persistence: session row is created lazily on first AppendMessage/Save
 	m.currentID = sessionID
+	if m.store != nil {
+		_ = m.store.EnsureSession(ctx, sessionID, normalizeSessionCwd(cwd))
+	}
 	return sessionID, nil
+}
+
+func normalizeSessionCwd(cwd string) string {
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(cwd); err == nil {
+		return abs
+	}
+	return cwd
+}
+
+// EnsureSessionRow creates or backfills the session row, including cwd.
+func (m *Manager) EnsureSessionRow(ctx context.Context, id, cwd string) error {
+	if m.store == nil || id == "" {
+		return nil
+	}
+	return m.store.EnsureSession(ctx, id, normalizeSessionCwd(cwd))
+}
+
+// LatestSessionID returns the newest non-empty session for the working directory.
+func (m *Manager) LatestSessionID(ctx context.Context, cwd string) (string, error) {
+	if m.store == nil {
+		return "", nil
+	}
+	seen := map[string]bool{}
+	for _, candidate := range []string{cwd, normalizeSessionCwd(cwd)} {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		id, err := m.store.LatestSessionID(ctx, candidate)
+		if err != nil {
+			return "", err
+		}
+		if id != "" {
+			return id, nil
+		}
+	}
+	return "", nil
 }
 
 // EnsureCurrentSession creates a session if none is active. Used at startup.

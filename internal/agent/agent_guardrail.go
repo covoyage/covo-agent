@@ -12,11 +12,11 @@ import (
 )
 
 func (ca *CovoAgent) CheckWriteSafe(path string) error {
-	return safety.IsWriteSafeWithWorkspace(path, ca.homeDir, ca.workDir, ca.workspaceOnly)
+	return safety.IsWriteSafeWithWorkspaces(path, ca.homeDir, ca.workDir, ca.extraWorkspaceRoots, ca.workspaceOnly)
 }
 
 func (ca *CovoAgent) CheckReadSafe(path string) error {
-	return safety.IsPathSafeWithWorkspace(path, ca.homeDir, ca.workDir, ca.workspaceOnly)
+	return safety.IsPathSafeWithWorkspaces(path, ca.homeDir, ca.workDir, ca.extraWorkspaceRoots, ca.workspaceOnly)
 }
 
 func (ca *CovoAgent) ToolGuardrail() *ToolGuardrail {

@@ -137,6 +137,7 @@ type CovoAgent struct {
 	dreamingEngine          *evolution.DreamingEngine
 	dreamingCancel          context.CancelFunc
 	workspaceOnly           bool // when true, file tools restricted to workspace directory
+	extraWorkspaceRoots     []string
 	auxClient               *AuxiliaryClient
 	compressionSwitch       *compression.CompressionProviderSwitch
 	doomloopDetector        *doomloop.Detector
@@ -204,6 +205,7 @@ type CovoAgentConfig struct {
 	// (some reasoning models reject non-zero penalties).
 	FrequencyPenalty float64
 	PresencePenalty  float64
+	ResponseFormat   *agentcore.ResponseFormat
 
 	ThinkingMode             string // "collapsed" / "truncated" / "full"
 	SkillURLs                []string
@@ -215,6 +217,7 @@ type CovoAgentConfig struct {
 	SystemPrompt             string                   // replaces SOUL.md in context tier
 	AppendSystemPrompt       string                   // appended to context tier
 	WorkspaceOnly            bool                     // when true, file tools restricted to workspace directory
+	ExtraWorkspaceRoots      []string                 // additional directories treated as workspace roots
 	ToolsetOverride          []string                 // restricted toolsets for child/sub agents (replaces COVO_TOOLSETS env var)
 	ToolNameFilter           func(string) bool        // optional per-tool-name predicate (headless --tools/--disallowed-tools); nil = no filtering
 	Auxiliary                *AuxiliaryConfig         // per-task auxiliary model overrides
@@ -511,6 +514,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 
 	// Workspace-only mode for file operations
 	workspaceOnly := cfg.WorkspaceOnly
+	extraWorkspaceRoots := append([]string(nil), cfg.ExtraWorkspaceRoots...)
 	promptBuilder.SetFSWorkspaceOnly(workspaceOnly)
 
 	// Repository map: code structure awareness for the model
@@ -874,6 +878,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	ca.readTracker = NewReadTracker()
 	ca.workDir = cfg.WorkingDir
 	ca.workspaceOnly = cfg.WorkspaceOnly
+	ca.extraWorkspaceRoots = extraWorkspaceRoots
 	ca.trajectory = NewTrajectoryRecorder(cfg.Model, "", filepath.Join(cfg.HomeDir, "trajectories"))
 	ca.lspManager = lsp.NewManager(lsp.ManagerConfig{
 		Enabled:     envBool("LSP_ENABLED", true),
@@ -1391,6 +1396,7 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 			Thinking:         cfg.ThinkingCfg,
 			FrequencyPenalty: cfg.FrequencyPenalty,
 			PresencePenalty:  cfg.PresencePenalty,
+			ResponseFormat:   cfg.ResponseFormat,
 		},
 		SystemPrompt: systemPrompt,
 		SkillConfig: agentcore.SkillConfig{

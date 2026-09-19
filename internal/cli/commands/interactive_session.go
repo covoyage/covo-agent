@@ -81,6 +81,7 @@ type interactiveSession struct {
 	subagentViewOpenID string
 	pasteStore         *agentui.PasteStore
 	composerDrafts     map[string]component.EditorDraft
+	restoredMessages   []agentcore.Message
 }
 
 func (s *interactiveSession) currentSessionID() string {
@@ -151,7 +152,7 @@ func (s *interactiveSession) restoreComposerDraft() {
 }
 
 // RunInteractive launches the interactive TUI, or the one-shot path when a
-// prompt was supplied via --oneshot/--pipe.
+// prompt was supplied via --print/--oneshot/--pipe.
 func RunInteractive(opts *RunOptions, runtime *cli.CommandRuntime) {
 	homeDir := runtime.HomeDir
 	cfg := runtime.Cfg
@@ -161,18 +162,13 @@ func RunInteractive(opts *RunOptions, runtime *cli.CommandRuntime) {
 		shared.RuntimeState.SetSessionYolo(true)
 	}
 
-	// Oneshot/pipe mode: run single prompt without TUI
-	oneshotPrompt := opts.Oneshot
-	if oneshotPrompt == "" {
-		oneshotPrompt = opts.Pipe
-	}
-	if oneshotPrompt == "-" || (oneshotPrompt == "" && !isTerminalFd(os.Stdin.Fd())) {
-		// Read from stdin (pipe mode)
+	printPrompt := opts.Print
+	if printPrompt == "-" || (printPrompt == "" && !isTerminalFd(os.Stdin.Fd())) {
 		data, _ := io.ReadAll(os.Stdin)
-		oneshotPrompt = strings.TrimSpace(string(data))
+		printPrompt = strings.TrimSpace(string(data))
 	}
-	if oneshotPrompt != "" {
-		runOneshot(oneshotPrompt, opts.Mode, opts.Provider, opts.Model, opts.Yolo, opts.JSON, opts.SystemPrompt, opts.AppendSystemPrompt)
+	if printPrompt != "" {
+		runOneshot(printPrompt, opts.Mode, opts.Provider, opts.Model, opts.Yolo, opts.JSON, opts.OutputFormat, opts.OutputSchema, opts.SystemPrompt, opts.AppendSystemPrompt, opts.Permission, opts.AddDir)
 		return
 	}
 
@@ -284,6 +280,9 @@ func (s *interactiveSession) run() {
 	}
 	s.workingDir = workingDir
 	workingDirOverride = workingDir
+	if _, _, err := applyCLIPermissionAndDirs(s.opts.Permission, s.opts.AddDir, s.workingDir, true, s.opts.Yolo); err != nil {
+		log.Fatalf("%v", err)
+	}
 
 	s.showReasoning, s.thinkingMode, s.thinkingStream = shared.DisplayConfigFromCLI(s.cfg)
 	s.historyMode = shared.HistoryModeFromCLI(s.cfg)
@@ -361,6 +360,7 @@ func (s *interactiveSession) run() {
 		LeanTools:                shared.LeanToolsEnabled(s.cfg),
 		SystemPrompt:             s.opts.SystemPrompt,
 		AppendSystemPrompt:       s.opts.AppendSystemPrompt,
+		ExtraWorkspaceRoots:      shared.RuntimeState.ExtraWorkspaceRoots(),
 		WorkspaceOnly:            shared.WorkspaceOnlyFromConfig(s.cfg),
 		Auxiliary:                shared.AuxiliaryConfigFromCLI(s.cfg),
 		AuxiliaryProviderBuilder: cli.ResolveAuxiliaryProviderBuilder(),
@@ -389,16 +389,7 @@ func (s *interactiveSession) run() {
 	// Initialized early so it's available to the SlashContext and hotkeys.
 	s.changedFiles = NewChangedFilesTracker(covoAgent.Core())
 
-	// Create or ensure a session exists for persistence
-	if s.opts.SessionID != "" {
-		sessionMgr := covoAgent.SessionManager()
-		if err := sessionMgr.ResumeSession(context.Background(), s.opts.SessionID); err != nil {
-			// Session doesn't exist — start with this ID anyway
-			sessionMgr.SetCurrentSessionID(s.opts.SessionID)
-		}
-	} else {
-		covoAgent.SessionManager().EnsureCurrentSession(context.Background(), s.workingDir)
-	}
+	s.openOrResumeSession(covoAgent)
 	s.bindPromptQueue(covoAgent.SessionManager().CurrentID())
 	defer func() {
 		shared.RuntimeState.PersistPromptQueue(context.Background())
@@ -434,6 +425,7 @@ func (s *interactiveSession) run() {
 	s.agentRuntime.SetPrepare(s.prepareAgent)
 
 	s.wirePermissionGate()
+	s.prepareAgent(covoAgent)
 	s.wireApprovalOverlay()
 	s.wireHandoff()
 	s.wireAskUser()
@@ -480,6 +472,7 @@ func (s *interactiveSession) run() {
 	s.installSubagentViewClickHandler()
 
 	s.app.SetReady()
+	s.startInteractiveFollowups()
 
 	cronScheduler := s.buildCronScheduler()
 	cronScheduler.Start(context.Background())
@@ -508,6 +501,49 @@ func chatHistoryTheme() chat.ChatHistoryTheme {
 		return strings.Split(rendered, "\n")
 	}
 	return th
+}
+
+func (s *interactiveSession) openOrResumeSession(covoAgent *agent.CovoAgent) {
+	sessionMgr := covoAgent.SessionManager()
+	ctx := context.Background()
+	switch {
+	case s.opts.SessionID != "":
+		if err := sessionMgr.ResumeSession(ctx, s.opts.SessionID); err != nil {
+			sessionMgr.SetCurrentSessionID(s.opts.SessionID)
+		}
+	case s.opts.Continue:
+		id, err := sessionMgr.LatestSessionID(ctx, s.workingDir)
+		if err != nil {
+			log.Printf("lookup latest session: %v", err)
+		}
+		if id != "" {
+			if err := sessionMgr.ResumeSession(ctx, id); err != nil {
+				log.Printf("resume latest session: %v", err)
+			}
+		} else {
+			sessionMgr.EnsureCurrentSession(ctx, s.workingDir)
+		}
+	default:
+		sessionMgr.EnsureCurrentSession(ctx, s.workingDir)
+	}
+	_ = sessionMgr.EnsureSessionRow(ctx, sessionMgr.CurrentID(), s.workingDir)
+	if snap, err := sessionMgr.LoadSession(ctx, sessionMgr.CurrentID()); err == nil && len(snap.Messages) > 0 {
+		covoAgent.Core().State().Restore(snap)
+		s.restoredMessages = snap.Messages
+	}
+}
+
+func (s *interactiveSession) startInteractiveFollowups() {
+	if s.opts.ShowSessionPicker {
+		s.openSessions()
+	}
+	prompt := strings.TrimSpace(s.opts.InitialPrompt)
+	if prompt == "" || s.opts.Print != "" {
+		return
+	}
+	safego.SafeGo(func() {
+		s.handleSubmit(context.Background(), prompt)
+	}, s.logger)
 }
 
 func configureInteractiveLogging(writer io.Writer) *slog.Logger {

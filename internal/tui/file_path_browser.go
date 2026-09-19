@@ -14,11 +14,16 @@ import (
 type FilePathBrowser struct {
 	trigger      string
 	rootDir      string
+	extraRoots   func() []string
 	fuzzyEnabled func() bool
 }
 
 func NewFilePathBrowser(trigger, rootDir string, fuzzyEnabled func() bool) *FilePathBrowser {
 	return &FilePathBrowser{trigger: trigger, rootDir: rootDir, fuzzyEnabled: fuzzyEnabled}
+}
+
+func (browser *FilePathBrowser) SetExtraRoots(fn func() []string) {
+	browser.extraRoots = fn
 }
 
 func (browser *FilePathBrowser) Trigger() string { return browser.trigger }
@@ -48,6 +53,10 @@ func (browser *FilePathBrowser) Complete(token string) []core.Suggestion {
 	searchPath := filepath.Join(root, directory)
 	if !strings.HasSuffix(directory, string(os.PathSeparator)) && directory == "" {
 		searchPath = root
+	}
+
+	if strings.HasPrefix(cleanToken, "/") || filepath.IsAbs(cleanToken) {
+		return browser.completeAbsolute(skipped, cleanToken, prefix, mode)
 	}
 
 	entries, err := os.ReadDir(searchPath)
@@ -118,6 +127,60 @@ func (browser *FilePathBrowser) Complete(token string) []core.Suggestion {
 	suggestions := make([]core.Suggestion, len(scored))
 	for index, item := range scored {
 		suggestions[index] = item.suggestion
+	}
+	if directory == "" && prefix == "" {
+		if extra := browser.extraRootSuggestions(skipped); len(extra) > 0 {
+			suggestions = append(extra, suggestions...)
+		}
+	}
+	return suggestions
+}
+
+func (browser *FilePathBrowser) extraRootSuggestions(skipped string) []core.Suggestion {
+	if browser.extraRoots == nil {
+		return nil
+	}
+	var out []core.Suggestion
+	for _, root := range browser.extraRoots() {
+		if root == "" {
+			continue
+		}
+		out = append(out, core.Suggestion{
+			InsertText:  skipped + root + string(os.PathSeparator),
+			Label:       "📁 " + filepath.Base(root) + "/",
+			Description: "workspace root",
+		})
+	}
+	return out
+}
+
+func (browser *FilePathBrowser) completeAbsolute(skipped, cleanToken, prefix, mode string) []core.Suggestion {
+	directory, namePrefix := filepath.Split(cleanToken)
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil
+	}
+	var suggestions []core.Suggestion
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") || !strings.Contains(strings.ToLower(name), strings.ToLower(namePrefix)) {
+			continue
+		}
+		isDirectory := entry.IsDir()
+		if mode == "folder" && !isDirectory {
+			continue
+		}
+		full := filepath.Join(directory, name)
+		suggestion := core.Suggestion{InsertText: skipped + full}
+		if isDirectory {
+			suggestion.Label = "📁 " + name + "/"
+			suggestion.InsertText += string(os.PathSeparator)
+			suggestion.Description = "directory"
+		} else {
+			suggestion.Label = "📄 " + name
+			suggestion.Description = formatFileSize(entry)
+		}
+		suggestions = append(suggestions, suggestion)
 	}
 	return suggestions
 }

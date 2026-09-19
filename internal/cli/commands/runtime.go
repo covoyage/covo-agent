@@ -8,10 +8,16 @@ type RunOptions struct {
 	Provider           string
 	Model              string
 	Yolo               bool
-	Oneshot            string
-	Pipe               string
+	Permission         string
+	AddDir             []string
+	Print              string
 	JSON               bool
+	OutputFormat       string
+	OutputSchema       string
 	SystemPrompt       string
 	AppendSystemPrompt string
 	SessionID          string
+	Continue           bool
+	ShowSessionPicker  bool
+	InitialPrompt      string
 }

@@ -47,6 +47,9 @@ func (factory *AgentFactory) Config(request AgentRequest) agent.CovoAgentConfig 
 	}
 	if factory.state != nil {
 		config.ToolProfile = factory.state.ActiveProfile()
+		if roots := factory.state.ExtraWorkspaceRoots(); roots != nil {
+			config.ExtraWorkspaceRoots = append([]string(nil), roots...)
+		}
 	}
 	return config
 }
@@ -63,6 +66,7 @@ func cloneAgentConfig(config agent.CovoAgentConfig) agent.CovoAgentConfig {
 	cloned.SkillExtraDirs = append([]string(nil), config.SkillExtraDirs...)
 	cloned.SkillDisabled = append([]string(nil), config.SkillDisabled...)
 	cloned.ToolsetOverride = append([]string(nil), config.ToolsetOverride...)
+	cloned.ExtraWorkspaceRoots = append([]string(nil), config.ExtraWorkspaceRoots...)
 	if config.MCPServers != nil {
 		cloned.MCPServers = make(map[string]agenttools.MCPConfig, len(config.MCPServers))
 		for name, server := range config.MCPServers {

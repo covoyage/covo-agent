@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/covoyage/covo-agent/internal/cli"
@@ -21,6 +24,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/i18n"
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/plugin"
+	"github.com/covoyage/covo-agent/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -29,24 +33,27 @@ type rootOptions struct {
 	provider           string
 	model              string
 	yolo               bool
-	oneshot            string
-	pipe               string
+	print              string
+	permission         string
+	addDir             []string
 	json               bool
 	systemPrompt       string
 	appendSystemPrompt string
 	sessionID          string
+	continueSession    bool
+	showSessionPicker  bool
 	sandbox            string
 
 	// Logging
 	logLevel string
 
-	// Headless mode flags
-	headless        bool
+	// Exec policy flags
 	tools           []string
 	disallowedTools []string
 	allowPatterns   []string
 	denyPatterns    []string
 	outputFormat    string
+	outputSchema    string
 	headlessTimeout time.Duration
 }
 
@@ -55,23 +62,10 @@ func newRootCommand() *cobra.Command {
 	runtime := &cli.CommandRuntime{}
 
 	root := &cobra.Command{
-		Use:          "covo-agent",
+		Use:          "covo-agent [prompt]",
 		Short:        "General-purpose AI agent for the terminal",
 		SilenceUsage: true,
-		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return nil
-			}
-			suggestions := cmd.SuggestionsFor(args[0])
-			var sugg string
-			if len(suggestions) > 0 {
-				sugg += "\n\nDid you mean this?\n"
-				for _, s := range suggestions {
-					sugg += fmt.Sprintf("\t%s\n", s)
-				}
-			}
-			return fmt.Errorf("unknown command %q for %q%s", args[0], cmd.CommandPath(), sugg)
-		},
+		Args:         cobra.MaximumNArgs(1),
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if err := applyLogLevelFlag(opts); err != nil {
 				return err
@@ -80,38 +74,37 @@ func newRootCommand() *cobra.Command {
 				return err
 			}
 			// Apply OS-level sandbox early, before any file operations.
-			// Only apply for the root command (interactive/oneshot), not subcommands.
-			if cmd.Name() == "covo-agent" {
+			// Only apply for interactive/print and exec, not other subcommands.
+			if cmd.Name() == "covo-agent" || cmd.Name() == "exec" {
 				commands.ApplySandboxIfRequested(opts.sandbox, runtime)
 			}
 			return nil
 		},
-		Run: func(_ *cobra.Command, _ []string) {
-			if opts.headless {
-				commands.RunHeadless(&headless.Options{
-					Prompt:             opts.oneshot,
-					Tools:              opts.tools,
-					DisallowedTools:    opts.disallowedTools,
-					Allow:              opts.allowPatterns,
-					Deny:               opts.denyPatterns,
-					OutputFormat:       opts.outputFormat,
-					Timeout:            opts.headlessTimeout,
-					SystemPrompt:       opts.systemPrompt,
-					AppendSystemPrompt: opts.appendSystemPrompt,
-				})
-				return
+		Run: func(_ *cobra.Command, args []string) {
+			initial := ""
+			if len(args) > 0 {
+				initial = strings.TrimSpace(args[0])
+			}
+			if opts.continueSession && opts.sessionID != "" {
+				log.Fatal("--continue cannot be combined with --session-id")
 			}
 			commands.RunInteractive(&commands.RunOptions{
 				Mode:               opts.mode,
 				Provider:           opts.provider,
 				Model:              opts.model,
 				Yolo:               opts.yolo,
-				Oneshot:            opts.oneshot,
-				Pipe:               opts.pipe,
+				Permission:         opts.permission,
+				AddDir:             opts.addDir,
+				Print:              opts.print,
 				JSON:               opts.json,
+				OutputFormat:       opts.outputFormat,
+				OutputSchema:       opts.outputSchema,
 				SystemPrompt:       opts.systemPrompt,
 				AppendSystemPrompt: opts.appendSystemPrompt,
 				SessionID:          opts.sessionID,
+				Continue:           opts.continueSession,
+				ShowSessionPicker:  opts.showSessionPicker,
+				InitialPrompt:      initial,
 			}, runtime)
 		},
 	}
@@ -119,25 +112,31 @@ func newRootCommand() *cobra.Command {
 	flags := root.PersistentFlags()
 	flags.StringVar(&opts.mode, "mode", "", "agent mode: general (all-purpose) or code (coding-focused)")
 	flags.StringVar(&opts.provider, "provider", "", "AI provider: openai, anthropic, gemini, xiaomi, openrouter, or custom")
+	flags.StringVar(&opts.permission, "permission", "", "permission mode: ask|auto|full (TUI) or smart|full|off (exec)")
+	flags.StringSliceVar(&opts.addDir, "add-dir", nil, "extra workspace directory (repeatable, max 16)")
 	flags.StringVar(&opts.model, "model", "", "model name to use")
 	flags.BoolVar(&opts.yolo, "yolo", false, "bypass all dangerous command approval prompts (use at your own risk)")
-	flags.StringVarP(&opts.oneshot, "oneshot", "z", "", "run a single prompt and output result to stdout (alias: --pipe)")
-	flags.StringVar(&opts.pipe, "pipe", "", "alias for --oneshot")
-	flags.BoolVar(&opts.json, "json", false, "output structured JSON (only with --oneshot/--pipe)")
+	flags.StringVarP(&opts.print, "print", "p", "", "run a single prompt and print the result (no TUI)")
+	flags.StringVarP(&opts.print, "oneshot", "z", "", "alias for --print")
+	flags.StringVar(&opts.print, "pipe", "", "alias for --print")
+	flags.BoolVar(&opts.json, "json", false, "output structured JSON (only with --print/--oneshot/--pipe)")
 	flags.StringVar(&opts.systemPrompt, "system-prompt", "", "replace the default system prompt content")
 	flags.StringVar(&opts.appendSystemPrompt, "append-system-prompt", "", "append content to the system prompt")
 	flags.StringVar(&opts.sessionID, "session-id", "", "resume or create a session with the given ID")
 	flags.StringVar(&opts.sandbox, "sandbox", "", "OS-level sandbox profile: workspace, read-only, strict, devbox, off, or custom profile name")
 	flags.StringVar(&opts.logLevel, "log-level", "", "log level: DEBUG, INFO, WARN, or ERROR (default: per-command)")
 
-	// Headless mode flags
-	flags.BoolVar(&opts.headless, "headless", false, "run in non-interactive headless mode (no TUI)")
-	flags.StringSliceVar(&opts.tools, "tools", nil, "whitelist of tool names to allow in headless mode")
-	flags.StringSliceVar(&opts.disallowedTools, "disallowed-tools", nil, "blacklist of tool names to block in headless mode")
+	// Exec policy flags
+	flags.StringSliceVar(&opts.tools, "tools", nil, "whitelist of tool names to allow in exec mode")
+	flags.StringSliceVar(&opts.disallowedTools, "disallowed-tools", nil, "blacklist of tool names to block in exec mode")
 	flags.StringSliceVar(&opts.allowPatterns, "allow", nil, "permission patterns to auto-approve (e.g. 'edit:*', 'bash:ls *')")
 	flags.StringSliceVar(&opts.denyPatterns, "deny", nil, "permission patterns to auto-deny")
-	flags.StringVar(&opts.outputFormat, "output-format", "text", "output format in headless mode: text or streaming-json")
-	flags.DurationVar(&opts.headlessTimeout, "timeout", 0, "timeout for headless mode execution")
+	flags.StringVar(&opts.outputFormat, "output-format", "text", "output format: text, json, or streaming-json (alias: stream-json)")
+	flags.StringVar(&opts.outputSchema, "output-schema", "", "JSON Schema for the final answer (inline object or file path)")
+	flags.DurationVar(&opts.headlessTimeout, "timeout", 0, "timeout for exec mode")
+
+	root.Flags().BoolVarP(&opts.continueSession, "continue", "c", false, "resume the latest session in the current directory")
+	root.Flags().BoolVar(&opts.showSessionPicker, "session", false, "open the session picker on startup")
 
 	root.SuggestionsMinimumDistance = 2
 
@@ -145,6 +144,8 @@ func newRootCommand() *cobra.Command {
 		return []string{"DEBUG", "INFO", "WARN", "ERROR"}, cobra.ShellCompDirectiveNoFileComp
 	})
 
+	root.AddCommand(newExecCommand(opts))
+	root.AddCommand(newInitCommand())
 	root.AddCommand(model.NewModelCommand(runtime))
 	root.AddCommand(health.NewVersionCommand())
 	root.AddCommand(health.NewStatusCommand())
@@ -211,6 +212,79 @@ func applyLogLevelFlag(opts *rootOptions) error {
 	}
 	logutil.SetLevel(lvl)
 	return nil
+}
+
+func (opts *rootOptions) nonInteractivePrompt() string {
+	return opts.print
+}
+
+func (opts *rootOptions) headlessOptions(prompt string) *headless.Options {
+	return &headless.Options{
+		Prompt:             prompt,
+		Tools:              opts.tools,
+		DisallowedTools:    opts.disallowedTools,
+		Permission:         opts.permission,
+		Yolo:               opts.yolo,
+		AddDir:             opts.addDir,
+		Allow:              opts.allowPatterns,
+		Deny:               opts.denyPatterns,
+		OutputFormat:       opts.outputFormat,
+		OutputSchema:       opts.outputSchema,
+		Timeout:            opts.headlessTimeout,
+		SystemPrompt:       opts.systemPrompt,
+		AppendSystemPrompt: opts.appendSystemPrompt,
+	}
+}
+
+func newInitCommand() *cobra.Command {
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "init [directory]",
+		Short: "Create AGENTS.md project guidance",
+		Long:  "Write AGENTS.md in the given directory (default: current directory) if it does not already exist.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			dir := "."
+			if len(args) > 0 {
+				dir = args[0]
+			}
+			path, created, err := workspace.WriteAgentsFile(dir, force)
+			if err != nil {
+				return err
+			}
+			if created {
+				fmt.Printf("Wrote %s\n", path)
+				return nil
+			}
+			fmt.Printf("%s already exists. Use --force to overwrite.\n", path)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing AGENTS.md")
+	return cmd
+}
+
+func newExecCommand(opts *rootOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "exec [prompt]",
+		Short: "Run a non-interactive agent task",
+		Long:  "Run one prompt without the TUI. Policy flags such as --tools, --allow, --deny, --output-format, and --output-schema apply here.",
+		Args:  cobra.MaximumNArgs(1),
+		Run: func(_ *cobra.Command, args []string) {
+			prompt := ""
+			if len(args) > 0 {
+				prompt = strings.TrimSpace(args[0])
+			}
+			if prompt == "" {
+				prompt = opts.nonInteractivePrompt()
+			}
+			if prompt == "-" || (prompt == "" && !cli.IsTerminal(os.Stdin.Fd())) {
+				data, _ := io.ReadAll(os.Stdin)
+				prompt = strings.TrimSpace(string(data))
+			}
+			commands.RunHeadless(opts.headlessOptions(prompt))
+		},
+	}
 }
 
 func initializeCommandRuntime(runtime *cli.CommandRuntime) error {

@@ -4,18 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/covoyage/covo-agent/internal/cli"
-	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
 	"log"
 	"log/slog"
 	"os"
 
 	"github.com/covoyage/covo-agent/internal/agent"
+	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
+	"github.com/covoyage/covo-agent/internal/headless"
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/telemetry"
+	"github.com/covoyage/covonaut/agentcore"
 )
 
-func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput bool, systemPrompt, appendSystemPrompt string) {
+func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput bool, outputFormat, outputSchema, systemPrompt, appendSystemPrompt, permission string, addDir []string) {
 	cfg, err := cli.LoadConfig()
 	if err != nil {
 		log.Fatalf("load config: %v", err)
@@ -48,7 +50,20 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logutil.ResolveLevel(slog.LevelError)}))
 	workingDir, _ := os.Getwd()
+	permMode, extraRoots, err := applyCLIPermissionAndDirs(permission, addDir, workingDir, false, yolo)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
 	skillCfgGet, skillCfgSet := shared.SkillConfigFns(cfg)
+
+	schema, err := headless.ParseOutputSchema(outputSchema)
+	if err != nil {
+		log.Fatalf("output schema: %v", err)
+	}
+	var responseFormat *agentcore.ResponseFormat
+	if schema != nil {
+		responseFormat = agentcore.NewJSONSchemaResponseFormat("output", schema)
+	}
 
 	covoAgent, err := agent.NewCovoAgent(agent.CovoAgentConfig{
 		Mode:                     mode,
@@ -72,6 +87,8 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 		SkillConfigGet:           skillCfgGet,
 		SkillConfigSet:           skillCfgSet,
 		LeanTools:                shared.LeanToolsEnabled(cfg),
+		ResponseFormat:           responseFormat,
+		ExtraWorkspaceRoots:      extraRoots,
 	})
 	if err != nil {
 		log.Fatalf("create agent: %v", err)
@@ -80,8 +97,9 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 
 	// Oneshot mode has no user present to approve dangerous commands — mark
 	// the session as non-interactive so the manual-approval fallback auto-denies.
-	if covoAgent.ApprovalSystem() != nil {
-		covoAgent.ApprovalSystem().SetNonInteractive(true)
+	if sys := covoAgent.ApprovalSystem(); sys != nil {
+		sys.SetNonInteractive(true)
+		agent.ApplyPermissionMode(sys, permMode)
 	}
 
 	ctx := context.Background()
@@ -94,7 +112,34 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 		log.Fatalf("agent run: %v", err)
 	}
 
-	if jsonOutput {
+	payload := result
+	if schema != nil {
+		payload = headless.ExtractJSONPayload(result)
+		if valErr := agentcore.ValidateJSON(schema, payload); valErr != nil {
+			telemetry.ShutdownOtel(context.Background())
+			log.Fatalf("structured output invalid: %v", valErr)
+		}
+	}
+
+	format := headless.NormalizeOutputFormat(outputFormat)
+	if jsonOutput && format == "text" {
+		format = "json"
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	switch format {
+	case "json":
+		if schema != nil {
+			var parsed any
+			if unmarshalErr := json.Unmarshal([]byte(payload), &parsed); unmarshalErr != nil {
+				log.Fatalf("decode structured output: %v", unmarshalErr)
+			}
+			if encodeErr := enc.Encode(parsed); encodeErr != nil {
+				log.Fatalf("encode output: %v", encodeErr)
+			}
+			return
+		}
 		usage := covoAgent.Core().State().TotalUsage()
 		out := oneshotJSONResult{
 			Result:   result,
@@ -106,13 +151,11 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 				Total:      usage.TotalTokens,
 			},
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(out); err != nil {
-			log.Fatalf("encode output: %v", err)
+		if encodeErr := enc.Encode(out); encodeErr != nil {
+			log.Fatalf("encode output: %v", encodeErr)
 		}
-	} else {
-		fmt.Print(result)
+	default:
+		fmt.Print(payload)
 	}
 }
 

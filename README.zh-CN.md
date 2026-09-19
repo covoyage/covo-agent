@@ -104,45 +104,62 @@ covo-agent auth list
 ```bash
 cd your-project
 covo-agent
+covo-agent "找出失败的测试，修好后再跑一遍"
+covo-agent --continue
+covo-agent --session
+covo-agent init .
 ```
 
 不启动 TUI，执行一次任务：
 
 ```bash
-covo-agent --oneshot "总结当前仓库"
-covo-agent -z "审查未提交的修改" --json
+covo-agent -p "总结当前仓库"
+covo-agent --print "审查未提交的修改" --json
 ```
 
 运行受约束的无头任务：
 
 ```bash
-covo-agent --headless \
-  -z "找出测试失败的原因" \
+covo-agent exec "找出测试失败的原因" \
   --tools read,grep,glob,bash \
   --allow 'bash:go test *' \
-  --deny 'bash:rm *'
+  --deny 'bash:rm *' \
+  --permission smart \
+  --add-dir ../shared-lib \
+  --output-format streaming-json
 ```
 
 ## 运行模式
 
 | 模式 | 示例 | 适用场景 |
 | --- | --- | --- |
-| 交互式 TUI | `covo-agent` | 迭代开发、工具调用、审批和会话管理 |
-| 单次运行 | `covo-agent -z "prompt"` | 脚本或一次性终端回复 |
-| 单次 JSON | `covo-agent -z "prompt" --json` | 结构化自动化输出 |
-| 无头模式 | `covo-agent --headless -z "prompt"` | 使用明确策略的非交互 Agent 任务 |
+| 交互式 TUI | `covo-agent` 或 `covo-agent "prompt"` | 迭代开发、工具调用、审批和会话管理 |
+| 续跑 | `covo-agent --continue` | 恢复当前目录最近一次会话 |
+| 初始化 | `covo-agent init .` | 生成 `AGENTS.md` 项目约定 |
+| 单次打印 | `covo-agent -p "prompt"` | 脚本或一次性终端回复 |
+| 单次 JSON | `covo-agent -p "prompt" --json` | 结构化自动化输出 |
+| 无头执行 | `covo-agent exec "prompt"` | 使用明确策略的非交互 Agent 任务 |
+| 无头 JSON 流 | `covo-agent exec "prompt" --output-format streaming-json` | 文本、工具调用和错误的 NDJSON 事件流 |
+| 结构化输出 | `covo-agent -p "prompt" --output-schema schema.json` | 最终回答必须符合 JSON Schema |
 
 常用全局参数：
 
 ```text
 --provider <name>          临时覆盖 Provider
 --model <name>             临时覆盖模型
+-c, --continue             恢复当前目录最近一次会话
+--session                  启动时打开会话选择器
 --mode general|code        选择 Agent 模式
 --session-id <id>          恢复或创建指定会话
 --sandbox <profile>        workspace、read-only、strict、devbox、off 或自定义配置
 --system-prompt <text>     替换默认系统提示词
 --append-system-prompt     追加系统提示词
+--permission               TUI：ask|auto|full；exec：smart|full|off
+--add-dir <path>           额外工作区目录（可重复，最多 16 个）
 --yolo                     跳过审批提示（高风险）
+-p, --print                运行一次 prompt 并打印结果（不进入 TUI）
+--output-format            text、json 或 streaming-json
+--output-schema            约束最终回答的 JSON Schema
 ```
 
 使用 `covo-agent --help` 查看完整且与当前版本一致的参数列表。
@@ -156,7 +173,7 @@ covo-agent --headless \
 | 编程工作流 | `analyze`、`review`、`pr`、`testgen`、`worktree` |
 | 集成能力 | `mcp`、`acp`、`lsp`、`gateway`、`pairing`、`plugin`、`ext`、`package` |
 | 个性化 | `profile`、`language`、`theme`、`features`、`template` |
-| 自动化 | `cron`、`heartbeat`、`completion` |
+| 自动化 | `exec`、`cron`、`heartbeat`、`completion` |
 
 每个命令都有独立帮助页面：
 
@@ -229,10 +246,10 @@ Profile 使用独立的数据目录：
 
 ## 安全机制
 
-可能修改文件、执行命令或影响外部系统的工具操作，会经过审批和策略层。自动化场景建议使用明确的 allow/deny 规则和沙箱配置。`--allow`/`--deny` 模式仅在 `--headless` 运行时生效；交互式会话使用审批门。
+可能修改文件、执行命令或影响外部系统的工具操作，会经过审批和策略层。自动化场景建议使用明确的 allow/deny 规则和沙箱配置。`--allow`/`--deny` 模式仅在 `exec` 运行时生效；交互式会话使用审批门。
 
 ```bash
-covo-agent --headless -z "运行测试并修复一个失败" \
+covo-agent exec "运行测试并修复一个失败" \
   --sandbox workspace \
   --allow 'edit:*' \
   --allow 'bash:go test *' \

@@ -97,3 +97,18 @@ func TestAgentFactoryAppliesToolNameFilter(t *testing.T) {
 		t.Fatal("ToolNameFilter was not applied")
 	}
 }
+
+func TestAgentFactoryOverlaysExtraWorkspaceRoots(t *testing.T) {
+	state := NewRuntimeState()
+	state.SetExtraWorkspaceRoots([]string{"/tmp/extra-a"})
+	factory := NewAgentFactory(agent.CovoAgentConfig{}, state)
+	got := factory.Config(AgentRequest{})
+	if len(got.ExtraWorkspaceRoots) != 1 || got.ExtraWorkspaceRoots[0] != "/tmp/extra-a" {
+		t.Fatalf("ExtraWorkspaceRoots = %v", got.ExtraWorkspaceRoots)
+	}
+	state.SetExtraWorkspaceRoots([]string{"/tmp/extra-b"})
+	got = factory.Config(AgentRequest{})
+	if len(got.ExtraWorkspaceRoots) != 1 || got.ExtraWorkspaceRoots[0] != "/tmp/extra-b" {
+		t.Fatalf("updated ExtraWorkspaceRoots = %v", got.ExtraWorkspaceRoots)
+	}
+}

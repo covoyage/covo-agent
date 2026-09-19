@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/covoyage/covo-agent/internal/promptqueue"
+	"github.com/covoyage/covonaut/agentcore"
 )
 
 func TestPromptQueueSaveLoadRoundTrip(t *testing.T) {
@@ -66,6 +67,38 @@ func TestPromptQueueSaveLoadRoundTrip(t *testing.T) {
 	}
 	if len(cleared) != 0 {
 		t.Fatalf("cleared=%+v", cleared)
+	}
+}
+
+func TestLatestSessionID(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	if err := store.EnsureSession(ctx, "empty", "/tmp/proj"); err != nil {
+		t.Fatal(err)
+	}
+	id, err := store.LatestSessionID(ctx, "/tmp/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "" {
+		t.Fatalf("empty session should be ignored, got %q", id)
+	}
+	if err := store.EnsureSession(ctx, "used", "/tmp/proj"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendMessage(ctx, "used", agentcore.Message{Role: "user", Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	id, err = store.LatestSessionID(ctx, "/tmp/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "used" {
+		t.Fatalf("latest = %q", id)
 	}
 }
 

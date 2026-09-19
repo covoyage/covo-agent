@@ -7,8 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/covoyage/covo-agent/internal/agent"
+	"github.com/covoyage/covo-agent/internal/workspace"
 )
 
 // Options controls headless mode behavior.
@@ -26,8 +31,21 @@ type Options struct {
 	// Deny is a list of permission patterns to auto-deny.
 	Deny []string
 
-	// OutputFormat controls the output format: "text" or "streaming-json".
+	// Permission is the exec approval mode: smart, full, or off.
+	Permission string
+
+	// Yolo bypasses dangerous-operation approval (same as --permission full).
+	Yolo bool
+
+	// AddDir is extra workspace directories for this run.
+	AddDir []string
+
+	// OutputFormat controls the output format: "text", "json", or "streaming-json".
 	OutputFormat string
+
+	// OutputSchema is an inline JSON Schema object or a path to a schema file.
+	// When set, the final assistant answer must be JSON matching the schema.
+	OutputSchema string
 
 	// SystemPrompt overrides the default system prompt.
 	SystemPrompt string
@@ -46,7 +64,7 @@ type Options struct {
 
 // OutputEvent represents a streaming JSON output event.
 type OutputEvent struct {
-	Type       string `json:"type"`    // "text", "tool_call", "tool_result", "error", "done"
+	Type       string `json:"type"`    // "text", "tool_call", "tool_result", "error", "reset", "done"
 	Content    string `json:"content"` // text content or tool name
 	ToolInput  string `json:"tool_input,omitempty"`
 	ToolResult string `json:"tool_result,omitempty"`
@@ -184,6 +202,7 @@ func matchGlob(pattern, text string) bool {
 
 // StreamingWriter handles streaming JSON output to a writer.
 type StreamingWriter struct {
+	mu  sync.Mutex
 	w   io.Writer
 	enc *json.Encoder
 }
@@ -201,6 +220,8 @@ func (sw *StreamingWriter) WriteEvent(event OutputEvent) error {
 	if event.Timestamp == 0 {
 		event.Timestamp = time.Now().UnixMilli()
 	}
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
 	return sw.enc.Encode(event)
 }
 
@@ -254,11 +275,20 @@ func ValidateOptions(opts *Options) error {
 		return fmt.Errorf("prompt is required for headless mode")
 	}
 
+	opts.OutputFormat = NormalizeOutputFormat(opts.OutputFormat)
 	switch opts.OutputFormat {
-	case "", "text", "streaming-json":
+	case "text", "json", "streaming-json":
 		// valid
 	default:
-		return fmt.Errorf("invalid output format: %s (expected 'text' or 'streaming-json')", opts.OutputFormat)
+		return fmt.Errorf("invalid output format: %s (expected 'text', 'json', or 'streaming-json')", opts.OutputFormat)
+	}
+
+	if _, err := ParseOutputSchema(opts.OutputSchema); err != nil {
+		return err
+	}
+
+	if err := validatePermissionAndDirs(opts); err != nil {
+		return err
 	}
 
 	switch opts.ReasoningEffort {
@@ -279,6 +309,26 @@ func ValidateOptions(opts *Options) error {
 		}
 	}
 
+	return nil
+}
+
+func validatePermissionAndDirs(opts *Options) error {
+	permission := opts.Permission
+	if opts.Yolo {
+		permission = string(agent.PermissionFull)
+	}
+	if _, err := agent.NormalizePermissionMode(permission, false); err != nil {
+		return err
+	}
+	workingDir, _ := os.Getwd()
+	var roots []string
+	for _, dir := range opts.AddDir {
+		next, _, err := workspace.AddExtraRoot(workingDir, roots, dir)
+		if err != nil {
+			return fmt.Errorf("add-dir %s: %w", dir, err)
+		}
+		roots = next
+	}
 	return nil
 }
 

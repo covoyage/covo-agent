@@ -21,12 +21,13 @@ func (s *interactiveSession) prepareAgent(newCA *agent.CovoAgent) {
 	}
 	if s.permissionGate != nil {
 		newCA.SetPermissionChecker(s.permissionGate.Checker())
+		s.permissionGate.YoloMode = shared.RuntimeState.SessionYolo()
 	}
-	if shared.RuntimeState.SessionYolo() {
-		if approvalSys := newCA.ApprovalSystem(); approvalSys != nil {
-			approvalSys.EnableSessionYolo("cli")
-		}
+	mode := agent.PermissionMode(shared.RuntimeState.PermissionMode())
+	if mode == "" {
+		mode = agent.PermissionAsk
 	}
+	agent.ApplyPermissionMode(newCA.ApprovalSystem(), mode)
 }
 
 func (s *interactiveSession) requestFor(m agent.AgentMode, provider agentcore.Provider, providerName, modelName string) runtimeapp.AgentRequest {
