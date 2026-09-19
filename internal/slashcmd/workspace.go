@@ -86,3 +86,22 @@ func handleInit(sctx *SlashContext, parts []string) bool {
 	sctx.UI.App.PrintSystem(fmt.Sprintf("%s already exists. Use /init force to overwrite.", path))
 	return true
 }
+
+func submitSlashPrompt(sctx *SlashContext, text string) bool {
+	if sctx.UI.SubmitPrompt == nil {
+		sctx.UI.App.PrintSystem(text)
+		return true
+	}
+	sctx.UI.SubmitPrompt(text)
+	return true
+}
+
+func handleReviewTask(sctx *SlashContext, parts []string) bool {
+	scope, extra := parseReviewArgs(parts)
+	return submitSlashPrompt(sctx, buildReviewPrompt(scope, extra))
+}
+
+func handleInterview(sctx *SlashContext, parts []string) bool {
+	topic := strings.TrimSpace(strings.Join(parts[1:], " "))
+	return submitSlashPrompt(sctx, buildInterviewPrompt(topic))
+}

@@ -22,11 +22,12 @@ type UsageFooter interface {
 
 // AgentUIBinder connects agent events to the current chat app and footer.
 type AgentUIBinder struct {
-	App         func() *chat.ChatApp
-	Footer      func() UsageFooter
-	PrintSystem func(string)
-	Mode        func() string
-	Model       func() string
+	App          func() *chat.ChatApp
+	Footer       func() UsageFooter
+	PrintSystem  func(string)
+	Mode         func() string
+	Model        func() string
+	ShowFollowUp func()
 
 	mu        sync.Mutex
 	startedAt time.Time
@@ -65,6 +66,9 @@ func (binder *AgentUIBinder) Bind(core *agentcore.Agent) {
 	})
 	core.On(agentcore.EventAgentEnd, func(agentcore.Event) {
 		binder.attachCompletionChip()
+		if binder.ShowFollowUp != nil {
+			binder.ShowFollowUp()
+		}
 	})
 	if binder.App != nil {
 		if app := binder.App(); app != nil {

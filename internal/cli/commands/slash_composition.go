@@ -38,6 +38,8 @@ type slashCompositionConfig struct {
 	OpenDashboard        func()
 	StashComposerDraft   func()
 	RestoreComposerDraft func()
+	SubmitPrompt         func(text string)
+	AttachImage          func(path, message string) error
 	BackgroundManager    slashcmd.BackgroundManager
 	StatusLineManager    slashcmd.StatusLineManager
 	WorkingDir           string
@@ -81,6 +83,8 @@ func newSlashContextBuilder(config slashCompositionConfig) *slashcmd.ContextBuil
 			OpenDashboard:        config.OpenDashboard,
 			StashComposerDraft:   config.StashComposerDraft,
 			RestoreComposerDraft: config.RestoreComposerDraft,
+			SubmitPrompt:         config.SubmitPrompt,
+			AttachImage:          config.AttachImage,
 		},
 		IO: slashcmd.IODependencies{
 			ExportSessionHTML:     exportSessionHTML,

@@ -12,9 +12,10 @@ type AgentRole struct {
 
 var predefinedRoles = []AgentRole{
 	{
-		Name:        "explorer",
-		Description: "Read-only code exploration: searching, reading, navigating codebases.",
-		Toolsets:    []string{"filesystem", "search", "git"},
+		Name:         "explorer",
+		Description:  "Read-only code exploration: searching, reading, navigating codebases.",
+		Toolsets:     []string{"filesystem", "search", "git"},
+		SystemPrompt: "You are a read-only file explorer. Map the files, symbols, and call paths relevant to the task. Do not edit files or run mutating commands. Return a concise report: relevant paths, what each does, and where the parent should start editing.",
 	},
 	{
 		Name:        "coder",
@@ -22,9 +23,10 @@ var predefinedRoles = []AgentRole{
 		Toolsets:    []string{"filesystem", "shell", "git", "editing"},
 	},
 	{
-		Name:        "reviewer",
-		Description: "Code review: read-only inspection, linting, testing.",
-		Toolsets:    []string{"filesystem", "shell", "git", "search"},
+		Name:         "reviewer",
+		Description:  "Code review: read-only inspection, linting, testing.",
+		Toolsets:     []string{"filesystem", "shell", "git", "search"},
+		SystemPrompt: "You are an independent code reviewer. Inspect the described changes for correctness bugs, regressions, and security issues. Do not implement fixes. Rate each finding critical/major/minor and cite file paths.",
 	},
 	{
 		Name:        "devops",

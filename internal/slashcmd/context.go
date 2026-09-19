@@ -69,6 +69,8 @@ type UIDependencies struct {
 	OpenDashboard        func()
 	StashComposerDraft   func()
 	RestoreComposerDraft func()
+	SubmitPrompt         func(text string)
+	AttachImage          func(path, message string) error
 }
 
 // IODependencies groups import/export and clipboard integrations.

@@ -14,6 +14,8 @@ func TestSlashCompositionBuilderWiresDynamicAndStaticDependencies(t *testing.T) 
 	tracker := NewChangedFilesTracker(nil)
 	tracker.recordEntry("changed.go", ActionModified, "edit")
 	var busy atomic.Bool
+	var submitted string
+	var attached string
 
 	builder := newSlashContextBuilder(slashCompositionConfig{
 		Busy:         &busy,
@@ -22,6 +24,8 @@ func TestSlashCompositionBuilderWiresDynamicAndStaticDependencies(t *testing.T) 
 		WorkingDir:   "/workspace",
 		HomeDir:      "/home",
 		ChangedFiles: tracker,
+		SubmitPrompt: func(text string) { submitted = text },
+		AttachImage:  func(path, message string) error { attached = path + ":" + message; return nil },
 	})
 	requestContext := context.Background()
 	built := builder.Build("/status", requestContext, "provider", "model")
@@ -37,6 +41,22 @@ func TestSlashCompositionBuilderWiresDynamicAndStaticDependencies(t *testing.T) 
 	}
 	if built.IO.ExportSessionHTML == nil || built.UI.RestoreChatHistory == nil || built.Services.ExecuteShellCommand == nil {
 		t.Fatal("static command services were not wired")
+	}
+	if built.UI.SubmitPrompt == nil {
+		t.Fatal("SubmitPrompt was not wired")
+	}
+	built.UI.SubmitPrompt("hello")
+	if submitted != "hello" {
+		t.Fatalf("SubmitPrompt = %q", submitted)
+	}
+	if built.UI.AttachImage == nil {
+		t.Fatal("AttachImage was not wired")
+	}
+	if err := built.UI.AttachImage("/tmp/a.png", "look"); err != nil {
+		t.Fatal(err)
+	}
+	if attached != "/tmp/a.png:look" {
+		t.Fatalf("AttachImage = %q", attached)
 	}
 	if len(built.Services.Personalities) == 0 {
 		t.Fatal("personality catalog was not wired")

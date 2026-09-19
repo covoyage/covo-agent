@@ -30,8 +30,16 @@ func NewSuggestionsManager(onSubmit func(string)) *SuggestionsManager {
 }
 
 func (manager *SuggestionsManager) Show(app *chat.ChatApp) {
+	manager.ShowWith(app, nil)
+}
+
+func (manager *SuggestionsManager) ShowWith(app *chat.ChatApp, texts []string) {
 	manager.mu.Lock()
-	manager.active = suggestionTexts()
+	if len(texts) == 0 {
+		manager.active = suggestionTexts()
+	} else {
+		manager.active = suggestionsFromTexts(texts)
+	}
 	manager.mu.Unlock()
 	manager.appendMessage(app)
 }
@@ -105,9 +113,25 @@ func (*SuggestionsManager) SuggestionMsgID() string {
 }
 
 func suggestionTexts() []Suggestion {
-	return []Suggestion{
-		{Key: "ctrl+1", Text: i18n.T("suggestions.detail")},
-		{Key: "ctrl+2", Text: i18n.T("suggestions.changes")},
-		{Key: "ctrl+3", Text: i18n.T("suggestions.risks")},
+	return suggestionsFromTexts([]string{
+		i18n.T("suggestions.detail"),
+		i18n.T("suggestions.changes"),
+		i18n.T("suggestions.risks"),
+	})
+}
+
+func suggestionsFromTexts(texts []string) []Suggestion {
+	keys := []string{"ctrl+1", "ctrl+2", "ctrl+3"}
+	out := make([]Suggestion, 0, 3)
+	for i, text := range texts {
+		if i >= len(keys) {
+			break
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		out = append(out, Suggestion{Key: keys[len(out)], Text: text})
 	}
+	return out
 }

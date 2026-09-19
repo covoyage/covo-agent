@@ -178,7 +178,7 @@ type SkillsConfig struct {
 type ToolsConfig struct {
 	// Lean hides long-tail tool schemas from the model and leaves them
 	// discoverable via tool_search / tool_describe / tool_call.
-	// Default is auto: enable when more than one MCP server is configured.
+	// Default is auto: on in code mode, or when more than one MCP server is configured.
 	Lean string `yaml:"lean,omitempty"` // auto / on / off
 }
 

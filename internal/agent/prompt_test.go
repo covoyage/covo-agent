@@ -70,6 +70,18 @@ func TestLoadContextFilesPrefersCloserFile(t *testing.T) {
 	}
 }
 
+func TestCodeAgentIdentityIncludesCodingWorkflow(t *testing.T) {
+	if !strings.Contains(codeAgentIdentity, "CODING WORKFLOW") {
+		t.Fatal("code identity should include coding workflow guidance")
+	}
+	if !strings.Contains(codeAgentIdentity, "role=explorer") {
+		t.Fatal("code identity should mention explorer spawn")
+	}
+	if !strings.Contains(codeAgentIdentity, "role=reviewer") {
+		t.Fatal("code identity should mention reviewer spawn")
+	}
+}
+
 func contextFileContains(got map[string]string, name, snippet string) bool {
 	for k, v := range got {
 		if strings.EqualFold(filepath.Base(k), name) && strings.Contains(v, snippet) {

@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/covoyage/covonaut/tools"
 	"github.com/covoyage/covonaut/tui/chat"
 	"github.com/covoyage/covonaut/tui/theme"
 
@@ -74,6 +75,7 @@ func executeShellCommand(
 			return
 		}
 	}
+	tools.IsolateCommand(cmd)
 
 	err := cmd.Run()
 

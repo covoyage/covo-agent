@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/covoyage/covo-agent/internal/diffrender"
 	"github.com/covoyage/covonaut/agentcore"
@@ -409,6 +410,9 @@ func (s *interactiveSession) run() {
 		},
 		Mode:  func() string { return string(s.mode) },
 		Model: func() string { return s.model },
+		ShowFollowUp: func() {
+			s.showTurnFollowUps()
+		},
 	}
 
 	s.agentRuntime.OnReplace(func(replacement runtimeapp.AgentReplacement) {
@@ -531,6 +535,37 @@ func (s *interactiveSession) openOrResumeSession(covoAgent *agent.CovoAgent) {
 		covoAgent.Core().State().Restore(snap)
 		s.restoredMessages = snap.Messages
 	}
+}
+
+func (s *interactiveSession) showTurnFollowUps() {
+	if s.sideBusy.Load() || s.suggestionsMgr == nil || s.app == nil {
+		return
+	}
+	var messages []agentcore.Message
+	var aux *agent.AuxiliaryClient
+	if s.agentRuntime != nil {
+		if ca := s.agentRuntime.Current(); ca != nil {
+			aux = ca.AuxClient()
+			if core := ca.Core(); core != nil && core.State() != nil {
+				messages = core.State().Messages()
+			}
+		}
+	}
+	if aux == nil {
+		s.suggestionsMgr.Show(s.app)
+		return
+	}
+	app := s.app
+	mgr := s.suggestionsMgr
+	safego.SafeGo(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		texts := agent.GenerateFollowUps(ctx, aux, messages)
+		if s.app == nil || s.suggestionsMgr == nil {
+			return
+		}
+		mgr.ShowWith(app, texts)
+	}, s.logger)
 }
 
 func (s *interactiveSession) startInteractiveFollowups() {

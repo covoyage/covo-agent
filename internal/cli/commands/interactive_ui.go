@@ -284,14 +284,25 @@ func (s *interactiveSession) handleImagePaste() {
 		}
 		return
 	}
-	if s.app != nil {
-		// Inject image reference into editor
-		ed := loadUIBus().Editor()
-		ed.SetValue(ed.GetValue() + " [image:" + filepath.Base(path) + "]")
-		loadUIBus().PrintSystem(i18n.T("system.image_pasted", "name", filepath.Base(path)))
-		// Store the path for submit-time injection
-		s.pendingImages.Store(filepath.Base(path), path)
+	_ = s.attachImage(path, "")
+}
+
+func (s *interactiveSession) attachImage(path, message string) error {
+	name := filepath.Base(path)
+	s.pendingImages.Store(name, path)
+	ref := "[image:" + name + "]"
+	message = strings.TrimSpace(message)
+	if message != "" {
+		s.submitPrompt(context.Background(), message+" "+ref)
+		return nil
 	}
+	if s.app != nil {
+		if ed := loadUIBus().Editor(); ed != nil {
+			ed.SetValue(strings.TrimSpace(ed.GetValue() + " " + ref))
+		}
+		loadUIBus().PrintSystem(i18n.T("system.image_pasted", "name", name))
+	}
+	return nil
 }
 
 // wireFooter creates the sticky footer and status line, connects the slash
@@ -330,11 +341,15 @@ func (s *interactiveSession) wireFooter() {
 		OpenPromptQueue:      s.showPromptQueue,
 		StashComposerDraft:   s.stashComposerDraft,
 		RestoreComposerDraft: s.restoreComposerDraft,
-		BackgroundManager:    s.bgManager,
-		StatusLineManager:    s.statusLineMgr,
-		WorkingDir:           s.workingDir,
-		HomeDir:              s.homeDir,
-		ChangedFiles:         s.changedFiles,
+		SubmitPrompt: func(text string) {
+			s.submitPrompt(context.Background(), text)
+		},
+		AttachImage:       s.attachImage,
+		BackgroundManager: s.bgManager,
+		StatusLineManager: s.statusLineMgr,
+		WorkingDir:        s.workingDir,
+		HomeDir:           s.homeDir,
+		ChangedFiles:      s.changedFiles,
 	})
 	s.statusLineMgr.SetRenderFn("mode", func(pal *theme.Palette) string {
 		md := s.stickyFooter.Snapshot().Mode

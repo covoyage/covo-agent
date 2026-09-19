@@ -88,6 +88,9 @@ var slashDispatch = map[string]slashHandler{
 	"rewind":            handleRewind,
 	"plan":              handlePlan,
 	"act":               handleAct,
+	"review":            handleReviewTask,
+	"interview":         handleInterview,
+	"image":             handleImage,
 	"permission":        handlePermission,
 	"add-dir":           handleAddDir,
 	"init":              handleInit,
@@ -376,6 +379,10 @@ func handleRewind(sctx *SlashContext, parts []string) bool {
 // planModeGateBeforeHook and hidden from the LLM's tool list by the toolset
 // filter.
 func handlePlan(sctx *SlashContext, parts []string) bool {
+	task := strings.TrimSpace(strings.Join(parts[1:], " "))
+	if task != "" {
+		return submitSlashPrompt(sctx, buildPlanTaskPrompt(task))
+	}
 	if sctx.Runtime.Busy.Load() {
 		sctx.UI.App.PrintSystem(i18n.T("system.busy"))
 		return true

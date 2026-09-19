@@ -29,6 +29,25 @@ func TestSuggestionsManagerActivatesHotkey(t *testing.T) {
 	}
 }
 
+func TestSuggestionsManagerShowWithCustomTexts(t *testing.T) {
+	submitted := make(chan string, 1)
+	manager := NewSuggestionsManager(func(text string) { submitted <- text })
+	manager.mu.Lock()
+	manager.active = suggestionsFromTexts([]string{"Run tests", "Open a PR"})
+	manager.mu.Unlock()
+	if !manager.HandleHotkey("\x1b[49;5u") { // ctrl+1
+		t.Fatal("ctrl+1 did not activate a suggestion")
+	}
+	select {
+	case got := <-submitted:
+		if got != "Run tests" {
+			t.Fatalf("submitted %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for suggestion submission")
+	}
+}
+
 func TestSuggestionsManagerRejectsInactiveHotkey(t *testing.T) {
 	manager := NewSuggestionsManager(nil)
 	if manager.HandleHotkey("\x1f") { // ctrl+/

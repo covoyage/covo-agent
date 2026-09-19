@@ -358,13 +358,12 @@ var DefaultPlanModeAllowedTools = map[string]bool{
 // tool_search / tool_describe / tool_call (including MCP).
 var LeanDirectTools = map[string]bool{
 	"read": true, "edit": true, "write_file": true, "ls": true,
-	"search_files": true,
-	"bash":         true, "git_status": true, "git_diff": true, "git_log": true,
-	"web_fetch": true, "open_url": true, "todo": true, "update_plan": true, "clarify": true,
-	"exit_plan_mode": true, "session_search": true, "diffs": true,
-	"apply_patch": true, "edit_block": true, "skill": true,
+	"search_files": true, "glob": true, "grep": true,
+	"bash": true, "git_status": true, "git_diff": true, "git_log": true,
+	"todo": true, "update_plan": true, "clarify": true, "ask_user": true,
+	"exit_plan_mode": true, "diffs": true, "apply_patch": true, "edit_block": true,
+	"sessions_spawn": true, "sessions_wait": true,
 	"tool_search": true, "tool_describe": true, "tool_call": true,
-	"secrets": true, "ask_user": true, "memory": true,
 }
 
 // SetPlanModeChecker sets the function used to check if the agent is in

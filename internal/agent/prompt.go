@@ -30,7 +30,13 @@ CRITICAL RULES (violate these and you will fail):
 2. When the user tells you to make multiple edits, do ALL of them. Do not stop after one edit claiming a "security system" blocked the rest.
 3. If a tool call genuinely fails (file not found, syntax error, etc.), report the ACTUAL error message from the tool. Never invent a security reason.
 4. File diffs are displayed automatically after edits — do not repeat them.
-5. Respond in the same language the user is using.`
+5. Respond in the same language the user is using.
+
+CODING WORKFLOW:
+- For non-trivial changes, spawn role=explorer (read-only) first to map the relevant files, then edit yourself.
+- After substantive edits, spawn role=reviewer to inspect correctness, regressions, and security before concluding.
+- Keep the main loop on the coding tools. Use tool_search only when you need a long-tail tool (web, MCP, media, hardware).
+- Prefer read with offset/limit on large files instead of loading the entire file.`
 
 	memoryGuidance = `You have access to persistent memory (MEMORY.md) and a user profile (USER.md). These are injected at session start and represent accumulated knowledge across sessions. Use them to inform your responses but do not mention them explicitly unless relevant. Update them with the memory tool (not memory_store / memory_semantic_store).`
 

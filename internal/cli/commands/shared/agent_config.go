@@ -114,7 +114,7 @@ func SkillConfigFns(cfg *cli.Config) (func() map[string]string, func(key, value 
 }
 
 // LeanToolsEnabled is true when long-tail tool schemas should be hidden.
-// Default (auto / unset): on when more than one MCP server is configured.
+// Default (auto / unset): on for code mode, or when more than one MCP server is configured.
 func LeanToolsEnabled(cfg *cli.Config) bool {
 	mode := ""
 	if cfg != nil && cfg.Tools != nil {
@@ -129,6 +129,9 @@ func LeanToolsEnabled(cfg *cli.Config) bool {
 	case "off", "false", "0", "no":
 		return false
 	default:
+		if cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.Mode), "code") {
+			return true
+		}
 		return cfg != nil && len(cfg.MCPServers) > 1
 	}
 }

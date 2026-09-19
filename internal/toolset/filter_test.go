@@ -120,6 +120,19 @@ func TestToolsetFilter_LeanModeHidesLongTail(t *testing.T) {
 	}
 }
 
+func TestLeanDirectToolsKeepsCodingLoop(t *testing.T) {
+	for _, name := range []string{"read", "edit", "bash", "sessions_spawn", "sessions_wait", "tool_search", "tool_call"} {
+		if !LeanDirectTools[name] {
+			t.Errorf("expected %s in LeanDirectTools", name)
+		}
+	}
+	for _, name := range []string{"web_fetch", "open_url", "mcp", "computer_use", "skill"} {
+		if LeanDirectTools[name] {
+			t.Errorf("did not expect %s in LeanDirectTools", name)
+		}
+	}
+}
+
 func TestToolsetFilter_NilNameFilterKeepsAll(t *testing.T) {
 	platform := NewPlatformToolsets("cli")
 	platform.SetOverride("cli", []string{"read", "bash", "web_fetch"})

@@ -58,6 +58,29 @@ func TestSessionsSpawnMaxTurnsExplicit(t *testing.T) {
 	}
 }
 
+func TestSessionsSpawnInjectsRoleSystemPrompt(t *testing.T) {
+	var gotTask string
+	runner := func(ctx context.Context, task string, toolsets []string, maxTurns int) (string, error) {
+		gotTask = task
+		return "done", nil
+	}
+	tool := BuildSessionsSpawnTool(runner, nil,
+		func() []string { return nil },
+		func() []agentcore.Message { return nil },
+		nil, nil)
+
+	args := `{"task": "map the auth package", "role": "explorer", "background": false}`
+	if _, err := tool.Func(context.Background(), json.RawMessage(args)); err != nil {
+		t.Fatalf("Func: %v", err)
+	}
+	if !strings.Contains(gotTask, "read-only file explorer") {
+		t.Fatalf("expected explorer system prompt in task, got %q", gotTask)
+	}
+	if !strings.Contains(gotTask, "map the auth package") {
+		t.Fatalf("expected original task in spawned prompt, got %q", gotTask)
+	}
+}
+
 // TestSpawnUnknownPersonaSoftDegradation verifies that an invented persona
 // name does not fail the spawn: the child runs without the persona and the
 // result carries a warning listing the available names.

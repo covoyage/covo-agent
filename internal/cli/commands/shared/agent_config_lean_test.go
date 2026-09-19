@@ -32,6 +32,14 @@ func TestLeanToolsEnabled(t *testing.T) {
 		}
 	})
 
+	t.Run("auto on in code mode", func(t *testing.T) {
+		t.Setenv("COVO_TOOLS_LEAN", "")
+		cfg := &cli.Config{Mode: "code"}
+		if !LeanToolsEnabled(cfg) {
+			t.Fatal("expected lean on in code mode")
+		}
+	})
+
 	t.Run("explicit on", func(t *testing.T) {
 		t.Setenv("COVO_TOOLS_LEAN", "")
 		cfg := &cli.Config{Tools: &cli.ToolsConfig{Lean: "on"}}

@@ -267,12 +267,15 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 					task = reminder + "\n\n---\n## Your Task\n" + task
 				}
 			}
+			if role, ok := GetRole(params.Role); ok && strings.TrimSpace(role.SystemPrompt) != "" {
+				task = role.SystemPrompt + "\n\n---\n## Your Task\n" + task
+			}
 
 			switch mode {
 			case "state":
 				if parentMessages != nil {
 					if summary := SummarizeParentState(parentMessages()); summary != "" {
-						task = summary + "\n\n---\n## Your Task\n" + params.Task
+						task = summary + "\n\n---\n## Your Task\n" + task
 					}
 				}
 			case "full", "turns":
