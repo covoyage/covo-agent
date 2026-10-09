@@ -209,6 +209,8 @@ type ShellHookManager struct {
 	allowlistPath string
 	autoAccept    bool
 	registered    map[string]bool
+	trust         *HookTrustStore
+	workDir       string
 
 	// Hot reload
 	hotReloadStop   chan struct{}
@@ -229,6 +231,7 @@ func NewShellHookManager(hermesHome string, autoAccept bool) *ShellHookManager {
 		autoAccept:    autoAccept,
 		registered:    make(map[string]bool),
 		breakers:      make(map[string]*circuitBreaker),
+		trust:         NewHookTrustStore(hermesHome),
 	}
 	m.loadAllowlist()
 	return m
@@ -543,7 +546,9 @@ func (m *ShellHookManager) RegisterFromConfig(hooks []map[string]any) []*ShellHo
 }
 
 // LoadProjectHooksFile reads .covo-agent-hooks.json from the working directory
-// and registers any hooks found. Returns the number of hooks registered.
+// When the file digest differs from the last granted snapshot, previously
+// allowlisted commands from this workspace are ignored until re-approved
+// (or COVO_ACCEPT_HOOKS is set).
 func (m *ShellHookManager) LoadProjectHooksFile(workDir string) int {
 	path := filepath.Join(workDir, ".covo-agent-hooks.json")
 	data, err := os.ReadFile(path)
@@ -556,8 +561,35 @@ func (m *ShellHookManager) LoadProjectHooksFile(workDir string) int {
 	if err := json.Unmarshal(data, &cfg); err != nil || len(cfg.Hooks) == 0 {
 		return 0
 	}
+	digest := HookFileDigest(data)
+	m.workDir = workDir
+	if m.trust != nil {
+		if prev, ok := m.trust.Granted(workDir); ok && prev != digest && !m.autoAccept {
+			m.forgetProjectAllowlist(cfg.Hooks)
+		}
+	}
 	registered := m.RegisterFromConfig(cfg.Hooks)
+	if len(registered) > 0 && m.trust != nil {
+		_ = m.trust.Grant(workDir, digest)
+	}
 	return len(registered)
+}
+
+func (m *ShellHookManager) forgetProjectAllowlist(hooks []map[string]any) {
+	m.allowlistMu.Lock()
+	defer m.allowlistMu.Unlock()
+	for _, entry := range hooks {
+		event, _ := entry["event"].(string)
+		cmd, _ := entry["command"].(string)
+		if event == "" || cmd == "" {
+			continue
+		}
+		event = normalizeEvent(event)
+		if cmds, ok := m.allowlist[event]; ok {
+			delete(cmds, cmd)
+		}
+	}
+	_ = m.saveAllowlist()
 }
 
 // claudeHooksPaths returns the Claude Code hooks files in load/hot-reload

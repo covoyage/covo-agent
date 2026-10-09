@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os"
 	"strings"
 
 	"github.com/covoyage/covonaut/agentcore"
@@ -51,7 +52,22 @@ func (factory *AgentFactory) Config(request AgentRequest) agent.CovoAgentConfig 
 			config.ExtraWorkspaceRoots = append([]string(nil), roots...)
 		}
 	}
+	config.LeanTools = leanToolsForMode(config, request.Mode)
 	return config
+}
+
+func leanToolsForMode(config agent.CovoAgentConfig, mode agent.AgentMode) bool {
+	env := strings.ToLower(strings.TrimSpace(os.Getenv("COVO_TOOLS_LEAN")))
+	switch env {
+	case "on", "true", "1", "yes":
+		return true
+	case "off", "false", "0", "no":
+		return false
+	}
+	if mode.LeanDefault() {
+		return true
+	}
+	return len(config.MCPServers) > 1
 }
 
 func (factory *AgentFactory) New(request AgentRequest) (*agent.CovoAgent, error) {
@@ -67,6 +83,10 @@ func cloneAgentConfig(config agent.CovoAgentConfig) agent.CovoAgentConfig {
 	cloned.SkillDisabled = append([]string(nil), config.SkillDisabled...)
 	cloned.ToolsetOverride = append([]string(nil), config.ToolsetOverride...)
 	cloned.ExtraWorkspaceRoots = append([]string(nil), config.ExtraWorkspaceRoots...)
+	if config.Remote != nil {
+		remote := *config.Remote
+		cloned.Remote = &remote
+	}
 	if config.MCPServers != nil {
 		cloned.MCPServers = make(map[string]agenttools.MCPConfig, len(config.MCPServers))
 		for name, server := range config.MCPServers {

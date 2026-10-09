@@ -3,6 +3,7 @@ package toolset
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -46,7 +47,12 @@ var Toolsets = map[string]ToolsetDef{
 	"web": {
 		Name:        "web",
 		Description: "Web search, content extraction, and opening URLs in the user's default browser",
-		Tools:       []string{"web_fetch", "open_url"},
+		Tools:       []string{"web_fetch", "web_search", "open_url"},
+	},
+	"cyber": {
+		Name:        "cyber",
+		Description: "Scan recipes and finding/asset tracking",
+		Tools:       []string{"scan", "finding_upsert", "asset_upsert"},
 	},
 	"vision": {
 		Name:        "vision",
@@ -134,7 +140,7 @@ var Toolsets = map[string]ToolsetDef{
 	},
 	"full": {
 		Name:        "full",
-		Description: "All available tools",
+		Description: "All available tools except cyber (cyber is ModeCyber-only)",
 		Tools:       []string{},
 		Includes:    []string{"coding", "creative", "memory", "skills", "productivity", "delegation", "browser", "computer_use", "mcp", "discovery"},
 	},
@@ -184,6 +190,16 @@ func PlatformDefaults(platform string) []string {
 	default:
 		return []string{"full"}
 	}
+}
+
+// EnsureCyberToolset appends the cyber toolset when it is not already present.
+func EnsureCyberToolset(names []string) []string {
+	for _, name := range names {
+		if strings.EqualFold(strings.TrimSpace(name), "cyber") {
+			return names
+		}
+	}
+	return append(append([]string(nil), names...), "cyber")
 }
 
 // --- Resolver ---

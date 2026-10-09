@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	agenttools "github.com/covoyage/covo-agent/internal/tools"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -24,30 +25,30 @@ type ResultPersistenceConfig struct {
 
 func DefaultResultPersistenceConfig(homeDir string) ResultPersistenceConfig {
 	return ResultPersistenceConfig{
-		PerResultThreshold: 500_000,
-		TurnBudget:         2_000_000,
-		PreviewSize:        3000,
+		PerResultThreshold: 32_000,
+		TurnBudget:         200_000,
+		PreviewSize:        2000,
 		StorageDir:         filepath.Join(homeDir, ".covo-agent", "results"),
 	}
 }
 
 // toolsNeverPersist are tools where results should always stay in context.
 var toolsNeverPersist = map[string]bool{
-	"read":           true, // need full content for code understanding
-	"grep":           true, // grep results are already bounded
-	"find":           true,
-	"glob":           true,
-	"search_files":   true,
-	"ls":             true,
-	"git_status":     true,
-	"git_diff":       true,
-	"git_log":        true,
-	"todo":           true,
-	"clarify":        true,
-	"cronjob":        true,
-	"session_search": true,
-	"diffs":          true,
-	"update_plan":    true,
+	"read":            true, // need full content for code understanding
+	"grep":            true, // grep results are already bounded
+	"find":            true,
+	"glob":            true,
+	"search_files":    true,
+	"ls":              true,
+	"git_status":      true,
+	"git_diff":        true,
+	"git_log":         true,
+	"todo":            true,
+	"clarify":         true,
+	"cronjob":         true,
+	"session_search":  true,
+	"diffs":           true,
+	"update_plan":     true,
 	"tool_search":     true,
 	"tool_describe":   true,
 	"standing_orders": true,
@@ -68,7 +69,11 @@ func (ca *CovoAgent) persistLargeResultAfterToolCall() func(
 		if toolsNeverPersist[tc.Name] {
 			return nil
 		}
-		if len(result.Result) <= cfg.PerResultThreshold {
+		threshold := cfg.PerResultThreshold
+		if c, ok := agenttools.LookupContract(tc.Name); ok && c.MaxOutputBytes > 0 && c.MaxOutputBytes < threshold {
+			threshold = c.MaxOutputBytes
+		}
+		if len(result.Result) <= threshold {
 			return nil
 		}
 

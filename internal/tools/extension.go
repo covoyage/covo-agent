@@ -10,13 +10,17 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 
 	"github.com/covoyage/covo-agent/internal/audit"
+	"github.com/covoyage/covo-agent/internal/cyber"
 	"github.com/covoyage/covo-agent/internal/evolution"
 	"github.com/covoyage/covo-agent/internal/goal"
 	"github.com/covoyage/covo-agent/internal/inbox"
 	"github.com/covoyage/covo-agent/internal/kanban"
 	"github.com/covoyage/covo-agent/internal/logutil"
+	"github.com/covoyage/covo-agent/internal/safego"
 	"github.com/covoyage/covo-agent/internal/sandbox"
 	toolscanvas "github.com/covoyage/covo-agent/internal/tools/canvas"
 	toolscodegraph "github.com/covoyage/covo-agent/internal/tools/codegraph"
@@ -35,6 +39,7 @@ import (
 	toolssubagent "github.com/covoyage/covo-agent/internal/tools/subagent"
 	toolswarm "github.com/covoyage/covo-agent/internal/tools/swarm"
 	toolsworktree "github.com/covoyage/covo-agent/internal/tools/worktree"
+	"github.com/covoyage/covo-agent/internal/toolset"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -92,6 +97,10 @@ type Extension struct {
 	parentMessages    func() []agentcore.Message
 	phaseTransition   toolsplanning.PhaseTransitioner
 	externalAgents    *externalagent.Registry
+	catalog           *cyber.Catalog
+	cyberMode         bool
+	subagentRole      string
+	intakeCancel      context.CancelFunc
 }
 
 // ExtensionConfig configures the agent tools extension.
@@ -148,6 +157,12 @@ type ExtensionConfig struct {
 	// the agent from Plan to Act execution phase. May be nil if Plan/Act mode
 	// is not used.
 	PhaseTransitioner toolsplanning.PhaseTransitioner
+
+	// CyberMode exposes scan/finding tools to tool_search and
+	// tool_describe.
+	CyberMode bool
+	// SubagentRole fixes role-aware visibility for this agent instance.
+	SubagentRole string
 }
 
 // NewExtension creates a new agent tools extension.
@@ -245,12 +260,21 @@ func NewExtension(cfg ExtensionConfig) *Extension {
 		toolProfile:       cfg.ToolProfile,
 		workDir:           cfg.WorkDir,
 		parentMessages:    cfg.ParentMessages,
+		catalog:           cyber.NewCatalog(cfg.WorkDir),
 		phaseTransition:   cfg.PhaseTransitioner,
 		externalAgents:    externalagent.NewRegistry(cfg.WorkDir, os.Getenv("COVO_EXTERNAL_AGENTS")),
+		cyberMode:         cfg.CyberMode,
+		subagentRole:      strings.ToLower(strings.TrimSpace(cfg.SubagentRole)),
+	}
+	if ext.cyberMode && ext.subagentRole == "" {
+		ext.subagentRole = "parent"
 	}
 	// Wire registry into subagent runner
 	if ext.subagentRunner != nil {
 		ext.subagentRunner.SetRegistry(ext.subagentReg)
+	}
+	if cfg.CyberMode && cfg.Sandbox != nil {
+		_, _ = ext.catalog.EnsureRuntime(string(cfg.Sandbox.Type()), cyber.EngagementID(cfg.WorkDir), cfg.WorkDir)
 	}
 	// Wire persistent subagent store (crash recovery + orphan detection).
 	// The parentSessionFn is updated when SetGoalStore provides the real
@@ -271,6 +295,9 @@ func NewExtension(cfg ExtensionConfig) *Extension {
 	}
 	return ext
 }
+
+// FindingCatalog returns the persisted finding/asset catalog.
+func (e *Extension) FindingCatalog() *cyber.Catalog { return e.findingCatalog() }
 
 func (e *Extension) Name() string { return "agent-tools" }
 
@@ -397,6 +424,11 @@ func (e *Extension) SetAuditStore(s *audit.Store) {
 }
 
 func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
+	if e.cyberMode {
+		if err := e.catalog.EnsurePrivateStorage(); err != nil {
+			return err
+		}
+	}
 	// Load persisted cron jobs
 	_ = e.cronStore.Load()
 
@@ -417,6 +449,24 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 	})
 	// Wire journal for crash-recovery resume of orchestration plans.
 	e.swarmOrch.SetJournal(toolswarm.NewWorkflowJournal(filepath.Join(e.homeDir, "workflows")))
+
+	if e.cyberMode {
+		toolssubagent.SetAgentObserver(func(item toolssubagent.AgentObservation) {
+			if e.catalog == nil {
+				return
+			}
+			_ = e.catalog.RecordAgentObservation(cyber.AgentObservation{
+				ID: item.ID, Role: item.Role, Task: item.Task, Skills: item.Skills, Status: item.Status, Error: item.Error,
+			})
+		})
+	}
+
+	cyberVisibility := func(ctx context.Context, name string) bool {
+		if !e.cyberMode {
+			return !toolset.CyberOnlyTools[name]
+		}
+		return cyber.AllowAgentTool(e.subagentRole, subagentRole(ctx), name)
+	}
 
 	e.tools = []*agentcore.Tool{
 		// Batch 1: session_search, todo, clarify, send_message, moa
@@ -484,8 +534,8 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 					})
 				}
 			}
-			return defs
-		}),
+			return hideCyberOnlyTools(defs, e.cyberMode)
+		}, cyberVisibility),
 		buildToolDescribeTool(func() []agentcore.ToolDefinition {
 			names := agent.ToolNames()
 			defs := make([]agentcore.ToolDefinition, 0, len(names))
@@ -498,9 +548,9 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 					})
 				}
 			}
-			return defs
-		}),
-		buildToolCallTool(agent),
+			return hideCyberOnlyTools(defs, e.cyberMode)
+		}, cyberVisibility),
+		buildToolCallTool(agent, cyberVisibility),
 		// Batch 8: apply_patch
 		fileops.BuildApplyPatchTool(),
 		// Batch 9: human_handoff
@@ -569,7 +619,7 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		// Batch 19: context compression
 		toolscontext.BuildContextCompressTool(e.compressor),
 		toolscontext.BuildContextCompressConfigTool(e.compressor),
-		BuildWebFetchTool(e.webFetchTransport),
+		buildWebFetchTool(e.webFetchTransport, newWebFetchCache(), catalogExchangeRecorder(e.catalog)),
 		BuildOpenURLTool(),
 		buildReactionTool(),
 
@@ -580,6 +630,7 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		toolssubagent.BuildDashboardTool(e.subagentReg),
 		toolssubagent.BuildWorkflowTool(e.spawnRunner, e.subagentReg),
 		toolssubagent.BuildAdvancedWorkflowTool(e.spawnRunner, e.subagentReg, e.homeDir),
+		toolssubagent.BuildScriptWorkflowTool(e.spawnRunner, e.subagentReg, e.homeDir),
 		toolssubagent.BuildSessionsForkTool(e.spawnRunner, e.subagentReg, e.forkGuard),
 		toolsmemory.BuildMemoryExtractTool(e.dreamCycle),
 		toolsmemory.BuildMemoryDreamTool(e.dreamCycle),
@@ -611,6 +662,30 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 
 		// Batch 27: code graph (Go package dependency analysis)
 		toolscodegraph.BuildCodeGraphTool(e.workDir),
+
+		// Cyber: findings/assets ledger and scan recipes.
+		BuildFindingUpsertTool(e.catalog),
+		BuildFindingTriageTool(e.catalog),
+		BuildAssetUpsertTool(e.catalog),
+		BuildCoverageUpsertTool(e.catalog),
+		BuildExchangeListTool(e.catalog),
+		BuildExchangeGetTool(e.catalog),
+		BuildWebContextTool(e.catalog),
+		BuildCSRFRetestTool(e.catalog, e.subagentRole, e.webFetchTransport),
+		BuildExchangeLabelTool(e.catalog),
+		BuildExchangeSearchTool(e.catalog),
+		BuildExchangeReplayTool(e.catalog, e.webFetchTransport),
+		BuildExchangeCompareTool(e.catalog, e.webFetchTransport),
+		BuildWebParamProbeTool(e.catalog, e.subagentRole, e.webFetchTransport),
+		BuildRequestIntakeToolForRole(e.catalog, e.subagentRole),
+		BuildAssessmentTool(e.catalog),
+		BuildRemoteNodesToolForRole(e.catalog, e.subagentRole),
+		BuildRemoteNodeExecTool(e.catalog, e.subagentRole),
+		BuildThreatModelTool(e.catalog),
+		BuildDiffScopeTool(e.catalog),
+		BuildScanProfileToolForRole(e.catalog, e.subagentRole),
+		BuildFinishScanTool(e.catalog),
+		BuildScanToolWithTransport(e.workDir, e.catalog, e.sandbox, e.webFetchTransport),
 
 		// Batch 29: run_code (Code Mode — execute Go programs with tool SDK)
 		BuildRunCodeToolWithRegistry(agent),
@@ -668,10 +743,57 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 	}
 
 	agent.RegisterTools(e.tools...)
+	if e.cyberMode && e.subagentRole == "parent" && e.spawnRunner != nil {
+		if err := e.catalog.RecoverIntake(); err != nil {
+			return err
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		e.intakeCancel = cancel
+		safego.SafeGo(func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := e.processIntake(ctx); err != nil {
+						e.logger.Warn("request intake failed", "error", err)
+					}
+				}
+			}
+		}, nil)
+	}
 	return nil
 }
 
+func (e *Extension) processIntake(ctx context.Context) error {
+	config, err := e.catalog.IntakeConfig()
+	if err != nil || !config.Enabled {
+		return err
+	}
+	job, ok, err := e.catalog.ClaimIntake()
+	if err != nil || !ok {
+		return err
+	}
+	task := fmt.Sprintf("Review recorded exchange %s for %s (test identity %q). This intake job authorizes only this exchange and endpoint. Use exchange_get/web_context with this id, assessment, and coverage_upsert for this host or path; GET/HEAD replay or web_param_probe must keep the same id and path. Do not scan, spawn, run shell, submit forms, or record findings from this automatic task. Return observations and untested surfaces for parent review.", job.ExchangeID, job.Endpoint, job.Identity)
+	childCtx, task, toolsets := toolssubagent.ApplySpawnRole(ctx, task, "verifier", nil)
+	childCtx = toolssubagent.WithIntakeScope(childCtx, toolssubagent.IntakeScope{Endpoint: job.Endpoint, ExchangeID: job.ExchangeID})
+	childCtx = toolssubagent.WithSubagentViewRef(childCtx, job.Key)
+	_ = e.catalog.RecordAgentObservation(cyber.AgentObservation{ID: job.Key, Role: "verifier", Task: task, Skills: toolssubagent.RoleSkillNamesForTask("verifier", task), Status: "running"})
+	_, runErr := e.spawnRunner(childCtx, task, toolsets, 12)
+	status := "completed"
+	if runErr != nil {
+		status = "failed"
+	}
+	_ = e.catalog.RecordAgentObservation(cyber.AgentObservation{ID: job.Key, Role: "verifier", Status: status})
+	return e.catalog.CompleteIntake(job.Key, runErr)
+}
+
 func (e *Extension) Dispose() error {
+	if e.intakeCancel != nil {
+		e.intakeCancel()
+	}
 	if e.ftsSearcher != nil {
 		e.ftsSearcher.Close()
 	}
@@ -716,6 +838,11 @@ func (e *Extension) SetWorkshopStore(s *evolution.WorkshopStore) {
 // SetSkillManager sets the skill manager for applying workshop proposals.
 func (e *Extension) SetSkillManager(sm *evolution.SkillManager) {
 	e.skillMgr = sm
+	if sm == nil {
+		toolssubagent.SetSkillBodyLoader(nil)
+		return
+	}
+	toolssubagent.SetSkillBodyLoader(sm.Read)
 }
 
 func (e *Extension) WorktreeManager() *toolsworktree.WorktreeManager {

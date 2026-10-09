@@ -2,6 +2,7 @@ package setup
 
 import (
 	"fmt"
+	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli"
 	"github.com/covoyage/covo-agent/internal/cli/commands/model"
 	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
@@ -381,7 +382,7 @@ func promptModel(provider, currentModel string) string {
 
 // promptMode lets the user pick an agent mode.
 func promptMode(currentMode string) string {
-	modes := []string{"general", "code"}
+	modes := agent.AllModeNames()
 	if currentMode == "" {
 		currentMode = "general"
 	}

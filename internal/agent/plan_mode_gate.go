@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	agenttools "github.com/covoyage/covo-agent/internal/tools"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -62,8 +63,10 @@ func (ca *CovoAgent) planModeGateBeforeHook() agentcore.BeforeHook {
 			return nil
 		}
 
-		// Allow tools explicitly permitted in Plan mode.
-		if PlanModeAllowedTools[hc.ToolName] {
+		// Allow tools explicitly permitted in Plan mode, plus any tool
+		// whose contract declares it read-only (so new tools do not need
+		// a second allowlist entry).
+		if PlanModeAllowedTools[hc.ToolName] || agenttools.ContractReadOnly(hc.ToolName) {
 			return nil
 		}
 

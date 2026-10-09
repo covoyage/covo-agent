@@ -3,12 +3,21 @@
 Auto-checked by TestToolCatalogCoversRegistry: every registered tool must have a row here.
 Regenerate with: go test ./internal/agent -run TestToolCatalog -update-tool-catalog
 
+Cyber HTTP evidence storage is capped at 500 exchanges. Retention preserves finding references, pending/running intake references, and the baseline chains of retained exchanges before filling remaining capacity with recent records. A new record is rejected if preserving referenced evidence would exceed the cap; completed/failed intake jobs alone do not pin evidence. Finding validation and intake enqueueing serialize with retention within one process, not across separate processes.
+
+Cyber ledgers, reports, and full-output spills use directory-confined filesystem operations. Storage directories use mode `0700` and files use `0600`; initialization also tightens existing output files. Symbolic links in the storage tree are rejected rather than read or migrated. Spill filenames are unique, so repeated output from the same tool does not overwrite prior evidence. This storage boundary does not sandbox external scanner processes.
+
+HTTP capture and its cache are local to each tool instance, and captured request headers are preserved for authenticated replay. Exchanges persist header/body truncation flags. Replaying incomplete or redacted requests requires explicit complete replacements (`replace_headers: true` and/or `body` as appropriate); CSRF retests require complete original requests. Identity comparisons preflight both sides and reject recognized credentials in URLs/bodies, unclassified captured headers, and opaque bodies instead of silently reusing baseline authentication. Application-specific authentication still needs independently verified test identities. CSRF retests use a public-suffix-aware cookie jar for new, rotated, deleted, and expired cookies; recorded Cookie headers have no original attributes, so their initial scope is the recorded origin with path `/`.
+
+Finding updates validate merged evidence and cannot change the target, established endpoint, or method under the same ID. Use a new finding for a different identity.
+
 | 工具 | 功能 | 并发声明 |
 |------|------|----------|
 | `advanced_workflow` | Orchestrate a multi-phase workflow with advanced features: - Conditional phase execution (skip phases based on prior ... | undeclared |
 | `append_file` | Append content to a file without overwriting existing content. | undeclared |
 | `apply_patch` | Apply a structured V4A format patch to modify files in the workspace. | undeclared |
 | `ask_user` | Ask the user a question and block until they answer. | undeclared |
+| `asset_upsert` | Record or update an asset discovered during recon. | undeclared |
 | `audit_query` | Query the persistent audit log of agent tool calls and lifecycle events. | safe |
 | `audit_read` | Read file contents like 'read', but with automatic sensitive-path blocking. | safe |
 | `bash` | Execute a bash command in the current working directory. | undeclared |
@@ -27,6 +36,7 @@ Regenerate with: go test ./internal/agent -run TestToolCatalog -update-tool-cata
 | `delete` | Delete a file or directory. Files and directories are moved to the platform trash so they can be restored. | undeclared |
 | `deploy` | Deploy a static site or application to a target environment. | undeclared |
 | `diffs` | Generate a unified diff between two texts, or apply a unified patch. | undeclared |
+| `diff_scope` | Configure or inspect a git diff-scoped security review. | undeclared |
 | `edit` | Edit a single file using exact text replacement. | undeclared |
 | `edit_block` | Apply targeted text replacements to a file using block matching. | undeclared |
 | `enter_worktree` | Create and switch to an isolated git worktree. | undeclared |
@@ -35,6 +45,24 @@ Regenerate with: go test ./internal/agent -run TestToolCatalog -update-tool-cata
 | `exit_worktree` | Remove the current worktree and return to the original working copy. | undeclared |
 | `external_agent` | Delegate a standalone, self-contained task to an external coding agent that runs as its own process (Claude Code, Codex, or opencode). | undeclared |
 | `find` | Search for files by glob pattern. | safe |
+| `finding_upsert` | Record or update a security finding. | undeclared |
+| `finding_triage` | Approve a similar finding as distinct or link it to an existing finding as a duplicate. | undeclared |
+| `coverage_upsert` | Record which surface was tested, the outcome, and why it stopped. | undeclared |
+| `exchange_list` | List recorded HTTP exchanges. | undeclared |
+| `exchange_get` | Fetch one recorded HTTP exchange by id. | undeclared |
+| `web_context` | Summarize bounded endpoint evidence, coverage, and intake status without raw requests or credentials. | undeclared |
+| `csrf_retest` | Refresh a CSRF token via recorded GET and submit a same-origin recorded form POST without returning or storing the new token. | undeclared |
+| `exchange_label` | Attach identity, role, tenant, resource, owner, or baseline labels to a recorded HTTP exchange. | undeclared |
+| `exchange_search` | Search recorded HTTP exchanges by method, host, path, parameter, status, or text. | undeclared |
+| `exchange_replay` | Replay a recorded HTTP exchange from a spawned hands-on cyber role and save the response as new evidence. | undeclared |
+| `exchange_compare` | Compare a captured request under two authentication contexts and save both responses as evidence. | undeclared |
+| `web_param_probe` | Check one captured GET query parameter for reflection with an inert marker; returns evidence, not a vulnerability verdict. | undeclared |
+| `request_intake` | Enable exact-host request-shape intake and view verifier dispatch jobs. | undeclared |
+| `assessment` | View asset-by-risk coverage and unconfirmed chain candidates. | undeclared |
+| `remote_nodes` | Register, remove, or list named SSH execution nodes. | undeclared |
+| `remote_node_exec` | Run a command on a registered SSH node from a hands-on cyber role. | undeclared |
+| `scan_profile` | Set scan depth (quick, standard, deep) and whether the target is whitebox. | undeclared |
+| `finish_scan` | Close recon and emit JSON, Markdown, CSV, and SARIF reports with coverage and completeness. | undeclared |
 | `generate_tests` | Suggest the conventional test file path for a source file. | undeclared |
 | `get_goal` | Retrieve the current goal state for this session. | safe |
 | `git_diff` | Show changes between commits, commit and working tree, etc. | safe |
@@ -73,6 +101,9 @@ Regenerate with: go test ./internal/agent -run TestToolCatalog -update-tool-cata
 | `read` | Read a file, image, PDF, Jupyter notebook, or video. | safe |
 | `remote_exec` | Execute commands on a remote machine via SSH. | undeclared |
 | `run_code` | Execute a complete Go program with access to all agent tools. | undeclared |
+| `scan` | Run a scan recipe; locally, a missing curl binary falls back to one scoped native GET without extra flags. Other recipes still need their binaries. | undeclared |
+| `script_workflow` | Compile and run a checkable workflow script. | undeclared |
+| `script_workflow` | Compile and run a checkable workflow script. | undeclared |
 | `sandbox` | Run shell commands in the configured sandbox. | undeclared |
 | `search_files` | Preferred workspace search: find files by name pattern AND/OR search file contents. | safe |
 | `secrets` | Resolve a named secret into the process environment without putting the value into the conversation. | undeclared |
@@ -112,6 +143,7 @@ Regenerate with: go test ./internal/agent -run TestToolCatalog -update-tool-cata
 | `tool_call` | Invoke a tool discovered via 'tool_search' by its name with the given arguments. | undeclared |
 | `tool_describe` | Load the full JSON schema for a tool returned by 'tool_search'. | safe |
 | `tool_search` | Search for available tools by keyword or capability description. | safe |
+| `threat_model` | Read, save, amend, or list the engagement's shared threat model. | undeclared |
 | `transcribe` | Transcribe speech from audio or video files to text. | undeclared |
 | `update_goal` | Update the status of the current session goal. | undeclared |
 | `update_plan` | Ordered plan for the current task (not a durable tracker; use todo for this turn, kanban/goal to persist). | undeclared |

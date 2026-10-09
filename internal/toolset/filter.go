@@ -22,7 +22,10 @@ type ToolsetFilter struct {
 	planModeChecker func() bool       // returns true when agent is in Plan mode
 	planModeAllowed map[string]bool   // tools allowed in Plan mode
 	nameFilter      func(string) bool // optional per-tool-name predicate (e.g. headless --tools)
-	leanMode        bool              // hide long-tail schemas; keep them via tool_search
+	contextFilter   func(context.Context, string) bool
+	leanMode        bool // hide long-tail schemas; keep them via tool_search
+	leanCyber       bool // keep scan/web schemas in lean cyber mode
+	cyberMode       bool // expose scan/finding tools only in cyber mode
 	logger          *slog.Logger
 }
 
@@ -33,10 +36,13 @@ type ToolsetFilterConfig struct {
 	Filter          *CachedFilter
 	ToolNames       func() []string
 	PlatformName    func() string
-	PlanModeChecker func() bool       // returns true when agent is in Plan mode
-	PlanModeAllowed map[string]bool   // tools allowed in Plan mode (overrides filtering)
-	NameFilter      func(string) bool // optional per-tool-name predicate; nil = no extra filtering
-	LeanMode        bool              // hide long-tail schemas; keep them via tool_search
+	PlanModeChecker func() bool                        // returns true when agent is in Plan mode
+	PlanModeAllowed map[string]bool                    // tools allowed in Plan mode (overrides filtering)
+	NameFilter      func(string) bool                  // optional per-tool-name predicate; nil = no extra filtering
+	ContextFilter   func(context.Context, string) bool // optional role/run-aware predicate
+	LeanMode        bool                               // hide long-tail schemas; keep them via tool_search
+	LeanCyber       bool                               // keep scan/web schemas when lean + cyber
+	CyberMode       bool                               // expose scan/finding tools only in cyber mode
 	Logger          *slog.Logger
 }
 
@@ -66,7 +72,10 @@ func NewToolsetFilter(cfg ToolsetFilterConfig) *ToolsetFilter {
 		planModeChecker: cfg.PlanModeChecker,
 		planModeAllowed: planModeAllowed,
 		nameFilter:      cfg.NameFilter,
+		contextFilter:   cfg.ContextFilter,
+		leanCyber:       cfg.LeanCyber,
 		leanMode:        cfg.LeanMode,
+		cyberMode:       cfg.CyberMode,
 		logger:          cfg.Logger,
 	}
 }
@@ -87,7 +96,7 @@ func (tf *ToolsetFilter) PlatformRef() *PlatformToolsets {
 }
 
 // BeforeModelCall filters the tool definitions in the request based on active toolsets.
-func (tf *ToolsetFilter) BeforeModelCall(_ context.Context, _ *agentcore.AgentRunContext, mcc *agentcore.ModelCallContext) error {
+func (tf *ToolsetFilter) BeforeModelCall(ctx context.Context, _ *agentcore.AgentRunContext, mcc *agentcore.ModelCallContext) error {
 	if mcc.Request == nil || tf.toolNames == nil {
 		return nil
 	}
@@ -126,7 +135,13 @@ func (tf *ToolsetFilter) BeforeModelCall(_ context.Context, _ *agentcore.AgentRu
 		if tf.nameFilter != nil && !tf.nameFilter(def.Name) {
 			continue
 		}
-		if tf.leanMode && !LeanDirectTools[def.Name] {
+		if tf.contextFilter != nil && !tf.contextFilter(ctx, def.Name) {
+			continue
+		}
+		if tf.leanMode && !tf.leanVisible(def.Name) {
+			continue
+		}
+		if CyberOnlyTools[def.Name] && !tf.cyberMode {
 			continue
 		}
 		filtered = append(filtered, def)
@@ -223,8 +238,12 @@ func (tf *ToolsetFilter) Preview(allToolNames []string) ToolPreview {
 			out.Excluded[name] = "name filter"
 			continue
 		}
-		if tf.leanMode && !LeanDirectTools[name] {
+		if tf.leanMode && !tf.leanVisible(name) {
 			out.Excluded[name] = "lean"
+			continue
+		}
+		if CyberOnlyTools[name] && !tf.cyberMode {
+			out.Excluded[name] = "cyber mode"
 			continue
 		}
 		out.Kept = append(out.Kept, name)
@@ -364,6 +383,56 @@ var LeanDirectTools = map[string]bool{
 	"exit_plan_mode": true, "diffs": true, "apply_patch": true, "edit_block": true,
 	"sessions_spawn": true, "sessions_wait": true,
 	"tool_search": true, "tool_describe": true, "tool_call": true,
+}
+
+// CyberOnlyTools are never shown or callable outside ModeCyber.
+var CyberOnlyTools = map[string]bool{
+	"scan":             true,
+	"finding_upsert":   true,
+	"finding_triage":   true,
+	"asset_upsert":     true,
+	"coverage_upsert":  true,
+	"exchange_list":    true,
+	"exchange_get":     true,
+	"web_context":      true,
+	"csrf_retest":      true,
+	"exchange_label":   true,
+	"exchange_search":  true,
+	"exchange_replay":  true,
+	"exchange_compare": true,
+	"web_param_probe":  true,
+	"request_intake":   true,
+	"assessment":       true,
+	"remote_nodes":     true,
+	"remote_node_exec": true,
+	"threat_model":     true,
+	"diff_scope":       true,
+	"scan_profile":     true,
+	"finish_scan":      true,
+}
+
+// LeanCyberTools stay visible in lean mode so cyber recon does not have to
+// round-trip through tool_search.
+var LeanCyberTools = map[string]bool{
+	"web_fetch": true, "web_search": true, "open_url": true,
+	"scan": true, "finding_upsert": true, "finding_triage": true, "asset_upsert": true,
+	"coverage_upsert": true, "exchange_list": true, "exchange_get": true,
+	"web_context":    true,
+	"csrf_retest":    true,
+	"exchange_label": true, "exchange_search": true, "exchange_replay": true,
+	"exchange_compare": true,
+	"web_param_probe":  true,
+	"request_intake":   true, "assessment": true, "remote_nodes": true,
+	"remote_node_exec": true,
+	"threat_model":     true, "diff_scope": true,
+	"scan_profile": true, "finish_scan": true,
+}
+
+func (tf *ToolsetFilter) leanVisible(name string) bool {
+	if LeanDirectTools[name] {
+		return true
+	}
+	return tf != nil && tf.leanCyber && LeanCyberTools[name]
 }
 
 // SetPlanModeChecker sets the function used to check if the agent is in

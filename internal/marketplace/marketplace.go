@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/covoyage/covo-agent/internal/evolution"
+	"github.com/covoyage/covo-agent/internal/plugin"
 	"github.com/covoyage/covo-agent/internal/skillhub"
 )
 
@@ -480,6 +481,10 @@ func (m *Marketplace) installGeneric(entry *PluginEntry) (string, error) {
 	path := filepath.Join(pluginDir, "plugin.json")
 	if err := os.WriteFile(path, body, 0644); err != nil {
 		return "", fmt.Errorf("marketplace: write plugin: %w", err)
+	}
+	if _, err := plugin.LoadBundle(pluginDir); err != nil {
+		_ = os.RemoveAll(pluginDir)
+		return "", fmt.Errorf("marketplace: invalid plugin bundle: %w", err)
 	}
 
 	source := entry.InstallURL

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli"
 	"github.com/covoyage/covo-agent/internal/cli/commands"
 	"github.com/covoyage/covo-agent/internal/cli/commands/automation"
@@ -43,6 +44,9 @@ type rootOptions struct {
 	continueSession    bool
 	showSessionPicker  bool
 	sandbox            string
+	surface            string
+	remote             string
+	remoteRuntime      bool
 
 	// Logging
 	logLevel string
@@ -105,14 +109,20 @@ func newRootCommand() *cobra.Command {
 				Continue:           opts.continueSession,
 				ShowSessionPicker:  opts.showSessionPicker,
 				InitialPrompt:      initial,
+				Surface:            opts.surface,
+				Remote:             opts.remote,
+				RemoteRuntime:      opts.remoteRuntime,
 			}, runtime)
 		},
 	}
 
 	flags := root.PersistentFlags()
-	flags.StringVar(&opts.mode, "mode", "", "agent mode: general (all-purpose) or code (coding-focused)")
+	flags.StringVar(&opts.mode, "mode", "", "agent mode: general, code, or cyber")
+	flags.StringVar(&opts.surface, "surface", "", "presentation surface: terminal, acp, gateway, or exec")
+	flags.BoolVar(&opts.remoteRuntime, "remote-runtime", false, "upload this binary and run it on --remote instead of forwarding file/bash calls")
+	flags.StringVar(&opts.remote, "remote", "", "remote workspace (user@host:/path or ssh://user@host/path)")
 	flags.StringVar(&opts.provider, "provider", "", "AI provider: openai, anthropic, gemini, xiaomi, openrouter, or custom")
-	flags.StringVar(&opts.permission, "permission", "", "permission mode: ask|auto|full (TUI) or smart|full|off (exec)")
+	flags.StringVar(&opts.permission, "permission", "", "permission mode: plan|ask|auto|yolo (TUI) or smart|full|off (exec)")
 	flags.StringSliceVar(&opts.addDir, "add-dir", nil, "extra workspace directory (repeatable, max 16)")
 	flags.StringVar(&opts.model, "model", "", "model name to use")
 	flags.BoolVar(&opts.yolo, "yolo", false, "bypass all dangerous command approval prompts (use at your own risk)")
@@ -142,6 +152,9 @@ func newRootCommand() *cobra.Command {
 
 	_ = root.RegisterFlagCompletionFunc("log-level", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return []string{"DEBUG", "INFO", "WARN", "ERROR"}, cobra.ShellCompDirectiveNoFileComp
+	})
+	_ = root.RegisterFlagCompletionFunc("mode", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		return agent.AllModeNames(), cobra.ShellCompDirectiveNoFileComp
 	})
 
 	root.AddCommand(newExecCommand(opts))
@@ -221,6 +234,7 @@ func (opts *rootOptions) nonInteractivePrompt() string {
 func (opts *rootOptions) headlessOptions(prompt string) *headless.Options {
 	return &headless.Options{
 		Prompt:             prompt,
+		Mode:               opts.mode,
 		Tools:              opts.tools,
 		DisallowedTools:    opts.disallowedTools,
 		Permission:         opts.permission,

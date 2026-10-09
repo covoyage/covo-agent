@@ -1,10 +1,66 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/covoyage/covo-agent/internal/agent/approval"
+	toolssubagent "github.com/covoyage/covo-agent/internal/tools/subagent"
+	"github.com/covoyage/covonaut/agentcore"
 )
+
+func TestNonInteractiveCyberRemoteExecutionRequiresPolicy(t *testing.T) {
+	system := approval.NewSystem(approval.Config{Mode: "manual", StorageDir: t.TempDir()})
+	system.SetNonInteractive(true)
+	agent := &CovoAgent{mode: ModeCyber, approvalSystem: system}
+	if err := agent.permissionGateBeforeHook()(context.Background(), &agentcore.HookContext{ToolName: "remote_node_exec"}); err == nil {
+		t.Fatal("non-interactive child executed an unapproved remote command")
+	}
+}
+
+func TestCyberChildRoleCannotBecomeParent(t *testing.T) {
+	if role, err := resolveCyberChildRole(ModeCyber, ""); err != nil || role != "leaf" {
+		t.Fatalf("empty child role=%q err=%v", role, err)
+	}
+	if _, err := resolveCyberChildRole(ModeCyber, "parent"); err == nil {
+		t.Fatal("parent cyber role accepted for child")
+	}
+	if role, err := resolveCyberChildRole(ModeCyber, "verifier"); err != nil || role != "verifier" {
+		t.Fatalf("verifier role=%q err=%v", role, err)
+	}
+}
+
+func TestAutomaticVerifierCannotEscapeIntakeEndpoint(t *testing.T) {
+	scope := toolssubagent.IntakeScope{Endpoint: "GET https://example.test/orders/1", ExchangeID: "ex-1"}
+	for _, call := range []struct {
+		name string
+		args string
+		want bool
+	}{
+		{"exchange_get", `{"id":"ex-1"}`, true},
+		{"exchange_get", `{"id":"ex-2"}`, false},
+		{"exchange_search", `{"host":"other.test"}`, false},
+		{"exchange_replay", `{"id":"ex-1","url":"https://example.test/orders/1?id=2"}`, true},
+		{"exchange_replay", `{"id":"ex-1","url":"https://example.test/admin"}`, false},
+		{"exchange_replay", `{"id":"ex-1","method":"POST"}`, false},
+		{"exchange_compare", `{"id":"ex-2"}`, false},
+		{"scan", `{"recipe":"nmap","target":"example.test"}`, false},
+		{"sessions_spawn", `{"task":"scan"}`, false},
+		{"tool_call", `{"name":"scan"}`, false},
+		{"coverage_upsert", `{"target":"outside.test","surface":"/"}`, false},
+		{"coverage_upsert", `{"surface":"/orders/1","outcome":"clean"}`, false},
+	} {
+		context := toolssubagent.WithIntakeScope(context.Background(), scope)
+		agent := &CovoAgent{mode: ModeCyber}
+		err := agent.permissionGateBeforeHook()(context, &agentcore.HookContext{ToolName: call.name, Arguments: json.RawMessage(call.args)})
+		if (err == nil) != call.want {
+			t.Errorf("%s(%s) allowed=%v want=%v: %v", call.name, call.args, err == nil, call.want, err)
+		}
+	}
+}
 
 func TestValidateURL(t *testing.T) {
 	tests := []struct {

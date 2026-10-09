@@ -7,23 +7,69 @@ import (
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli"
 	"github.com/covoyage/covo-agent/internal/evolution"
+	"github.com/covoyage/covo-agent/internal/plugin"
 	agenttools "github.com/covoyage/covo-agent/internal/tools"
+	"github.com/covoyage/covo-agent/internal/workspace"
 )
 
-func MCPAgentConfig(cfg *cli.Config) map[string]agenttools.MCPConfig {
-	if cfg == nil || cfg.MCPServers == nil {
-		return nil
+// RegisterCustomModes publishes config-defined modes so RequireMode and
+// custom-mode prompts work for TUI, oneshot, exec, cron, ACP, gateway, and MCP.
+func RegisterCustomModes(cfg *cli.Config) {
+	if cfg == nil {
+		return
 	}
-	m := make(map[string]agenttools.MCPConfig, len(cfg.MCPServers))
-	for name, srv := range cfg.MCPServers {
-		m[name] = agenttools.MCPConfig{
-			Command: srv.Command,
-			Args:    srv.Args,
-			Env:     srv.Env,
-			Timeout: srv.Timeout,
+	for _, cm := range cfg.CustomModes {
+		def := &agent.CustomModeDefinition{
+			Name:         cm.Name,
+			Description:  cm.Description,
+			SystemPrompt: cm.SystemPrompt,
+		}
+		if cm.Tools != nil {
+			def.AllowTools = cm.Tools.Allow
+			def.DenyTools = cm.Tools.Deny
+		}
+		agent.RegisterCustomMode(def)
+	}
+}
+
+func MCPAgentConfig(cfg *cli.Config) map[string]agenttools.MCPConfig {
+	m := map[string]agenttools.MCPConfig{}
+	if cfg != nil && cfg.MCPServers != nil {
+		for name, srv := range cfg.MCPServers {
+			m[name] = agenttools.MCPConfig{
+				Command: srv.Command,
+				Args:    srv.Args,
+				Env:     srv.Env,
+				Timeout: srv.Timeout,
+			}
 		}
 	}
+	home, err := cli.EnsureHomeDir()
+	if err == nil {
+		for name, def := range plugin.DiscoverHome(home).MCPServers() {
+			if _, exists := m[name]; exists {
+				continue
+			}
+			m[name] = agenttools.MCPConfig{
+				Command: def.Command,
+				Args:    def.Args,
+				Env:     def.Env,
+				Timeout: def.Timeout,
+			}
+		}
+	}
+	if len(m) == 0 {
+		return nil
+	}
 	return m
+}
+
+func RemoteFromFlag(raw string) *workspace.RemoteSpec {
+	spec, err := workspace.ParseRemote(raw)
+	if err != nil {
+		return nil
+	}
+	return spec
 }
 
 // AuxiliaryConfigFromCLI converts cli.AuxiliaryConfig to agent.AuxiliaryConfig.
@@ -114,22 +160,33 @@ func SkillConfigFns(cfg *cli.Config) (func() map[string]string, func(key, value 
 }
 
 // LeanToolsEnabled is true when long-tail tool schemas should be hidden.
-// Default (auto / unset): on for code mode, or when more than one MCP server is configured.
+// Default (auto / unset): on for code/cyber mode, or when more than one MCP server is configured.
 func LeanToolsEnabled(cfg *cli.Config) bool {
-	mode := ""
+	modeName := ""
+	if cfg != nil {
+		modeName = cfg.Mode
+	}
+	return LeanToolsEnabledFor(cfg, modeName)
+}
+
+// LeanToolsEnabledFor is LeanToolsEnabled using an explicit runtime mode
+// (oneshot/headless --mode, or a TUI /mode switch) instead of only cfg.Mode.
+func LeanToolsEnabledFor(cfg *cli.Config, modeName string) bool {
+	lean := ""
 	if cfg != nil && cfg.Tools != nil {
-		mode = strings.ToLower(strings.TrimSpace(cfg.Tools.Lean))
+		lean = strings.ToLower(strings.TrimSpace(cfg.Tools.Lean))
 	}
 	if env := strings.ToLower(strings.TrimSpace(os.Getenv("COVO_TOOLS_LEAN"))); env != "" {
-		mode = env
+		lean = env
 	}
-	switch mode {
+	switch lean {
 	case "on", "true", "1", "yes":
 		return true
 	case "off", "false", "0", "no":
 		return false
 	default:
-		if cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.Mode), "code") {
+		switch strings.ToLower(strings.TrimSpace(modeName)) {
+		case "code", "cyber":
 			return true
 		}
 		return cfg != nil && len(cfg.MCPServers) > 1

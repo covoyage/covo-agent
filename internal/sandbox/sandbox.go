@@ -24,6 +24,8 @@ type Config struct {
 	SSHKey  string
 	WorkDir string
 	Env     map[string]string
+	Mounts  []Mount
+	Network bool
 
 	// PersistentID, when set on a Docker sandbox, switches it from
 	// ephemeral per-call containers to a single long-lived container that
@@ -36,6 +38,12 @@ type Config struct {
 	// for the original ephemeral behavior (the default). Ignored by the
 	// local and SSH backends.
 	PersistentID string
+}
+
+type Mount struct {
+	Source   string
+	Target   string
+	ReadOnly bool
 }
 
 type Result struct {

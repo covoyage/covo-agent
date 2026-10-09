@@ -69,4 +69,7 @@ func TestRunDirectDelegatesToCore(t *testing.T) {
 	if mock.calls == 0 {
 		t.Fatal("expected the mock provider to be called")
 	}
+	if ca.lease.Busy() {
+		t.Fatal("lease should be released after RunDirect")
+	}
 }

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ type AgentMode string
 const (
 	ModeGeneral AgentMode = "general"
 	ModeCode    AgentMode = "code"
+	ModeCyber   AgentMode = "cyber"
 )
 
 // CustomModeDefinition holds the runtime representation of a custom mode.
@@ -71,7 +73,7 @@ func ListCustomModes() []*CustomModeDefinition {
 
 // AllModeNames returns built-in plus custom mode names.
 func AllModeNames() []string {
-	names := []string{string(ModeGeneral), string(ModeCode)}
+	names := []string{string(ModeGeneral), string(ModeCode), string(ModeCyber)}
 	for _, def := range ListCustomModes() {
 		names = append(names, def.Name)
 	}
@@ -79,7 +81,7 @@ func AllModeNames() []string {
 }
 
 func (m AgentMode) Valid() bool {
-	if m == ModeGeneral || m == ModeCode {
+	if m == ModeGeneral || m == ModeCode || m == ModeCyber {
 		return true
 	}
 	return GetCustomMode(string(m)) != nil
@@ -90,16 +92,42 @@ func (m AgentMode) String() string {
 }
 
 func (m AgentMode) IsCustom() bool {
-	return m != ModeGeneral && m != ModeCode && m.Valid()
+	return m != ModeGeneral && m != ModeCode && m != ModeCyber && m.Valid()
 }
 
 func ParseMode(s string) (AgentMode, bool) {
-	m := AgentMode(strings.ToLower(s))
+	m := AgentMode(strings.ToLower(strings.TrimSpace(s)))
 	return m, m.Valid()
 }
 
+// RequireMode parses a mode name. Empty values default to general; unknown
+// names fail instead of silently falling back.
+func RequireMode(s string) (AgentMode, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ModeGeneral, nil
+	}
+	m, ok := ParseMode(s)
+	if !ok {
+		return "", fmt.Errorf("invalid mode %q: use %s", s, strings.Join(AllModeNames(), ", "))
+	}
+	return m, nil
+}
+
+// LeanDefault reports whether lean tool schemas should be on for this mode
+// when tools.lean / COVO_TOOLS_LEAN is unset.
+func (m AgentMode) LeanDefault() bool {
+	return m == ModeCode || m.IsCyberFamily()
+}
+
+// IsCyberFamily reports whether the mode runs the cyber pipeline: the
+// built-in cyber mode or a registered cyber scenario preset.
+func (m AgentMode) IsCyberFamily() bool {
+	return m == ModeCyber
+}
+
 // ExecutionPhase represents the Plan/Act execution phase.
-// This is orthogonal to AgentMode (general/code) — both modes can enter
+// This is orthogonal to AgentMode (general/code/cyber) — all modes can enter
 // Plan or Act phase. In Plan mode, mutating tools are blocked by
 // planModeGateBeforeHook and filtered from the LLM's tool list by the
 // toolset filter. The only way to exit Plan mode is through the

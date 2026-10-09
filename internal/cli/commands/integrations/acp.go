@@ -14,6 +14,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/cli"
 	"github.com/covoyage/covo-agent/internal/cli/commands/setup"
 	"github.com/covoyage/covo-agent/internal/logutil"
+	"github.com/covoyage/covo-agent/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -23,6 +24,8 @@ func NewACPCommand() *cobra.Command {
 	var version bool
 	var wsMode bool
 	var wsAddr string
+	var remote string
+	var remoteRuntime bool
 	acpCmd := &cobra.Command{
 		Use:   "acp",
 		Short: "Run the ACP server",
@@ -81,6 +84,18 @@ func NewACPCommand() *cobra.Command {
 			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 
+			if remoteRuntime {
+				spec, perr := workspace.ParseRemote(remote)
+				if perr != nil || spec == nil || !spec.Enabled() {
+					return fmt.Errorf("--remote-runtime requires --remote")
+				}
+				session, err := spec.DeployRuntime(ctx, "acp")
+				if err != nil {
+					return err
+				}
+				return session.Wait()
+			}
+
 			// WebSocket relay mode: start a WebSocket-to-stdio bridge
 			if wsMode {
 				relay, err := acpadapt.NewWSRelay(acpadapt.WSRelayConfig{
@@ -109,5 +124,7 @@ func NewACPCommand() *cobra.Command {
 	acpCmd.Flags().BoolVar(&version, "version", false, "show version and exit")
 	acpCmd.Flags().BoolVar(&wsMode, "ws", false, "start as WebSocket relay server (for remote IDE integration)")
 	acpCmd.Flags().StringVar(&wsAddr, "addr", ":17891", "WebSocket relay listen address (use with --ws)")
+	acpCmd.Flags().StringVar(&remote, "remote", "", "remote workspace (user@host:/path or ssh://user@host/path)")
+	acpCmd.Flags().BoolVar(&remoteRuntime, "remote-runtime", false, "upload this binary and run acp on --remote")
 	return acpCmd
 }

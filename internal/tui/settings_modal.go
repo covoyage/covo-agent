@@ -8,6 +8,7 @@ import (
 	"github.com/covoyage/covonaut/tui/core"
 	"github.com/covoyage/covonaut/tui/theme"
 
+	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/i18n"
 )
 
@@ -228,12 +229,9 @@ func BuildDefaultSettingsEntries() []component.SettingEntry {
 			Description: i18n.T("settings.desc_theme"),
 		},
 		{
-			Key:   "mode",
-			Label: i18n.T("settings.label_mode"),
-			Options: []component.SettingOption{
-				{Value: "code", Label: i18n.T("settings.opt_code")},
-				{Value: "general", Label: i18n.T("settings.opt_general")},
-			},
+			Key:         "mode",
+			Label:       i18n.T("settings.label_mode"),
+			Options:     settingsModeOptions(),
 			Current:     0,
 			Description: i18n.T("settings.desc_mode"),
 		},
@@ -270,6 +268,25 @@ func BuildDefaultSettingsEntries() []component.SettingEntry {
 			Description: i18n.T("settings.desc_diff"),
 		},
 	}
+}
+
+func settingsModeOptions() []component.SettingOption {
+	opts := []component.SettingOption{
+		{Value: "code", Label: i18n.T("settings.opt_code")},
+		{Value: "general", Label: i18n.T("settings.opt_general")},
+		{Value: "cyber", Label: i18n.T("settings.opt_cyber")},
+	}
+	for _, def := range agent.ListCustomModes() {
+		if def == nil || def.Name == "" {
+			continue
+		}
+		label := def.Name
+		if def.Description != "" {
+			label = def.Name + " — " + def.Description
+		}
+		opts = append(opts, component.SettingOption{Value: def.Name, Label: label})
+	}
+	return opts
 }
 
 // Ensure SettingsModal implements core.Component and core.Updatable.

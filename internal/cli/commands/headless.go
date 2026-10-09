@@ -25,15 +25,16 @@ func RunHeadless(opts *headless.Options) {
 	// Flush buffered OTel spans before the process exits (log.Fatalf on the
 	// error paths bypasses defers, so those branches flush explicitly too).
 	defer telemetry.ShutdownOtel(context.Background())
-	if err := headless.ValidateOptions(opts); err != nil {
-		log.Fatalf("invalid headless options: %v", err)
-	}
 
 	cfg, err := cli.LoadConfig()
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
 	cli.RegisterCustomProviders(cfg)
+	shared.RegisterCustomModes(cfg)
+	if err := headless.ValidateOptions(opts); err != nil {
+		log.Fatalf("invalid headless options: %v", err)
+	}
 	homeDir, err := cli.EnsureHomeDir()
 	if err != nil {
 		log.Fatalf("home dir: %v", err)
@@ -41,11 +42,14 @@ func RunHeadless(opts *headless.Options) {
 
 	providerStr := cli.ResolveProvider(cfg)
 	modelStr := cli.ResolveModel(cfg)
-	modeStr := cli.ResolveMode(cfg)
+	modeStr := opts.Mode
+	if modeStr == "" {
+		modeStr = cli.ResolveMode(cfg)
+	}
 
-	mode := agent.ModeGeneral
-	if m, ok := agent.ParseMode(modeStr); ok {
-		mode = m
+	mode, err := agent.RequireMode(modeStr)
+	if err != nil {
+		log.Fatalf("%v", err)
 	}
 
 	llm, err := cli.BuildProvider(providerStr)
@@ -100,9 +104,10 @@ func RunHeadless(opts *headless.Options) {
 		SkillDisabled:            shared.SkillDisabled(cfg),
 		SkillConfigGet:           skillCfgGet,
 		SkillConfigSet:           skillCfgSet,
-		LeanTools:                shared.LeanToolsEnabled(cfg),
+		LeanTools:                shared.LeanToolsEnabledFor(cfg, string(mode)),
 		ResponseFormat:           responseFormat,
 		ExtraWorkspaceRoots:      extraRoots,
+		Surface:                  agent.SurfaceExec,
 	})
 	if err != nil {
 		log.Fatalf("create agent: %v", err)

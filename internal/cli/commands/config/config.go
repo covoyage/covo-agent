@@ -2,12 +2,15 @@ package config
 
 import (
 	"fmt"
-	"github.com/covoyage/covo-agent/internal/cli"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
+	"github.com/covoyage/covo-agent/internal/agent"
+	"github.com/covoyage/covo-agent/internal/cli"
+	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -61,6 +64,16 @@ func NewConfigCommand(runtime *cli.CommandRuntime) *cobra.Command {
 		Short:     "Set a configuration value",
 		Args:      cobra.ExactArgs(2),
 		ValidArgs: []string{"provider", "model", "mode"},
+		ValidArgsFunction: func(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) == 0 {
+				return []string{"provider", "model", "mode"}, cobra.ShellCompDirectiveNoFileComp
+			}
+			if len(args) == 1 && args[0] == "mode" {
+				shared.RegisterCustomModes(runtime.Cfg)
+				return completeModeNames(toComplete), cobra.ShellCompDirectiveNoFileComp
+			}
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return setConfigValue(cmd.OutOrStdout(), runtime.Cfg, args[0], args[1])
 		},
@@ -118,10 +131,15 @@ func checkConfigFile(w io.Writer, cfg *cli.Config, path string) error {
 		}
 		return fmt.Errorf("stat config: %w", err)
 	}
+	shared.RegisterCustomModes(cfg)
+	mode, err := agent.RequireMode(cli.ResolveMode(cfg))
+	if err != nil {
+		return err
+	}
 	fmt.Fprintf(w, "  ✓ config: %s\n", path)
 	fmt.Fprintf(w, "  ✓ provider: %s\n", cfg.Provider)
 	fmt.Fprintf(w, "  ✓ model: %s\n", cfg.Model)
-	fmt.Fprintf(w, "  ✓ mode: %s\n", cfg.Mode)
+	fmt.Fprintf(w, "  ✓ mode: %s\n", mode)
 	return nil
 }
 
@@ -132,7 +150,12 @@ func setConfigValue(w io.Writer, cfg *cli.Config, key, value string) error {
 	case "model":
 		cfg.Model = value
 	case "mode":
-		cfg.Mode = value
+		shared.RegisterCustomModes(cfg)
+		mode, err := agent.RequireMode(value)
+		if err != nil {
+			return err
+		}
+		cfg.Mode = string(mode)
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
@@ -141,4 +164,15 @@ func setConfigValue(w io.Writer, cfg *cli.Config, key, value string) error {
 	}
 	fmt.Fprintf(w, "  ✓ %s set to %q\n", key, value)
 	return nil
+}
+
+func completeModeNames(prefix string) []string {
+	prefix = strings.ToLower(prefix)
+	var names []string
+	for _, name := range agent.AllModeNames() {
+		if prefix == "" || strings.HasPrefix(strings.ToLower(name), prefix) {
+			names = append(names, name)
+		}
+	}
+	return names
 }

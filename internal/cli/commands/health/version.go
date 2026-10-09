@@ -2,11 +2,11 @@ package health
 
 import (
 	"fmt"
-	"github.com/covoyage/covo-agent/internal/cli"
 	"os"
 	"path/filepath"
 	"runtime"
 
+	"github.com/covoyage/covo-agent/internal/cli"
 	"github.com/covoyage/covo-agent/internal/sandbox/ossandbox"
 	"github.com/covoyage/covo-agent/internal/selfupdate"
 )

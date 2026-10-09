@@ -30,6 +30,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/safego"
 	"github.com/covoyage/covo-agent/internal/slashcmd"
 	agentui "github.com/covoyage/covo-agent/internal/tui"
+	"github.com/covoyage/covo-agent/internal/workspace"
 )
 
 // interactiveSession holds the shared state of one interactive TUI run: the
@@ -155,6 +156,13 @@ func (s *interactiveSession) restoreComposerDraft() {
 // RunInteractive launches the interactive TUI, or the one-shot path when a
 // prompt was supplied via --print/--oneshot/--pipe.
 func RunInteractive(opts *RunOptions, runtime *cli.CommandRuntime) {
+	if opts != nil && opts.RemoteRuntime {
+		if err := deployRemoteRuntime(context.Background(), opts.Remote, ""); err != nil {
+			fmt.Fprintf(os.Stderr, "remote runtime: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	homeDir := runtime.HomeDir
 	cfg := runtime.Cfg
 
@@ -180,6 +188,18 @@ func RunInteractive(opts *RunOptions, runtime *cli.CommandRuntime) {
 		homeDir: homeDir,
 	}
 	s.run()
+}
+
+func deployRemoteRuntime(ctx context.Context, raw, extraArgs string) error {
+	spec, err := workspace.ParseRemote(raw)
+	if err != nil || spec == nil || !spec.Enabled() {
+		return fmt.Errorf("--remote-runtime requires --remote")
+	}
+	session, err := spec.DeployRuntime(ctx, extraArgs)
+	if err != nil {
+		return err
+	}
+	return session.Wait()
 }
 
 func loggingRetainDays(cfg *cli.Config) int {
@@ -236,14 +256,15 @@ func (s *interactiveSession) run() {
 	if s.opts.Model != "" {
 		s.model = s.opts.Model
 	}
+	shared.RegisterCustomModes(s.cfg)
 	modeStr := cli.ResolveMode(s.cfg)
 	if s.opts.Mode != "" {
 		modeStr = s.opts.Mode
 	}
 
-	mode, ok := agent.ParseMode(modeStr)
-	if !ok {
-		log.Fatalf("invalid mode %q: must be 'general' or 'code'", modeStr)
+	mode, err := agent.RequireMode(modeStr)
+	if err != nil {
+		log.Fatalf("%v", err)
 	}
 	s.mode = mode
 
@@ -293,21 +314,6 @@ func (s *interactiveSession) run() {
 	var skillURLs []string
 	if s.cfg.Skills != nil {
 		skillURLs = s.cfg.Skills.URLs
-	}
-
-	// Register custom modes from config so they're available for
-	// mode validation and system prompt selection.
-	for _, cm := range s.cfg.CustomModes {
-		def := &agent.CustomModeDefinition{
-			Name:         cm.Name,
-			Description:  cm.Description,
-			SystemPrompt: cm.SystemPrompt,
-		}
-		if cm.Tools != nil {
-			def.AllowTools = cm.Tools.Allow
-			def.DenyTools = cm.Tools.Deny
-		}
-		agent.RegisterCustomMode(def)
 	}
 
 	slashSuggestions := slashcmd.BuildSlashSuggestions()
@@ -365,6 +371,8 @@ func (s *interactiveSession) run() {
 		WorkspaceOnly:            shared.WorkspaceOnlyFromConfig(s.cfg),
 		Auxiliary:                shared.AuxiliaryConfigFromCLI(s.cfg),
 		AuxiliaryProviderBuilder: cli.ResolveAuxiliaryProviderBuilder(),
+		Surface:                  agent.NormalizeSurface(s.opts.Surface),
+		Remote:                   shared.RemoteFromFlag(s.opts.Remote),
 	}, shared.RuntimeState)
 
 	covoAgent, err := s.agentFactory.New(runtimeapp.AgentRequest{

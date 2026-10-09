@@ -11,6 +11,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli"
 	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
+	"github.com/covoyage/covo-agent/internal/cyber"
 	"github.com/covoyage/covo-agent/internal/headless"
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/telemetry"
@@ -23,6 +24,7 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 		log.Fatalf("load config: %v", err)
 	}
 	cli.RegisterCustomProviders(cfg)
+	shared.RegisterCustomModes(cfg)
 	homeDir, err := cli.EnsureHomeDir()
 	if err != nil {
 		log.Fatalf("home dir: %v", err)
@@ -38,9 +40,9 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 		modeStr = cli.ResolveMode(cfg)
 	}
 
-	mode := agent.ModeGeneral
-	if m, ok := agent.ParseMode(modeStr); ok {
-		mode = m
+	mode, err := agent.RequireMode(modeStr)
+	if err != nil {
+		log.Fatalf("%v", err)
 	}
 
 	llm, err := cli.BuildProvider(providerStr)
@@ -86,9 +88,10 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 		SkillDisabled:            shared.SkillDisabled(cfg),
 		SkillConfigGet:           skillCfgGet,
 		SkillConfigSet:           skillCfgSet,
-		LeanTools:                shared.LeanToolsEnabled(cfg),
+		LeanTools:                shared.LeanToolsEnabledFor(cfg, string(mode)),
 		ResponseFormat:           responseFormat,
 		ExtraWorkspaceRoots:      extraRoots,
+		Surface:                  agent.SurfaceExec,
 	})
 	if err != nil {
 		log.Fatalf("create agent: %v", err)
@@ -138,6 +141,7 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 			if encodeErr := enc.Encode(parsed); encodeErr != nil {
 				log.Fatalf("encode output: %v", encodeErr)
 			}
+			exitCyberIfConfirmed(covoAgent, modeStr)
 			return
 		}
 		usage := covoAgent.Core().State().TotalUsage()
@@ -157,6 +161,7 @@ func runOneshot(prompt, modeStr, providerStr, modelStr string, yolo, jsonOutput 
 	default:
 		fmt.Print(payload)
 	}
+	exitCyberIfConfirmed(covoAgent, modeStr)
 }
 
 type oneshotJSONResult struct {
@@ -170,6 +175,35 @@ type tokenInfo struct {
 	Prompt     int64 `json:"prompt"`
 	Completion int64 `json:"completion"`
 	Total      int64 `json:"total"`
+}
+
+func exitCyberIfConfirmed(covoAgent *agent.CovoAgent, modeStr string) {
+	mode, ok := agent.ParseMode(modeStr)
+	if !ok || !mode.IsCyberFamily() || covoAgent == nil {
+		return
+	}
+	cat := covoAgent.FindingCatalog()
+	if cat == nil {
+		return
+	}
+	n := 0
+	if report, err := cat.LoadReport(); err == nil && !report.FinishedAt.IsZero() {
+		if !report.Complete {
+			telemetry.ShutdownOtel(context.Background())
+			os.Exit(2)
+		}
+		n = report.Confirmed
+	} else if items, err := cat.ListFindings(); err == nil {
+		for _, f := range items {
+			if f.Status == cyber.StatusConfirmed {
+				n++
+			}
+		}
+	}
+	if n > 0 {
+		telemetry.ShutdownOtel(context.Background())
+		os.Exit(1)
+	}
 }
 
 func isTerminalFd(fd uintptr) bool {

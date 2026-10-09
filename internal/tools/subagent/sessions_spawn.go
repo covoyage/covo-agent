@@ -172,8 +172,8 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 				},
 				"role": map[string]any{
 					"type":        "string",
-					"description": "Child role: 'leaf' (default, cannot delegate), 'orchestrator' (can spawn children), or agent role names: 'explorer', 'coder', 'reviewer', 'devops', 'architect'.",
-					"enum":        []string{"leaf", "orchestrator", "explorer", "coder", "reviewer", "devops", "architect"},
+					"description": "Child role: 'leaf' (default, cannot delegate), 'orchestrator' (can spawn children), or agent role names: 'explorer', 'coder', 'reviewer', 'devops', 'architect', 'recon', 'verifier'.",
+					"enum":        []string{"leaf", "orchestrator", "explorer", "coder", "reviewer", "devops", "architect", "recon", "verifier"},
 				},
 				"provider": map[string]any{
 					"type":        "string",
@@ -229,6 +229,9 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 			if params.Role == "" {
 				params.Role = "leaf"
 			}
+			if strings.EqualFold(strings.TrimSpace(params.Role), "parent") {
+				return nil, fmt.Errorf("parent is reserved for the top-level agent")
+			}
 
 			if runner == nil {
 				return nil, fmt.Errorf("sessions_spawn: no runner configured")
@@ -267,9 +270,7 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 					task = reminder + "\n\n---\n## Your Task\n" + task
 				}
 			}
-			if role, ok := GetRole(params.Role); ok && strings.TrimSpace(role.SystemPrompt) != "" {
-				task = role.SystemPrompt + "\n\n---\n## Your Task\n" + task
-			}
+			ctx, task, roleToolsets := ApplySpawnRole(ctx, task, params.Role, nil)
 
 			switch mode {
 			case "state":
@@ -293,11 +294,7 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 			// Resolve AgentRole to toolsets if role matches a predefined role
 			// (only when neither capability_mode nor explicit toolsets were given)
 			if childToolsets == nil {
-				if role, ok := GetRole(params.Role); ok {
-					if len(role.Toolsets) > 0 {
-						childToolsets = role.Toolsets
-					}
-				}
+				childToolsets = roleToolsets
 			}
 			if childToolsets == nil && parentToolsets != nil {
 				childToolsets = parentToolsets()
@@ -347,6 +344,7 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 					ctx = WithSubagentIsolation(ctx, params.Isolation)
 				}
 				runCtx, id := registry.StartBackground(ctx, params.Task, currentDepth+1)
+				observeAgent(AgentObservation{ID: id, Role: params.Role, Task: params.Task, Skills: RoleSkillNamesForTask(params.Role, params.Task), Status: "running"})
 				// Carry the registry id so the spawn runner registers the
 				// transcript view under the same id the tool block shows.
 				runCtx = WithSubagentViewRef(runCtx, id)
@@ -374,6 +372,11 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 					}()
 					output, err := runner(runCtx, spawnTask, spawnToolsets, int(maxTurns))
 					registry.Complete(id, err != nil)
+					status, errText := "completed", ""
+					if err != nil {
+						status, errText = "failed", err.Error()
+					}
+					observeAgent(AgentObservation{ID: id, Role: params.Role, Task: params.Task, Skills: RoleSkillNamesForTask(params.Role, params.Task), Status: status, Error: errText})
 					if onComplete != nil {
 						onComplete(id, params.Task, output, err)
 					}
@@ -400,6 +403,9 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 				}
 				if params.Isolation != "" {
 					ctx = WithSubagentIsolation(ctx, params.Isolation)
+				}
+				if params.Role != "" {
+					ctx = WithSubagentRole(ctx, params.Role)
 				}
 
 				output, err := subagentRunner.Run(ctx, spawn, task, childToolsets, SubagentRunOptions{
@@ -435,6 +441,9 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 			}
 			if params.Isolation != "" {
 				ctx = WithSubagentIsolation(ctx, params.Isolation)
+			}
+			if params.Role != "" {
+				ctx = WithSubagentRole(ctx, params.Role)
 			}
 
 			output, err := runner(ctx, task, safeToolsets, int(params.MaxTurns))

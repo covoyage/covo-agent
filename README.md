@@ -6,13 +6,16 @@
 
 [简体中文](README.zh-CN.md) | English
 
-`covo-agent` is a general-purpose AI agent for the terminal, with both general and code-focused modes. It supports everyday knowledge work, software development, automation, persistent context, and external-system collaboration through an interactive TUI, tools, memory, skills, safety controls, and extensible integrations.
+`covo-agent` is a general-purpose AI agent for the terminal, with general, code, and cyber modes. It supports everyday knowledge work, software development, recon/verification, automation, persistent context, and external-system collaboration through an interactive TUI, tools, memory, skills, safety controls, and extensible integrations.
 
 ## Highlights
 
 - **Interactive terminal workflow**: streaming responses, tool activity, mouse selection, session history, model picker, themes, and shell completion.
 - **Multiple execution modes**: interactive TUI, `-p/--print` for one-shot output, and `exec` for policy-controlled non-interactive runs.
 - **Coding tools**: file search and editing, patch application, shell execution, code analysis, review, test generation, Git worktrees, and checkpoints.
+- **Cyber mode**: autonomous recon, verification, and exploitation. The parent sets `scan_profile.allowed_hosts` to operator-authorized hostnames before active host/URL `scan` recipes run (`list`, nmap, subfinder, rustscan, ffuf, katana, nuclei, hydra, metasploit, msfvenom, responder, impacket, netexec, fscan, bloodhound, hashcat, john, pwntools, …). Known secondary targets are checked and arbitrary network `extra` flags are refused, but external scanner processes are not network-sandboxed. Findings, assets, coverage, and HTTP replay evidence are recorded in the engagement ledger.
+- **Limited native web checks**: if local `curl` is missing, its `scan` recipe can perform one scoped Go HTTP GET with no extra flags. `web_param_probe` sends one inert marker through an existing query parameter of a recorded GET request. Both produce evidence, not a vulnerability verdict or a replacement for full template and browser scanners.
+- **Web evidence workflow**: `web_context` summarizes a recorded endpoint without raw headers or bodies. `csrf_retest` fetches a fresh token from a recorded GET and submits one same-origin form POST; it requires authorized host scope and approval for the POST, and never returns or stores the refreshed token. A successful submission is not a CSRF finding without a negative control.
 - **Persistent context**: sessions, memory providers, skills, goals, snapshots, commitments, profiles, and project-level configuration.
 - **Provider flexibility**: OpenAI, Anthropic, Gemini, Xiaomi, OpenRouter, and OpenAI-compatible custom providers.
 - **Safety controls**: approval gates, allow/deny policies, secret redaction, URL/path checks, OS sandbox profiles, audit logs, and doom-loop recovery.
@@ -139,6 +142,8 @@ covo-agent exec "find the cause of the failing tests" \
 | Print | `covo-agent -p "prompt"` | Scripts and a single terminal response |
 | Print JSON | `covo-agent -p "prompt" --json` | Structured automation output |
 | Exec | `covo-agent exec "prompt"` | Non-interactive agent runs with explicit policies |
+| Cyber exec | `covo-agent exec --mode cyber "map hosts on example.com"` | Non-interactive recon run |
+| Cyber cron | `covo-agent cron add recon '@daily' 'map hosts'` | Scheduled recon run |
 | Exec JSON stream | `covo-agent exec "prompt" --output-format streaming-json` | NDJSON events for text, tools, and errors |
 | Structured output | `covo-agent -p "prompt" --output-schema schema.json` | Final answer must match a JSON Schema |
 
@@ -149,7 +154,7 @@ Useful root flags include:
 --model <name>             Override the configured model
 -c, --continue             Resume the latest session in this directory
 --session                  Open the session picker on startup
---mode general|code        Select the agent mode
+--mode general|code|cyber  Select the agent mode
 --session-id <id>          Resume or create a named session
 --sandbox <profile>        workspace, read-only, strict, devbox, off, or custom
 --system-prompt <text>     Replace the default system prompt

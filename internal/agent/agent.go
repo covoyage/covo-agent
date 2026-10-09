@@ -20,6 +20,7 @@ import (
 
 	"github.com/covoyage/covo-agent/internal/agent/approval"
 	"github.com/covoyage/covo-agent/internal/agent/compression"
+	"github.com/covoyage/covo-agent/internal/cyber"
 	"github.com/covoyage/covo-agent/internal/doomloop"
 	"github.com/covoyage/covo-agent/internal/evolution"
 	"github.com/covoyage/covo-agent/internal/extension"
@@ -29,6 +30,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/lifecycle"
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/lsp"
+	"github.com/covoyage/covo-agent/internal/plugin"
 	"github.com/covoyage/covo-agent/internal/repomap"
 	"github.com/covoyage/covo-agent/internal/rollout"
 	"github.com/covoyage/covo-agent/internal/safego"
@@ -42,6 +44,7 @@ import (
 	toolsstandingorders "github.com/covoyage/covo-agent/internal/tools/standingorders"
 	toolssubagent "github.com/covoyage/covo-agent/internal/tools/subagent"
 	"github.com/covoyage/covo-agent/internal/toolset"
+	"github.com/covoyage/covo-agent/internal/workspace"
 	"github.com/covoyage/covonaut/agentcore"
 	"github.com/covoyage/covonaut/skill"
 	"github.com/covoyage/covonaut/tools"
@@ -147,6 +150,9 @@ type CovoAgent struct {
 	hunkTracker             *hunk.Tracker
 	rolloutRecorder         *rollout.Recorder
 	rolloutStore            *rollout.Store
+	surface                 PresentationSurface
+	lease                   SessionLease
+	commands                *CommandQueue
 
 	// ExecutionPhase (Plan/Act) — orthogonal to AgentMode. In Plan mode,
 	// mutating tools are blocked by planModeGateBeforeHook and filtered
@@ -157,6 +163,7 @@ type CovoAgent struct {
 
 type CovoAgentConfig struct {
 	Mode             AgentMode
+	SubagentRole     string
 	Provider         agentcore.Provider
 	ProviderName     string
 	Model            string
@@ -230,6 +237,12 @@ type CovoAgentConfig struct {
 	// ParentRolloutID links this agent's rollout to the rollout of the agent
 	// that spawned it. Only meaningful for subagents when COVO_ROLLOUT=true.
 	ParentRolloutID string
+
+	// Surface selects prompt/tool presentation for this process (terminal,
+	// acp, gateway, exec). Empty defaults to terminal.
+	Surface PresentationSurface
+	// Remote, when set, routes file and bash tools to another host.
+	Remote *workspace.RemoteSpec
 }
 
 type skillConfigStore struct {
@@ -503,8 +516,12 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	if cfg.SystemPrompt != "" {
 		promptBuilder.SetSystemPrompt(cfg.SystemPrompt)
 	}
-	if cfg.AppendSystemPrompt != "" {
-		promptBuilder.SetAppendSystemPrompt(cfg.AppendSystemPrompt)
+	appendPrompt := cfg.AppendSystemPrompt
+	if extra := cfg.Surface.PromptDirective(); extra != "" {
+		appendPrompt = strings.TrimSpace(appendPrompt + "\n\n" + extra)
+	}
+	if appendPrompt != "" {
+		promptBuilder.SetAppendSystemPrompt(appendPrompt)
 	}
 
 	// Runtime metadata for system prompt
@@ -565,6 +582,14 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	}
 
 	sandboxCfg := sandbox.ConfigFromEnv()
+	if cfg.Mode.IsCyberFamily() && sandboxCfg.Type == sandbox.TypeDocker {
+		if sandboxCfg.PersistentID == "" {
+			sandboxCfg.PersistentID = "cyber:" + cfg.WorkingDir
+		}
+		sandboxCfg.WorkDir = "/workspace"
+		sandboxCfg.Network = true
+		sandboxCfg.Mounts = append(sandboxCfg.Mounts, sandbox.Mount{Source: cfg.WorkingDir, Target: "/workspace", ReadOnly: true})
+	}
 	sb, sbErr := sandbox.New(sandboxCfg)
 	if sbErr != nil {
 		sb = nil
@@ -625,14 +650,34 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 				}
 			}
 
+			childMode := cfg.Mode
+			if !childMode.Valid() {
+				childMode = ModeGeneral
+			}
+			if cyberSpawnRequested(ctx, toolsetNames) {
+				childMode = ModeCyber
+			}
+			childRole, err := resolveCyberChildRole(childMode, toolssubagent.SubagentRoleFromContext(ctx))
+			if err != nil {
+				return "", err
+			}
+			childPlatform := "minimal"
+			if childMode == ModeCyber {
+				childPlatform = "cli"
+				if len(toolsetNames) > 0 {
+					toolsetNames = toolset.EnsureCyberToolset(toolsetNames)
+				}
+			}
 			childCfg := CovoAgentConfig{
-				Mode:            ModeGeneral,
+				Mode:            childMode,
+				SubagentRole:    childRole,
 				Provider:        childProvider,
 				ProviderName:    providerName,
 				Model:           childModel,
 				WorkingDir:      childWorkingDir,
 				HomeDir:         homeDir,
-				Platform:        "minimal",
+				Platform:        childPlatform,
+				LeanTools:       cfg.LeanTools || childMode.LeanDefault(),
 				ExecutionMode:   execMode,
 				Concurrency:     concurrency,
 				ComputerUse:     computerUse,
@@ -727,6 +772,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 					panic(r)
 				}
 			}()
+			childCtx = toolssubagent.WithSubagentRole(childCtx, childRole)
 			subagentResult, err = child.core.Run(childCtx, task)
 			if err != nil {
 				// A manual interrupt cancels the child context — report the
@@ -751,6 +797,8 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 		SpawnRunner:       spawnRunner,
 		SpawnNotifyFunc:   cfg.SpawnNotifyFunc,
 		ToolProfile:       cfg.ToolProfile,
+		CyberMode:         cfg.Mode.IsCyberFamily(),
+		SubagentRole:      cfg.SubagentRole,
 		WorkDir:           cfg.WorkingDir,
 		ProviderName:      cfg.ProviderName,
 		WebFetchTransport: NewSafeClient().Transport,
@@ -792,6 +840,8 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 		doomloopDetector: doomloopDetector,
 		hunkTracker:      hunkTracker,
 		rolloutStore:     rolloutSt,
+		surface:          NormalizeSurface(string(cfg.Surface)),
+		commands:         NewCommandQueue(),
 	}
 
 	// Wire the SQLite goal store to the extension so LLM goal tools
@@ -950,6 +1000,9 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	if km := ca.agentTools.KanbanManager(); km != nil {
 		promptBuilder.SetKanbanManager(km)
 	}
+	if ca.agentTools != nil {
+		promptBuilder.SetFindingCatalog(ca.agentTools.FindingCatalog())
+	}
 
 	// Build and apply provider middleware chain (outermost first)
 	ca.setupProviderChain(&cfg)
@@ -992,6 +1045,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	// Stamp per-tool concurrency declarations for mixed execution mode.
 	// Undeclared tools stay fail-closed (exclusive); see concurrency.go.
 	agenttools.ApplyConcurrencyDeclarations(ca.core)
+	agenttools.ApplyToolContracts(ca.core)
 
 	// Wire BackgroundReviewer to curator for post-session self-improvement
 	ca.backgroundReviewer = NewBackgroundReviewerFromFunc(
@@ -1162,6 +1216,10 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 	if ca.fsOps == nil {
 		ca.fsOps = newSwappableFS()
 	}
+	if cfg.Remote.Enabled() {
+		remoteFS := &workspace.RemoteFS{Spec: cfg.Remote}
+		ca.fsOps.set(remoteFS)
+	}
 	readCfg := &tools.ReadToolConfig{Operations: ca.fsOps}
 	if cfg.ModelContextLength > 0 {
 		// 10% of context window in tokens × 4 bytes/tok = context * 0.4
@@ -1215,10 +1273,20 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 			return nil, fmt.Errorf("unsupported read media kind %q", kind)
 		}
 	}
+	var bashCfg *tools.BashToolConfig
+	if cfg.Remote.Enabled() {
+		bashCfg = &tools.BashToolConfig{Operations: &workspace.RemoteBash{Spec: cfg.Remote}}
+	}
+	var editCfg *tools.EditToolConfig
+	if cfg.Remote.Enabled() {
+		editCfg = &tools.EditToolConfig{Operations: &workspace.RemoteFS{Spec: cfg.Remote}}
+	}
 	toolExt := tools.NewExtension(tools.ExtensionConfig{
 		WorkingDir: cfg.WorkingDir,
 		Read:       readCfg,
+		Edit:       editCfg,
 		WriteFile:  &tools.WriteFileToolConfig{Operations: ca.fsOps},
+		Bash:       bashCfg,
 		Browser:    browserToolConfigFromEnv(),
 		WebSearch:  webSearchToolConfigFromAgent(cfg.ProviderName),
 		// Persistent terminal sessions: PTY-backed shells whose working
@@ -1249,7 +1317,9 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		ComputerUse: computerUse,
 	})
 
-	skillPaths := skillLoadPaths(cfg.HomeDir+"/skills", cfg.WorkingDir, cfg.SkillExtraDirs)
+	pluginRoots := plugin.DiscoverHome(cfg.HomeDir).SkillRoots()
+	skillExtra := append(append([]string{}, cfg.SkillExtraDirs...), pluginRoots...)
+	skillPaths := skillLoadPaths(cfg.HomeDir+"/skills", cfg.WorkingDir, skillExtra)
 	if len(cfg.SkillURLs) > 0 {
 		syncer := evolution.NewSkillURLSyncer(
 			evolution.UrlSkillCacheDefault(cfg.HomeDir), logger)
@@ -1293,13 +1363,22 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 
 	// Toolset override: from config field (spawnRunner) or env var (CLI compatibility)
 	if len(cfg.ToolsetOverride) > 0 {
-		platformToolsets.SetOverride(platform, cfg.ToolsetOverride)
+		names := cfg.ToolsetOverride
+		if cfg.Mode == ModeCyber {
+			names = toolset.EnsureCyberToolset(names)
+		}
+		platformToolsets.SetOverride(platform, names)
 	} else if override := os.Getenv("COVO_TOOLSETS"); override != "" {
 		var names []string
 		for _, n := range splitAndTrim(override) {
 			names = append(names, n)
 		}
+		if cfg.Mode == ModeCyber {
+			names = toolset.EnsureCyberToolset(names)
+		}
 		platformToolsets.SetOverride(platform, names)
+	} else if cfg.Mode == ModeCyber {
+		platformToolsets.SetOverride(platform, toolset.EnsureCyberToolset(platformToolsets.ToolsetNames(platform)))
 	}
 
 	toolsetFilter := toolset.NewToolsetFilter(toolset.ToolsetFilterConfig{
@@ -1307,6 +1386,16 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		Availability: availability,
 		Filter:       cachedFilter,
 		NameFilter:   cfg.ToolNameFilter,
+		ContextFilter: func(ctx context.Context, name string) bool {
+			if !cfg.Mode.IsCyberFamily() {
+				return true
+			}
+			instanceRole := strings.TrimSpace(cfg.SubagentRole)
+			if instanceRole == "" {
+				instanceRole = "parent"
+			}
+			return cyber.AllowAgentTool(instanceRole, toolssubagent.SubagentRoleFromContext(ctx), name)
+		},
 		ToolNames: func() []string {
 			if ca.core != nil {
 				return ca.core.ToolNames()
@@ -1316,6 +1405,8 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		PlatformName:    func() string { return platform },
 		PlanModeChecker: func() bool { return ca.IsPlanMode() },
 		LeanMode:        cfg.LeanTools,
+		LeanCyber:       cfg.Mode.IsCyberFamily(),
+		CyberMode:       cfg.Mode.IsCyberFamily(),
 		Logger:          logger,
 	})
 	ca.toolsetFilter = toolsetFilter
@@ -1559,6 +1650,9 @@ func (ca *CovoAgent) Close() {
 	if ca.shellHooks != nil {
 		ca.shellHooks.Stop()
 	}
+	if ca.commands != nil {
+		ca.commands.Close()
+	}
 	if ca.core != nil {
 		ca.core.Close()
 	}
@@ -1636,7 +1730,9 @@ func (ca *CovoAgent) Run(ctx context.Context, input string) (result string, err 
 		return "", err
 	}
 
-	result, err = ca.core.Run(ctx, input)
+	result, err = ca.runQueued(ctx, ModePrompt, input, func(ctx context.Context, input string) (string, error) {
+		return ca.core.Run(ctx, input)
+	})
 
 	if ca.trajectory != nil {
 		ca.trajectory.RecordAssistant(result, nil)
@@ -1694,11 +1790,80 @@ func (ca *CovoAgent) RunDirectWithSession(ctx context.Context, input, sessionID 
 		return "", err
 	}
 
-	return ca.Core().Run(ctx, input)
+	return ca.runQueued(ctx, ModePrompt, input, func(ctx context.Context, input string) (string, error) {
+		return ca.Core().Run(ctx, input)
+	})
+}
+
+func (ca *CovoAgent) acquireLease() error {
+	owner := string(ca.surface)
+	if owner == "" {
+		owner = string(SurfaceTerminal)
+	}
+	if _, err := ca.lease.Claim(owner); err != nil {
+		return err
+	}
+	return ca.lease.begin(0)
 }
 
 func (ca *CovoAgent) State() *agentcore.AgentState {
 	return ca.core.State()
+}
+
+// runQueued admits a turn through the session command queue. Same-owner
+// callers wait instead of failing when a turn is already in flight. A
+// different owner is still rejected by the lease.
+func (ca *CovoAgent) runQueued(ctx context.Context, mode CommandMode, input string, run func(context.Context, string) (string, error)) (string, error) {
+	if ca == nil || ca.commands == nil || run == nil {
+		if err := ca.acquireLease(); err != nil {
+			return "", err
+		}
+		defer ca.lease.end()
+		return run(ctx, input)
+	}
+	owner := string(ca.surface)
+	if owner == "" {
+		owner = string(SurfaceTerminal)
+	}
+	cmd := ca.commands.Enqueue(owner, mode, commandPriorityFor(mode), input)
+	if !ca.commands.tryStartWorker() {
+		return cmd.Wait(ctx)
+	}
+	ca.drainCommands(run)
+	ca.commands.endWorker()
+	if ca.commands.Len() > 0 && ca.commands.tryStartWorker() {
+		go func() {
+			defer ca.commands.endWorker()
+			ca.drainCommands(run)
+		}()
+	}
+	return cmd.Wait(ctx)
+}
+
+func (ca *CovoAgent) drainCommands(run func(context.Context, string) (string, error)) {
+	if ca == nil || ca.commands == nil {
+		return
+	}
+	for {
+		cmd, err := ca.commands.tryDequeue()
+		if err != nil || cmd == nil {
+			return
+		}
+		if _, claimErr := ca.lease.Claim(cmd.Owner); claimErr != nil {
+			cmd.finish("", claimErr)
+			continue
+		}
+		if beginErr := ca.lease.begin(0); beginErr != nil {
+			cmd.finish("", beginErr)
+			continue
+		}
+		out, runErr := run(context.Background(), cmd.Input)
+		ca.lease.end()
+		cmd.finish(out, runErr)
+		if ca.commands.Len() == 0 {
+			return
+		}
+	}
 }
 
 // AuxClient returns the auxiliary client used for routing lightweight LLM
@@ -1728,6 +1893,9 @@ func (ca *CovoAgent) Rebuild(mode AgentMode, provider agentcore.Provider, provid
 	cfg.WorkingDir = workingDir
 	cfg.HomeDir = homeDir
 	cfg.LifecycleHooks = existingHooks
+	if env := strings.ToLower(strings.TrimSpace(os.Getenv("COVO_TOOLS_LEAN"))); env == "" {
+		cfg.LeanTools = mode.LeanDefault() || len(cfg.MCPServers) > 1
+	}
 
 	// Re-apply the full provider middleware chain + compression switch
 	// so the rebuilt agent has the same provider stack as NewCovoAgent.
@@ -1739,6 +1907,7 @@ func (ca *CovoAgent) Rebuild(mode AgentMode, provider agentcore.Provider, provid
 	ca.cfg = ca.buildAgentConfig(cfg)
 	ca.core = agentcore.New(ca.cfg)
 	agenttools.ApplyConcurrencyDeclarations(ca.core)
+	agenttools.ApplyToolContracts(ca.core)
 
 	// Re-wrap the context engine in EnhancedContextEngine (carried state,
 	// boundary markers, compression switch).
@@ -1823,4 +1992,12 @@ func (ca *CovoAgent) LifecycleHooks() []agentcore.LifecycleHook {
 		return nil
 	}
 	return nil
+}
+
+// FindingCatalog returns the cyber ledger, or nil when tools are not wired.
+func (ca *CovoAgent) FindingCatalog() *cyber.Catalog {
+	if ca == nil || ca.agentTools == nil {
+		return nil
+	}
+	return ca.agentTools.FindingCatalog()
 }

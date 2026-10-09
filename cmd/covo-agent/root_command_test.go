@@ -81,6 +81,17 @@ func TestRootCommandRegistersExec(t *testing.T) {
 	}
 }
 
+func TestHeadlessOptionsInheritMode(t *testing.T) {
+	opts := &rootOptions{mode: "cyber", permission: "off"}
+	got := opts.headlessOptions("scan example.com")
+	if got.Mode != "cyber" {
+		t.Fatalf("mode=%q, want cyber", got.Mode)
+	}
+	if got.Prompt != "scan example.com" {
+		t.Fatalf("prompt=%q", got.Prompt)
+	}
+}
+
 func TestRootCommandHelpUsesCobraCommandTree(t *testing.T) {
 	root := newRootCommand()
 	var output bytes.Buffer
@@ -92,9 +103,30 @@ func TestRootCommandHelpUsesCobraCommandTree(t *testing.T) {
 		t.Fatalf("execute help: %v", err)
 	}
 	help := output.String()
-	for _, text := range []string{"Available Commands:", "completion", "gateway", "exec", "init", "--print", "--oneshot", "--permission", "--add-dir", "--continue"} {
+	for _, text := range []string{"Available Commands:", "completion", "gateway", "exec", "init", "--print", "--oneshot", "--permission", "--add-dir", "--continue", "--mode", "cyber"} {
 		if !strings.Contains(help, text) {
 			t.Errorf("help output missing %q", text)
+		}
+	}
+}
+
+func TestRootCommandModeCompletionIncludesCyber(t *testing.T) {
+	root := newRootCommand()
+	comps, ok := root.GetFlagCompletionFunc("mode")
+	if !ok || comps == nil {
+		t.Fatal("expected --mode completion")
+	}
+	got, dir := comps(root, nil, "")
+	if dir != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("directive=%v", dir)
+	}
+	want := map[string]bool{"general": true, "code": true, "cyber": true}
+	if len(got) != len(want) {
+		t.Fatalf("completions=%v", got)
+	}
+	for _, name := range got {
+		if !want[name] {
+			t.Fatalf("unexpected completion %q in %v", name, got)
 		}
 	}
 }

@@ -16,6 +16,7 @@ var DelegationToolNames = []string{
 	"interrupt_agent",
 	"subagents",
 	"advanced_workflow",
+	"script_workflow",
 	"swarm",
 	"swarm_orchestrate",
 }

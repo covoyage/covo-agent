@@ -22,45 +22,47 @@ import (
 
 // Phase represents a single step in a workflow.
 type Phase struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Prompt      string            `json:"prompt"`
-	Condition   string            `json:"condition,omitempty"`   // expression evaluated against context
-	MaxTurns    int               `json:"max_turns,omitempty"`   // 0 = unlimited
-	MaxTokens   int64             `json:"max_tokens,omitempty"`  // 0 = unlimited
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Prompt       string            `json:"prompt"`
+	Role         string            `json:"role,omitempty"`
+	Toolsets     []string          `json:"toolsets,omitempty"`
+	Condition    string            `json:"condition,omitempty"`     // expression evaluated against context
+	MaxTurns     int               `json:"max_turns,omitempty"`     // 0 = unlimited
+	MaxTokens    int64             `json:"max_tokens,omitempty"`    // 0 = unlimited
 	OutputSchema map[string]string `json:"output_schema,omitempty"` // field name → expected type
-	PauseAfter  bool              `json:"pause_after,omitempty"` // pause for user review after this phase
-	SkipOnError bool              `json:"skip_on_error,omitempty"`
+	PauseAfter   bool              `json:"pause_after,omitempty"`   // pause for user review after this phase
+	SkipOnError  bool              `json:"skip_on_error,omitempty"`
 }
 
 // Workflow defines a multi-phase task.
 type Workflow struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	Phases      []Phase `json:"phases"`
-	MaxTotalTurns    int   `json:"max_total_turns,omitempty"`
-	MaxTotalTokens   int64 `json:"max_total_tokens,omitempty"`
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	Description    string  `json:"description"`
+	Phases         []Phase `json:"phases"`
+	MaxTotalTurns  int     `json:"max_total_turns,omitempty"`
+	MaxTotalTokens int64   `json:"max_total_tokens,omitempty"`
 }
 
 // PhaseResult captures the outcome of a phase execution.
 type PhaseResult struct {
-	PhaseID   string          `json:"phase_id"`
-	Status    PhaseStatus     `json:"status"`
-	Output    string          `json:"output"`
-	Parsed    map[string]any  `json:"parsed,omitempty"`
-	Turns     int             `json:"turns"`
-	Tokens    int64           `json:"tokens"`
-	Error     string          `json:"error,omitempty"`
-	StartedAt time.Time       `json:"started_at"`
-	EndedAt   time.Time       `json:"ended_at"`
+	PhaseID   string         `json:"phase_id"`
+	Status    PhaseStatus    `json:"status"`
+	Output    string         `json:"output"`
+	Parsed    map[string]any `json:"parsed,omitempty"`
+	Turns     int            `json:"turns"`
+	Tokens    int64          `json:"tokens"`
+	Error     string         `json:"error,omitempty"`
+	StartedAt time.Time      `json:"started_at"`
+	EndedAt   time.Time      `json:"ended_at"`
 }
 
 // PhaseStatus represents the execution status of a phase.
 type PhaseStatus int
 
 const (
-	PhasePending   PhaseStatus = iota
+	PhasePending PhaseStatus = iota
 	PhaseRunning
 	PhaseCompleted
 	PhaseFailed
@@ -89,15 +91,19 @@ func (s PhaseStatus) String() string {
 
 // Journal persists workflow execution state for crash recovery.
 type Journal struct {
-	mu          sync.Mutex
-	path        string
-	WorkflowID  string                  `json:"workflow_id"`
-	StartedAt   time.Time               `json:"started_at"`
-	CurrentPhase int                    `json:"current_phase"`
-	Results     []PhaseResult           `json:"results"`
-	TotalTurns  int                     `json:"total_turns"`
-	TotalTokens int64                   `json:"total_tokens"`
-	Paused      bool                    `json:"paused"`
+	mu           sync.Mutex
+	path         string
+	WorkflowID   string            `json:"workflow_id"`
+	StartedAt    time.Time         `json:"started_at"`
+	CurrentPhase int               `json:"current_phase"`
+	Results      []PhaseResult     `json:"results"`
+	TotalTurns   int               `json:"total_turns"`
+	TotalTokens  int64             `json:"total_tokens"`
+	Paused       bool              `json:"paused"`
+	Script       string            `json:"script,omitempty"`
+	SiteIndex    int               `json:"site_index,omitempty"`
+	PendingAsk   string            `json:"pending_ask,omitempty"`
+	Answers      map[string]string `json:"answers,omitempty"`
 }
 
 // NewJournal creates or loads a journal at the given path.
@@ -160,6 +166,15 @@ func (j *Journal) SetPaused(paused bool) {
 	j.Paused = paused
 }
 
+func (j *Journal) SetSiteIndex(idx int) {
+	if j == nil {
+		return
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.SiteIndex = idx
+}
+
 // IsPaused returns whether the workflow is paused.
 func (j *Journal) IsPaused() bool {
 	j.mu.Lock()
@@ -198,9 +213,9 @@ func (j *Journal) Reset() error {
 
 // Executor runs a workflow phase by phase.
 type Executor struct {
-	workflow  *Workflow
-	journal   *Journal
-	runPhase  func(ctx context.Context, phase Phase) (*PhaseResult, error)
+	workflow          *Workflow
+	journal           *Journal
+	runPhase          func(ctx context.Context, phase Phase) (*PhaseResult, error)
 	evaluateCondition func(condition string, results []PhaseResult) (bool, error)
 }
 
@@ -208,9 +223,9 @@ type Executor struct {
 // runPhase is the callback that executes each phase (typically via a subagent).
 func NewExecutor(wf *Workflow, journal *Journal, runPhase func(ctx context.Context, phase Phase) (*PhaseResult, error)) *Executor {
 	return &Executor{
-		workflow:  wf,
-		journal:   journal,
-		runPhase:  runPhase,
+		workflow:          wf,
+		journal:           journal,
+		runPhase:          runPhase,
 		evaluateCondition: defaultConditionEvaluator,
 	}
 }
@@ -238,17 +253,17 @@ func (e *Executor) Run(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("phase %s condition error: %w", phase.ID, err)
 			}
-		if !shouldRun {
-			e.journal.RecordResult(PhaseResult{
-				PhaseID:   phase.ID,
-				Status:    PhaseSkipped,
-				StartedAt: time.Now(),
-				EndedAt:   time.Now(),
-			})
-			e.journal.SetCurrentPhase(i + 1)
-			e.journal.Save()
-			continue
-		}
+			if !shouldRun {
+				e.journal.RecordResult(PhaseResult{
+					PhaseID:   phase.ID,
+					Status:    PhaseSkipped,
+					StartedAt: time.Now(),
+					EndedAt:   time.Now(),
+				})
+				e.journal.SetCurrentPhase(i + 1)
+				e.journal.Save()
+				continue
+			}
 		}
 
 		// Check budget
@@ -264,12 +279,12 @@ func (e *Executor) Run(ctx context.Context) error {
 		if err != nil {
 			if phase.SkipOnError {
 				e.journal.RecordResult(PhaseResult{
-				PhaseID:   phase.ID,
-				Status:    PhaseSkipped,
-				Error:     err.Error(),
-				StartedAt: time.Now(),
-				EndedAt:   time.Now(),
-			})
+					PhaseID:   phase.ID,
+					Status:    PhaseSkipped,
+					Error:     err.Error(),
+					StartedAt: time.Now(),
+					EndedAt:   time.Now(),
+				})
 				e.journal.SetCurrentPhase(i + 1)
 				e.journal.Save()
 				continue

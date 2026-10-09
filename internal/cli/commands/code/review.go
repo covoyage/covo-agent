@@ -101,12 +101,6 @@ Be direct and focus on meaningful problems.`)
 
 	providerType := cli.ResolveProvider(cfg)
 	modelStr := cli.ResolveModel(cfg)
-	modeStr := cli.ResolveMode(cfg)
-
-	mode := agent.ModeGeneral
-	if m, ok := agent.ParseMode(modeStr); ok {
-		mode = m
-	}
 
 	llm, err := cli.BuildProvider(providerType)
 	if err != nil {
@@ -118,7 +112,7 @@ Be direct and focus on meaningful problems.`)
 	skillCfgGet, skillCfgSet := shared.SkillConfigFns(cfg)
 
 	covoAgent, err := agent.NewCovoAgent(agent.CovoAgentConfig{
-		Mode:                     mode,
+		Mode:                     agent.ModeCode,
 		Provider:                 llm,
 		ProviderName:             providerType,
 		Model:                    modelStr,
@@ -136,6 +130,7 @@ Be direct and focus on meaningful problems.`)
 		AuxiliaryProviderBuilder: cli.ResolveAuxiliaryProviderBuilder(),
 		SkillConfigGet:           skillCfgGet,
 		SkillConfigSet:           skillCfgSet,
+		LeanTools:                shared.LeanToolsEnabledFor(cfg, string(agent.ModeCode)),
 	})
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)

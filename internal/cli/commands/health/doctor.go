@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/covoyage/covo-agent/internal/agent"
+	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
+	"github.com/covoyage/covo-agent/internal/cyber"
 	"github.com/covoyage/covo-agent/internal/diag"
 	"github.com/spf13/cobra"
 )
@@ -128,6 +131,14 @@ func runDoctor(w io.Writer, fix bool) {
 				fmt.Fprintf(w, "  ✓ %s_API_KEY set\n", strings.ToUpper(provider))
 			}
 			fmt.Fprintf(w, "  ✓ model: %s\n", model)
+			shared.RegisterCustomModes(cfg)
+			mode, modeErr := agent.RequireMode(cli.ResolveMode(cfg))
+			if modeErr != nil {
+				fmt.Fprintf(w, "  ✗ mode: %v\n", modeErr)
+				ok = false
+			} else {
+				fmt.Fprintf(w, "  ✓ mode: %s\n", mode)
+			}
 		}
 	}
 
@@ -219,7 +230,24 @@ func runDoctor(w io.Writer, fix bool) {
 		}
 	}
 
-	// 9. Terminal diagnostics (color, clipboard, tmux, keyboard)
+	// 9. Cyber scan binaries (optional; missing recipes degrade, they do not fail doctor)
+	bins := cyber.RecipeBinaries()
+	found := 0
+	for _, bin := range bins {
+		if _, err := exec.LookPath(bin); err == nil {
+			found++
+		}
+	}
+	fmt.Fprintf(w, "  cyber scan recipes: %d catalog, %d binaries on PATH\n", len(cyber.Recipes()), found)
+	for _, bin := range []string{"nmap", "nuclei", "curl", "subfinder", "rustscan", "ffuf", "katana"} {
+		if _, err := exec.LookPath(bin); err == nil {
+			fmt.Fprintf(w, "  ✓ %s: found in PATH\n", bin)
+			continue
+		}
+		fmt.Fprintf(w, "  - %s: not found (cyber scan recipe unavailable)\n", bin)
+	}
+
+	// 10. Terminal diagnostics (color, clipboard, tmux, keyboard)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  Terminal Diagnostics:")
 	termReport := diag.RunDiagnostics()

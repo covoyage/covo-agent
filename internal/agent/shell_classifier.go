@@ -269,23 +269,61 @@ func isReadOnlyLine(line string) bool {
 		return true
 	}
 
-	if isAssignment(tokens) {
+	for _, segment := range splitSimpleCommands(tokens) {
+		if !isReadOnlySegment(segment) {
+			return false
+		}
+	}
+	return true
+}
+
+func splitSimpleCommands(tokens []string) [][]string {
+	var out [][]string
+	var cur []string
+	flush := func() {
+		if len(cur) > 0 {
+			out = append(out, cur)
+			cur = nil
+		}
+	}
+	for i := 0; i < len(tokens); i++ {
+		t := tokens[i]
+		if t == "|" || t == ";" || t == "&" || t == ">" || t == "<" {
+			flush()
+			continue
+		}
+		cur = append(cur, t)
+	}
+	flush()
+	return out
+}
+
+func isReadOnlySegment(tokens []string) bool {
+	if len(tokens) == 0 {
 		return true
 	}
-
-	cmd := tokens[0]
+	i := 0
+	for i < len(tokens) && isAssignment([]string{tokens[i]}) {
+		i++
+	}
+	if i >= len(tokens) {
+		return true
+	}
+	cmd := tokens[i]
 	cmd = stripShellBuiltins(cmd)
 	cmd = strings.TrimPrefix(cmd, `\`)
 	cmd = stripPath(cmd)
+	args := tokens[i+1:]
 
+	if cmd == "git" || cmd == "gh" {
+		return ClassifyArgv(cmd, args)
+	}
 	if readOnlyCommands[cmd] {
 		return true
 	}
-
 	if readOnlyCompoundCommands[cmd] {
 		return true
 	}
-
 	return false
 }
 

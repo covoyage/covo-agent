@@ -282,6 +282,14 @@ func TestNewDockerSandbox_PersistentIDSetsContainerName(t *testing.T) {
 	}
 }
 
+func TestAppendDockerMounts(t *testing.T) {
+	args := appendDockerMounts([]string{"run"}, []Mount{{Source: "/repo", Target: "/workspace", ReadOnly: true}})
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--volume /repo:/workspace:ro") {
+		t.Fatalf("mount args = %q", joined)
+	}
+}
+
 func TestConfigFromEnv_PersistentID(t *testing.T) {
 	origType := os.Getenv("SANDBOX_TYPE")
 	origPersistentID := os.Getenv("SANDBOX_PERSISTENT_ID")

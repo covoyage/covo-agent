@@ -421,6 +421,11 @@ func startGateway(pidFile string) {
 
 	providerType := cli.ResolveProvider(cfg)
 	model := cli.ResolveModel(cfg)
+	shared.RegisterCustomModes(cfg)
+	mode, err := agent.RequireMode(cli.ResolveMode(cfg))
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
 
 	llm, err := cli.BuildProvider(providerType)
 	if err != nil {
@@ -428,7 +433,6 @@ func startGateway(pidFile string) {
 	}
 
 	workingDir, _ := os.Getwd()
-
 	// Collect plugin lifecycle hooks
 	pluginHooks := agent.ConvertPluginHooks(pluginSystem.LifecycleHooks())
 
@@ -442,7 +446,7 @@ func startGateway(pidFile string) {
 	var gw *gateway.Gateway
 	factory := func(ctx context.Context) (gateway.Agent, error) {
 		ca, err := agent.NewCovoAgent(agent.CovoAgentConfig{
-			Mode:                     agent.ModeGeneral,
+			Mode:                     mode,
 			Provider:                 llm,
 			ProviderName:             providerType,
 			Model:                    model,
@@ -455,6 +459,9 @@ func startGateway(pidFile string) {
 			SessionSuspendFunc:       suspendStore.Suspend,
 			SkillConfigGet:           skillCfgGet,
 			SkillConfigSet:           skillCfgSet,
+			LeanTools:                shared.LeanToolsEnabledFor(cfg, string(mode)),
+			Surface:                  agent.SurfaceGateway,
+			MCPServers:               shared.MCPAgentConfig(cfg),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("create agent: %w", err)

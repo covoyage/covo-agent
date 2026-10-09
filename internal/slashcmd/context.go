@@ -71,6 +71,7 @@ type UIDependencies struct {
 	RestoreComposerDraft func()
 	SubmitPrompt         func(text string)
 	AttachImage          func(path, message string) error
+	RequestRender        func()
 }
 
 // IODependencies groups import/export and clipboard integrations.

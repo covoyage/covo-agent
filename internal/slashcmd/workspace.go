@@ -19,8 +19,16 @@ func handlePermission(sctx *SlashContext, parts []string) bool {
 		if sctx.Runtime.State != nil && sctx.Runtime.State.PermissionMode() != "" {
 			mode = agent.PermissionMode(sctx.Runtime.State.PermissionMode())
 		}
-		sctx.UI.App.PrintSystem(fmt.Sprintf("Permission mode: %s (ask, auto, full)", mode))
+		plan := ""
+		if ca.IsPlanMode() {
+			plan = ", execution=plan"
+		}
+		sctx.UI.App.PrintSystem(fmt.Sprintf("Permission mode: %s (plan, ask, auto, yolo)%s", mode, plan))
 		return true
+	}
+	raw := strings.ToLower(parts[1])
+	if raw == "plan" {
+		ca.SetExecutionPhase(agent.PhasePlan)
 	}
 	mode, err := agent.NormalizePermissionMode(parts[1], true)
 	if err != nil {
@@ -31,6 +39,10 @@ func handlePermission(sctx *SlashContext, parts []string) bool {
 	if sctx.Runtime.State != nil {
 		sctx.Runtime.State.SetPermissionMode(string(mode))
 		sctx.Runtime.State.SetSessionYolo(mode == agent.PermissionFull)
+	}
+	if raw == "plan" {
+		sctx.UI.App.PrintSystem("Permission mode set to ask; entered Plan execution phase")
+		return true
 	}
 	sctx.UI.App.PrintSystem(fmt.Sprintf("Permission mode set to %s", mode))
 	return true

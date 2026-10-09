@@ -50,9 +50,9 @@ var CommandRegistry = []CommandDef{
 	},
 	{
 		Name:        "mode",
-		Description: "Switch agent mode (general or code)",
+		Description: "Switch agent mode (general, code, or cyber)",
 		Category:    CatConfiguration,
-		ArgsHint:    "<general|code>",
+		ArgsHint:    "<general|code|cyber>",
 	},
 	{
 		Name:        "model",

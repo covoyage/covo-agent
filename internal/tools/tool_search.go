@@ -6,10 +6,36 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/covoyage/covo-agent/internal/toolset"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
-func buildToolSearchTool(getToolDefs func() []agentcore.ToolDefinition) *agentcore.Tool {
+func hideCyberOnlyTools(defs []agentcore.ToolDefinition, cyberMode bool) []agentcore.ToolDefinition {
+	if cyberMode {
+		return defs
+	}
+	out := make([]agentcore.ToolDefinition, 0, len(defs))
+	for _, td := range defs {
+		if toolset.CyberOnlyTools[td.Name] {
+			continue
+		}
+		out = append(out, td)
+	}
+	return out
+}
+
+type toolVisibilityFilter func(context.Context, string) bool
+
+func toolVisible(ctx context.Context, name string, filters []toolVisibilityFilter) bool {
+	for _, filter := range filters {
+		if filter != nil && !filter(ctx, name) {
+			return false
+		}
+	}
+	return true
+}
+
+func buildToolSearchTool(getToolDefs func() []agentcore.ToolDefinition, filters ...toolVisibilityFilter) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "tool_search",
 		Description: strings.Join([]string{
@@ -66,6 +92,12 @@ func buildToolSearchTool(getToolDefs func() []agentcore.ToolDefinition) *agentco
 			var matches []match
 			for _, td := range toolDefs {
 				name := td.Name
+				if name == "tool_search" || name == "tool_describe" || name == "tool_call" {
+					continue
+				}
+				if !toolVisible(ctx, name, filters) {
+					continue
+				}
 				desc := td.Description
 				lowerName := strings.ToLower(name)
 				lowerDesc := strings.ToLower(desc)
@@ -125,7 +157,7 @@ func buildToolSearchTool(getToolDefs func() []agentcore.ToolDefinition) *agentco
 	}
 }
 
-func buildToolDescribeTool(getToolDefs func() []agentcore.ToolDefinition) *agentcore.Tool {
+func buildToolDescribeTool(getToolDefs func() []agentcore.ToolDefinition, filters ...toolVisibilityFilter) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "tool_describe",
 		Description: strings.Join([]string{
@@ -156,6 +188,9 @@ func buildToolDescribeTool(getToolDefs func() []agentcore.ToolDefinition) *agent
 			toolDefs := getToolDefs()
 			for _, td := range toolDefs {
 				if td.Name == params.Name {
+					if !toolVisible(ctx, td.Name, filters) {
+						return nil, fmt.Errorf("tool '%s' is not available in this role", params.Name)
+					}
 					return map[string]any{
 						"name":        td.Name,
 						"description": td.Description,
@@ -169,7 +204,7 @@ func buildToolDescribeTool(getToolDefs func() []agentcore.ToolDefinition) *agent
 	}
 }
 
-func buildToolCallTool(agent *agentcore.Agent) *agentcore.Tool {
+func buildToolCallTool(agent *agentcore.Agent, filters ...toolVisibilityFilter) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "tool_call",
 		Description: strings.Join([]string{
@@ -189,7 +224,6 @@ func buildToolCallTool(agent *agentcore.Agent) *agentcore.Tool {
 					"description": "Arguments for the tool, matching its parameter schema.",
 				},
 			},
-			"required": []string{"name", "arguments"},
 		},
 		Func: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var params struct {
@@ -200,11 +234,26 @@ func buildToolCallTool(agent *agentcore.Agent) *agentcore.Tool {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
 			}
 			if strings.TrimSpace(params.Name) == "" {
-				return nil, fmt.Errorf("name is required")
+				return map[string]any{
+					"status": "invalid_request",
+					"error":  "tool name is required; call tool_search, then pass {name, arguments}",
+				}, nil
 			}
 
 			if params.Name == "tool_call" {
-				return nil, fmt.Errorf("tool_call cannot invoke itself")
+				return map[string]any{
+					"status": "invalid_request",
+					"error":  "tool_call cannot invoke itself; pass the discovered target tool name",
+				}, nil
+			}
+			if !toolVisible(ctx, params.Name, filters) {
+				return map[string]any{
+					"status": "unavailable",
+					"error":  fmt.Sprintf("tool '%s' is not available in this role", params.Name),
+				}, nil
+			}
+			if len(params.Arguments) == 0 || string(params.Arguments) == "null" {
+				params.Arguments = json.RawMessage(`{}`)
 			}
 			if _, ok := agent.GetTool(params.Name); !ok {
 				return nil, fmt.Errorf("tool '%s' not found in registry", params.Name)

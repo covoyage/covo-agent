@@ -74,11 +74,14 @@ func (s *dockerSandbox) runEphemeral(ctx context.Context, command string) (*Resu
 	execArgs := []string{
 		"run", "--rm",
 		"-w", s.workDir,
-		"--network", "none",
 		"--memory", "512m",
 		"--cpus", "1",
 		"--security-opt", "no-new-privileges",
 	}
+	if !s.cfg.Network {
+		execArgs = append(execArgs, "--network", "none")
+	}
+	execArgs = appendDockerMounts(execArgs, s.cfg.Mounts)
 
 	for k, v := range s.cfg.Env {
 		execArgs = append(execArgs, "-e", fmt.Sprintf("%s=%s", k, v))
@@ -132,11 +135,14 @@ func (s *dockerSandbox) ensureContainer(ctx context.Context) error {
 	createArgs := []string{
 		"create", "--name", s.containerName,
 		"-w", s.workDir,
-		"--network", "none",
 		"--memory", "512m",
 		"--cpus", "1",
 		"--security-opt", "no-new-privileges",
 	}
+	if !s.cfg.Network {
+		createArgs = append(createArgs, "--network", "none")
+	}
+	createArgs = appendDockerMounts(createArgs, s.cfg.Mounts)
 	for k, v := range s.cfg.Env {
 		createArgs = append(createArgs, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
@@ -148,6 +154,20 @@ func (s *dockerSandbox) ensureContainer(ctx context.Context) error {
 		return fmt.Errorf("docker create: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return exec.CommandContext(ctx, "docker", "start", s.containerName).Run()
+}
+
+func appendDockerMounts(args []string, mounts []Mount) []string {
+	for _, mount := range mounts {
+		if strings.TrimSpace(mount.Source) == "" || strings.TrimSpace(mount.Target) == "" {
+			continue
+		}
+		spec := mount.Source + ":" + mount.Target
+		if mount.ReadOnly {
+			spec += ":ro"
+		}
+		args = append(args, "--volume", spec)
+	}
+	return args
 }
 
 func (s *dockerSandbox) runDocker(ctx context.Context, execArgs []string) (*Result, error) {
@@ -179,16 +199,10 @@ func (s *dockerSandbox) runDocker(ctx context.Context, execArgs []string) (*Resu
 	}, nil
 }
 
-// Close stops (hibernates) a persistent container without removing it, so
-// the next sandbox created with the same PersistentID can resume it via
-// `docker start` instead of recreating it from scratch. Ephemeral
-// (non-persistent) sandboxes have nothing to clean up here -- each
-// `docker run --rm` container already removes itself on exit.
+// Close leaves persistent containers running because multiple agents may share
+// one engagement environment. Explicit teardown uses RemovePersistentDockerSandbox.
 func (s *dockerSandbox) Close() error {
-	if s.containerName == "" || !s.ensured {
-		return nil
-	}
-	return exec.Command("docker", "stop", s.containerName).Run()
+	return nil
 }
 
 // RemovePersistentDockerSandbox permanently deletes the named container
@@ -204,4 +218,3 @@ func RemovePersistentDockerSandbox(persistentID string) error {
 	}
 	return nil
 }
-

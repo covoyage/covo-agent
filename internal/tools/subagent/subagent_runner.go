@@ -69,6 +69,7 @@ type ctxKeySubagentGoal struct{}
 type ctxKeyProviderOverride struct{}
 type ctxKeyModelOverride struct{}
 type ctxKeyIsolation struct{}
+type ctxKeySubagentRole struct{}
 type ctxSubagentCredentialPool struct{}
 type ctxKeyParentMessages struct{}
 
@@ -202,6 +203,17 @@ func SubagentIsolationFromContext(ctx context.Context) string {
 	return s
 }
 
+// WithSubagentRole records the spawn role (recon, verifier, leaf, ...).
+func WithSubagentRole(ctx context.Context, role string) context.Context {
+	return context.WithValue(ctx, ctxKeySubagentRole{}, role)
+}
+
+// SubagentRoleFromContext retrieves the spawn role, if set.
+func SubagentRoleFromContext(ctx context.Context) string {
+	s, _ := ctx.Value(ctxKeySubagentRole{}).(string)
+	return s
+}
+
 // CredentialPool is the minimal interface for credential failover.
 type CredentialPool interface {
 	Next() (string, error)
@@ -251,6 +263,25 @@ func ParentMessageTurnsFromContext(ctx context.Context) int {
 // the spawn runner can register the TUI transcript view under the SAME id
 // the chat-side tool block can reference.
 type ctxKeySubagentViewRef struct{}
+
+type ctxKeyIntakeScope struct{}
+
+type IntakeScope struct {
+	Endpoint   string
+	ExchangeID string
+}
+
+func WithIntakeScope(ctx context.Context, scope IntakeScope) context.Context {
+	return context.WithValue(ctx, ctxKeyIntakeScope{}, scope)
+}
+
+func IntakeScopeFromContext(ctx context.Context) (IntakeScope, bool) {
+	if ctx == nil {
+		return IntakeScope{}, false
+	}
+	scope, ok := ctx.Value(ctxKeyIntakeScope{}).(IntakeScope)
+	return scope, ok
+}
 
 // WithSubagentViewRef attaches the sub-agent registry id to the context.
 func WithSubagentViewRef(ctx context.Context, id string) context.Context {
@@ -519,6 +550,11 @@ func (sr *SubagentRunner) Run(ctx context.Context, spawn SpawnRunner, task strin
 	var subID string
 	if sr.registry != nil {
 		ctx, subID = sr.registry.StartWithCancel(ctx, opts.Goal, opts.Depth)
+		if SubagentViewRefFromContext(ctx) == "" {
+			ctx = WithSubagentViewRef(ctx, subID)
+		}
+		role := SubagentRoleFromContext(ctx)
+		observeAgent(AgentObservation{ID: subID, Role: role, Task: opts.Goal, Skills: RoleSkillNamesForTask(role, opts.Goal), Status: "running"})
 
 		// Store subagent run in context for send_input message delivery
 		if run, ok := sr.registry.Get(subID); ok && run.inputChan != nil {
@@ -528,6 +564,12 @@ func (sr *SubagentRunner) Run(ctx context.Context, spawn SpawnRunner, task strin
 	defer func() {
 		if sr.registry != nil && subID != "" {
 			sr.registry.Complete(subID, err != nil)
+			status, errText := "completed", ""
+			if err != nil {
+				status, errText = "failed", err.Error()
+			}
+			role := SubagentRoleFromContext(ctx)
+			observeAgent(AgentObservation{ID: subID, Role: role, Task: opts.Goal, Skills: RoleSkillNamesForTask(role, opts.Goal), Status: status, Error: errText})
 		}
 	}()
 

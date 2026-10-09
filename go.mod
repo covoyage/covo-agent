@@ -59,3 +59,5 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
+
+replace github.com/covoyage/covonaut => /Users/ning/projects/go/covonaut

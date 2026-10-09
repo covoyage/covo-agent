@@ -213,6 +213,20 @@ func TestValidateOptions_PermissionSmart(t *testing.T) {
 	}
 }
 
+func TestValidateOptions_InvalidMode(t *testing.T) {
+	opts := &Options{Prompt: "hello", Mode: "pentest"}
+	if err := ValidateOptions(opts); err == nil {
+		t.Fatal("expected invalid mode error")
+	}
+}
+
+func TestValidateOptions_CyberMode(t *testing.T) {
+	opts := &Options{Prompt: "hello", Mode: "cyber"}
+	if err := ValidateOptions(opts); err != nil {
+		t.Fatalf("cyber should be valid: %v", err)
+	}
+}
+
 func TestValidateOptions_AddDirMissing(t *testing.T) {
 	opts := &Options{Prompt: "hello", AddDir: []string{t.TempDir() + "/missing-extra-root"}}
 	if err := ValidateOptions(opts); err == nil {

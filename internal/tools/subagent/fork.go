@@ -88,6 +88,11 @@ func BuildSessionsForkTool(runner SpawnRunner, registry *SubagentRegistry, guard
 					"items":       map[string]any{"type": "string"},
 					"description": "Toolset names for forked agent.",
 				},
+				"role": map[string]any{
+					"type":        "string",
+					"description": "Optional spawn role: leaf, orchestrator, explorer, coder, reviewer, devops, architect, recon, verifier.",
+					"enum":        []string{"leaf", "orchestrator", "explorer", "coder", "reviewer", "devops", "architect", "recon", "verifier"},
+				},
 			},
 			"required": []string{"task", "history"},
 		},
@@ -97,6 +102,7 @@ func BuildSessionsForkTool(runner SpawnRunner, registry *SubagentRegistry, guard
 				History  string   `json:"history"`
 				Depth    int      `json:"depth"`
 				Toolsets []string `json:"toolsets"`
+				Role     string   `json:"role"`
 			}
 			json.Unmarshal(args, &params)
 
@@ -105,19 +111,30 @@ func BuildSessionsForkTool(runner SpawnRunner, registry *SubagentRegistry, guard
 			}
 			defer guard.Release()
 
+			task := params.Task
+			toolsets := params.Toolsets
+			ctx, task, toolsets = ApplySpawnRole(ctx, task, params.Role, toolsets)
+
 			// Prepend history context to the task
 			fullTask := fmt.Sprintf("%s\n\n<inherited_conversation>\n%s\n</inherited_conversation>",
-				params.Task, params.History)
+				task, params.History)
 
-			subID := registry.Start(params.Task, params.Depth+1)
+			var subID string
+			if registry != nil {
+				subID = registry.Start(params.Task, params.Depth+1)
+			}
 
-			output, err := runner(ctx, fullTask, params.Toolsets, 0)
+			output, err := runner(ctx, fullTask, toolsets, 0)
 			if err != nil {
-				registry.Complete(subID, true)
+				if registry != nil && subID != "" {
+					registry.Complete(subID, true)
+				}
 				return nil, fmt.Errorf("fork failed: %w", err)
 			}
 
-			registry.Complete(subID, false)
+			if registry != nil && subID != "" {
+				registry.Complete(subID, false)
+			}
 			return map[string]any{
 				"forked": true,
 				"depth":  params.Depth + 1,

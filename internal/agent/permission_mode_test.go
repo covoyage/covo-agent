@@ -15,6 +15,14 @@ func TestNormalizePermissionModeInteractive(t *testing.T) {
 	if err != nil || got != PermissionAuto {
 		t.Fatalf("smart: %q %v", got, err)
 	}
+	got, err = NormalizePermissionMode("yolo", true)
+	if err != nil || got != PermissionFull {
+		t.Fatalf("yolo: %q %v", got, err)
+	}
+	got, err = NormalizePermissionMode("plan", true)
+	if err != nil || got != PermissionAsk {
+		t.Fatalf("plan: %q %v", got, err)
+	}
 	if _, err := NormalizePermissionMode("nope", true); err == nil {
 		t.Fatal("expected error")
 	}

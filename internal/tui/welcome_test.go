@@ -27,11 +27,35 @@ func TestBuildWelcomeMessageContainsSessionData(t *testing.T) {
 	}
 }
 
+func TestBuildWelcomeMessageCyber(t *testing.T) {
+	message := BuildWelcomeMessage(WelcomeInfo{
+		Provider:   "openai",
+		Model:      "gpt-test",
+		Mode:       "cyber",
+		WorkingDir: "/workspace",
+		ToolCount:  8,
+		SkillCount: 1,
+	})
+	if !strings.Contains(message, "cyber") {
+		t.Errorf("cyber welcome missing mode %q", message)
+	}
+
+	empty := BuildWelcomeMessage(WelcomeInfo{Mode: "cyber"})
+	if !strings.Contains(empty, "/mode") {
+		t.Fatal("cyber welcome shortcuts should include /mode")
+	}
+}
+
 func TestSessionCardLinesHaveStableWidth(t *testing.T) {
-	lines := sessionCardLines(WelcomeInfo{Provider: "p", Model: "m", Mode: "code", WorkingDir: "/tmp"})
-	for index, line := range lines {
-		if got := core.VisibleWidth(line); got != 74 {
-			t.Errorf("line %d width = %d, want 74: %q", index, got, line)
+	for _, info := range []WelcomeInfo{
+		{Provider: "p", Model: "m", Mode: "code", WorkingDir: "/tmp"},
+		{Provider: "p", Model: "m", Mode: "cyber", WorkingDir: "/tmp"},
+	} {
+		lines := sessionCardLines(info)
+		for index, line := range lines {
+			if got := core.VisibleWidth(line); got != 74 {
+				t.Errorf("mode=%s line %d width = %d, want 74: %q", info.Mode, index, got, line)
+			}
 		}
 	}
 }

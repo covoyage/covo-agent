@@ -26,6 +26,7 @@ func runCronPrompt(ctx context.Context, job *tools.CronJob) (string, error) {
 		return "", fmt.Errorf("load config: %w", err)
 	}
 	cli.RegisterCustomProviders(cfg)
+	shared.RegisterCustomModes(cfg)
 	homeDir, err := cli.EnsureHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("home dir: %w", err)
@@ -38,9 +39,9 @@ func runCronPrompt(ctx context.Context, job *tools.CronJob) (string, error) {
 	}
 	modeStr := cli.ResolveMode(cfg)
 
-	mode := agent.ModeGeneral
-	if m, ok := agent.ParseMode(modeStr); ok {
-		mode = m
+	mode, err := agent.RequireMode(modeStr)
+	if err != nil {
+		return "", err
 	}
 
 	llm, err := cli.BuildProvider(providerStr)
@@ -87,6 +88,7 @@ func runCronPrompt(ctx context.Context, job *tools.CronJob) (string, error) {
 		SkillConfigSet:           skillCfgSet,
 		ToolNameFilter:           toolNameFilter,
 		AppendSystemPrompt:       appendSystemPrompt,
+		LeanTools:                shared.LeanToolsEnabledFor(cfg, string(mode)),
 	})
 	if err != nil {
 		return "", fmt.Errorf("create agent: %w", err)

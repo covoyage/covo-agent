@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/covoyage/covonaut/tui/theme"
+
+	"github.com/covoyage/covo-agent/internal/agent"
 )
 
 // ---------------------------------------------------------------------------
@@ -422,6 +424,22 @@ func TestDefaultModalShortcuts(t *testing.T) {
 }
 
 // --- Settings Modal Filter Mode ---
+
+func TestSettingsModeOptionsIncludeCustom(t *testing.T) {
+	t.Cleanup(agent.ClearCustomModes)
+	agent.ClearCustomModes()
+	agent.RegisterCustomMode(&agent.CustomModeDefinition{Name: "reviewer", Description: "PR reviewer"})
+	found := false
+	for _, opt := range settingsModeOptions() {
+		if opt.Value == "reviewer" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("settings mode options missing custom reviewer")
+	}
+}
 
 func TestSettingsModalFilterMode(t *testing.T) {
 	entries := BuildDefaultSettingsEntries()

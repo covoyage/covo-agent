@@ -76,6 +76,9 @@ func ApplyConcurrencyDeclarations(agent *agentcore.Agent) {
 	}
 	for _, name := range agent.ToolNames() {
 		safe, declared := toolConcurrencyDeclarations[name]
+		if c, ok := LookupContract(name); ok && c.ConcurrentSafe {
+			safe, declared = true, true
+		}
 		if !declared {
 			continue
 		}

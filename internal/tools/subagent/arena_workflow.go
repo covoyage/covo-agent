@@ -126,6 +126,11 @@ func BuildWorkflowTool(runner SpawnRunner, registry *SubagentRegistry) *agentcor
 								"type":        "string",
 								"description": "Task description. Use {{label}} to reference prior output.",
 							},
+							"role": map[string]any{
+								"type":        "string",
+								"description": "Optional spawn role: leaf, orchestrator, explorer, coder, reviewer, devops, architect, recon, verifier.",
+								"enum":        []string{"leaf", "orchestrator", "explorer", "coder", "reviewer", "devops", "architect", "recon", "verifier"},
+							},
 						},
 						"required": []string{"label", "task"},
 					},
@@ -139,6 +144,7 @@ func BuildWorkflowTool(runner SpawnRunner, registry *SubagentRegistry) *agentcor
 					Label    string   `json:"label"`
 					Toolsets []string `json:"toolsets"`
 					Task     string   `json:"task"`
+					Role     string   `json:"role"`
 				} `json:"phases"`
 			}
 			json.Unmarshal(args, &params)
@@ -174,7 +180,8 @@ func BuildWorkflowTool(runner SpawnRunner, registry *SubagentRegistry) *agentcor
 					Status: "running",
 				}
 
-				output, err := runner(ctx, task, phase.Toolsets, 0)
+				phaseCtx, task, toolsets := ApplySpawnRole(ctx, task, phase.Role, phase.Toolsets)
+				output, err := runner(phaseCtx, task, toolsets, 0)
 				if err != nil {
 					result.Status = "failed"
 					result.Error = err.Error()

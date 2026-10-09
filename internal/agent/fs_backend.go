@@ -54,6 +54,11 @@ func (s *swappableFS) Stat(p string) (os.FileInfo, error) { return s.cur().Stat(
 func (s *swappableFS) WriteFile(p string, c []byte) error        { return s.cur().WriteFile(p, c) }
 func (s *swappableFS) MkdirAll(p string, perm os.FileMode) error { return s.cur().MkdirAll(p, perm) }
 
+func (s *swappableFS) Access(p string) error {
+	_, err := s.cur().Stat(p)
+	return err
+}
+
 // acpFileBackend routes text reads/writes through the ACP client (editor),
 // falling back to the local filesystem for stat/mkdir and on error (e.g. binary
 // files the editor cannot return as text).

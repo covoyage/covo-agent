@@ -8,6 +8,7 @@ import (
 )
 
 func TestAgentFactoryPreservesBaseAndAppliesRequest(t *testing.T) {
+	t.Setenv("COVO_TOOLS_LEAN", "")
 	state := NewRuntimeState()
 	state.SetActiveProfile("coding")
 	base := agent.CovoAgentConfig{
@@ -37,6 +38,9 @@ func TestAgentFactoryPreservesBaseAndAppliesRequest(t *testing.T) {
 	if config.Mode != agent.ModeCode || config.ProviderName != "new-provider" || config.Model != "new-model" {
 		t.Fatalf("dynamic fields were not applied: %+v", config)
 	}
+	if !config.LeanTools {
+		t.Fatal("switching to code should enable lean tools")
+	}
 	if config.ModelContextLength != 128000 {
 		t.Fatalf("ModelContextLength = %d, want 128000", config.ModelContextLength)
 	}
@@ -48,6 +52,16 @@ func TestAgentFactoryPreservesBaseAndAppliesRequest(t *testing.T) {
 	}
 	if len(config.SkillURLs) != 1 || config.SkillURLs[0] != base.SkillURLs[0] {
 		t.Fatalf("SkillURLs = %v", config.SkillURLs)
+	}
+
+	plain := NewAgentFactory(agent.CovoAgentConfig{WorkingDir: "/workspace"}, nil)
+	general := plain.Config(AgentRequest{Mode: agent.ModeGeneral})
+	if general.LeanTools {
+		t.Fatal("switching back to general should not keep lean on")
+	}
+	cyber := plain.Config(AgentRequest{Mode: agent.ModeCyber})
+	if !cyber.LeanTools {
+		t.Fatal("switching to cyber should enable lean tools")
 	}
 }
 

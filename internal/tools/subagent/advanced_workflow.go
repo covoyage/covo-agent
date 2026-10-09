@@ -54,6 +54,16 @@ func BuildAdvancedWorkflowTool(runner SpawnRunner, registry *SubagentRegistry, h
 								"type":        "string",
 								"description": "Task prompt for this phase.",
 							},
+							"role": map[string]any{
+								"type":        "string",
+								"description": "Optional spawn role: leaf, orchestrator, explorer, coder, reviewer, devops, architect, recon, verifier.",
+								"enum":        []string{"leaf", "orchestrator", "explorer", "coder", "reviewer", "devops", "architect", "recon", "verifier"},
+							},
+							"toolsets": map[string]any{
+								"type":        "array",
+								"items":       map[string]any{"type": "string"},
+								"description": "Optional toolset names for this phase.",
+							},
 							"condition": map[string]any{
 								"type":        "string",
 								"description": "Optional condition expression (e.g. 'phase_id.status == completed').",
@@ -79,14 +89,16 @@ func BuildAdvancedWorkflowTool(runner SpawnRunner, registry *SubagentRegistry, h
 		},
 		Func: func(ctx context.Context, args json.RawMessage) (any, error) {
 			var params struct {
-				Name          string `json:"name"`
-				Phases        []struct {
-					ID          string `json:"id"`
-					Name        string `json:"name"`
-					Prompt      string `json:"prompt"`
-					Condition   string `json:"condition"`
-					MaxTurns    int    `json:"max_turns"`
-					PauseAfter  bool   `json:"pause_after"`
+				Name   string `json:"name"`
+				Phases []struct {
+					ID         string   `json:"id"`
+					Name       string   `json:"name"`
+					Prompt     string   `json:"prompt"`
+					Role       string   `json:"role"`
+					Toolsets   []string `json:"toolsets"`
+					Condition  string   `json:"condition"`
+					MaxTurns   int      `json:"max_turns"`
+					PauseAfter bool     `json:"pause_after"`
 				} `json:"phases"`
 				MaxTotalTurns int `json:"max_total_turns"`
 			}
@@ -99,9 +111,9 @@ func BuildAdvancedWorkflowTool(runner SpawnRunner, registry *SubagentRegistry, h
 
 			// Build workflow
 			wf := &workflow.Workflow{
-				ID:          fmt.Sprintf("wf-%d", time.Now().UnixMilli()),
-				Name:        params.Name,
-				Phases:      make([]workflow.Phase, len(params.Phases)),
+				ID:            fmt.Sprintf("wf-%d", time.Now().UnixMilli()),
+				Name:          params.Name,
+				Phases:        make([]workflow.Phase, len(params.Phases)),
 				MaxTotalTurns: params.MaxTotalTurns,
 			}
 			for i, p := range params.Phases {
@@ -109,6 +121,8 @@ func BuildAdvancedWorkflowTool(runner SpawnRunner, registry *SubagentRegistry, h
 					ID:         p.ID,
 					Name:       p.Name,
 					Prompt:     p.Prompt,
+					Role:       p.Role,
+					Toolsets:   p.Toolsets,
 					Condition:  p.Condition,
 					MaxTurns:   p.MaxTurns,
 					PauseAfter: p.PauseAfter,
@@ -132,7 +146,8 @@ func BuildAdvancedWorkflowTool(runner SpawnRunner, registry *SubagentRegistry, h
 					subID = registry.Start(phase.Prompt, 1)
 				}
 
-				output, err := runner(ctx, phase.Prompt, nil, phase.MaxTurns)
+				phaseCtx, prompt, toolsets := ApplySpawnRole(ctx, phase.Prompt, phase.Role, phase.Toolsets)
+				output, err := runner(phaseCtx, prompt, toolsets, phase.MaxTurns)
 				if err != nil {
 					if registry != nil && subID != "" {
 						registry.Complete(subID, true)

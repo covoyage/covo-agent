@@ -57,6 +57,7 @@ func BuildSessionsSpawnBatchTool(runner SpawnRunner, subagentRunner *SubagentRun
 			"Each task supports an optional 'role' field:",
 			"  - 'leaf' (default): Cannot delegate further.",
 			"  - 'orchestrator': Can spawn grandchildren (subject to max_spawn_depth).",
+			"  - 'recon' / 'verifier': in-scope cyber mapping and evidence checks.",
 			"",
 			"Each task supports an optional 'context_mode' field:",
 			"  - 'isolated' (default): No parent context — clean slate.",
@@ -97,8 +98,8 @@ func BuildSessionsSpawnBatchTool(runner SpawnRunner, subagentRunner *SubagentRun
 							},
 							"role": map[string]any{
 								"type":        "string",
-								"description": "'leaf' (default) or 'orchestrator' (can spawn grandchildren). Subject to max_spawn_depth.",
-								"enum":        []string{"leaf", "orchestrator"},
+								"description": "'leaf' (default), 'orchestrator' (can spawn grandchildren), or agent roles: explorer, coder, reviewer, devops, architect, recon, verifier.",
+								"enum":        []string{"leaf", "orchestrator", "explorer", "coder", "reviewer", "devops", "architect", "recon", "verifier"},
 							},
 							"provider": map[string]any{
 								"type":        "string",
@@ -184,6 +185,11 @@ func BuildSessionsSpawnBatchTool(runner SpawnRunner, subagentRunner *SubagentRun
 					defer func() { <-sem }()
 
 					childToolsets := ResolveCapabilityMode(t.CapabilityMode, t.Toolsets)
+					if childToolsets == nil {
+						if role, ok := GetRole(t.Role); ok && len(role.Toolsets) > 0 {
+							childToolsets = role.Toolsets
+						}
+					}
 					if childToolsets == nil && parentToolsets != nil {
 						childToolsets = parentToolsets()
 					}
@@ -221,6 +227,12 @@ func BuildSessionsSpawnBatchTool(runner SpawnRunner, subagentRunner *SubagentRun
 					// 'turns:N': child inherits only the most recent N parent messages.
 					taskText := t.Task
 					childCtx := ctx
+					if t.Role != "" {
+						childCtx = WithSubagentRole(childCtx, t.Role)
+					}
+					if role, ok := GetRole(t.Role); ok && strings.TrimSpace(role.SystemPrompt) != "" {
+						taskText = role.SystemPrompt + "\n\n---\n## Your Task\n" + t.Task
+					}
 					// Pre-validated in the argument check above.
 					mode, turnsN, _ := normalizeContextMode(t.ContextMode)
 					switch mode {

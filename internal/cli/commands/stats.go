@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
 	"strings"
 
 	"github.com/covoyage/covonaut/agentcore"
@@ -11,6 +10,7 @@ import (
 	"github.com/covoyage/covonaut/tui/theme"
 
 	"github.com/covoyage/covo-agent/internal/agent"
+	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
 	"github.com/covoyage/covo-agent/internal/i18n"
 	"github.com/covoyage/covo-agent/internal/tui"
 )

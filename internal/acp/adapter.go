@@ -38,9 +38,12 @@ func (a *covoAgentInstance) Mode() string {
 }
 
 func (a *covoAgentInstance) Rebuild(mode, model string) error {
-	agentMode, ok := agent.ParseMode(mode)
-	if !ok {
-		agentMode = agent.ModeGeneral
+	if cfg, err := cli.LoadConfig(); err == nil {
+		shared.RegisterCustomModes(cfg)
+	}
+	agentMode, err := agent.RequireMode(mode)
+	if err != nil {
+		return err
 	}
 	cfg := a.agent.Config()
 	return a.agent.Rebuild(agentMode, cfg.Provider, a.agent.ProviderName(), model, a.agent.WorkDir(), a.agent.HomeDir())
@@ -79,6 +82,7 @@ func (f *covoAgentFactory) CreateAgent(ctx context.Context, sessionID, cwd, mode
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
+	shared.RegisterCustomModes(cfg)
 
 	providerType := cli.ResolveProvider(cfg)
 	if model == "" {
@@ -93,9 +97,9 @@ func (f *covoAgentFactory) CreateAgent(ctx context.Context, sessionID, cwd, mode
 		return nil, fmt.Errorf("create LLM provider: %w", err)
 	}
 
-	agentMode, ok := agent.ParseMode(mode)
-	if !ok {
-		agentMode = agent.ModeGeneral
+	agentMode, err := agent.RequireMode(mode)
+	if err != nil {
+		return nil, err
 	}
 
 	skillCfgGet, skillCfgSet := shared.SkillConfigFns(cfg)
@@ -111,6 +115,9 @@ func (f *covoAgentFactory) CreateAgent(ctx context.Context, sessionID, cwd, mode
 		AuxiliaryProviderBuilder: cli.ResolveAuxiliaryProviderBuilder(),
 		SkillConfigGet:           skillCfgGet,
 		SkillConfigSet:           skillCfgSet,
+		LeanTools:                shared.LeanToolsEnabledFor(cfg, string(agentMode)),
+		Surface:                  agent.SurfaceACP,
+		MCPServers:               shared.MCPAgentConfig(cfg),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)
@@ -136,10 +143,29 @@ func (f *covoAgentFactory) DefaultMode() string {
 }
 
 func (f *covoAgentFactory) AvailableModes() []acplib.SessionMode {
-	return []acplib.SessionMode{
+	if cfg, err := cli.LoadConfig(); err == nil {
+		shared.RegisterCustomModes(cfg)
+	}
+	modes := []acplib.SessionMode{
 		{ID: "general", Name: "General", Description: "General-purpose assistant"},
 		{ID: "code", Name: "Code", Description: "Coding-focused assistant"},
+		{ID: "cyber", Name: "Cyber", Description: "In-scope recon and verification"},
 	}
+	for _, def := range agent.ListCustomModes() {
+		if def == nil || def.Name == "" {
+			continue
+		}
+		desc := def.Description
+		if desc == "" {
+			desc = "Custom agent mode"
+		}
+		modes = append(modes, acplib.SessionMode{
+			ID:          def.Name,
+			Name:        def.Name,
+			Description: desc,
+		})
+	}
+	return modes
 }
 
 type covoAuthProvider struct{}

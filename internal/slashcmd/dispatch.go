@@ -12,6 +12,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/evolution"
 	"github.com/covoyage/covo-agent/internal/i18n"
+	"github.com/covoyage/covo-agent/internal/plugin"
 	"github.com/covoyage/covo-agent/internal/safego"
 	agentui "github.com/covoyage/covo-agent/internal/tui"
 )
@@ -143,9 +144,33 @@ func HandleSlashCommand(sctx *SlashContext) bool {
 
 	handler, ok := slashDispatch[cmd]
 	if !ok {
-		return false
+		return handlePluginCommand(sctx, cmd, parts)
 	}
 	return handler(sctx, parts)
+}
+
+func handlePluginCommand(sctx *SlashContext, cmd string, parts []string) bool {
+	if sctx.Services.HomeDir == "" {
+		return false
+	}
+	for _, c := range plugin.DiscoverHome(sctx.Services.HomeDir).Commands() {
+		if !strings.EqualFold(c.Name, cmd) {
+			continue
+		}
+		task := strings.TrimSpace(strings.Join(parts[1:], " "))
+		prompt := c.Prompt
+		if task != "" {
+			prompt = strings.TrimSpace(prompt + "\n\n" + task)
+		}
+		if sctx.UI.SubmitPrompt != nil {
+			sctx.UI.SubmitPrompt(prompt)
+		} else if ed := sctx.UI.App.Editor(); ed != nil {
+			ed.SetValue(prompt)
+		}
+		sctx.UI.App.PrintSystem(fmt.Sprintf("Plugin command /%s (%s)", c.Name, c.Plugin))
+		return true
+	}
+	return false
 }
 
 func handleSkillInvoke(sctx *SlashContext, parts []string) bool {

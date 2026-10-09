@@ -8,7 +8,51 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/covoyage/covo-agent/internal/cyber"
+	toolssubagent "github.com/covoyage/covo-agent/internal/tools/subagent"
 )
+
+func TestWebFetchEvidenceIsInstanceLocal(t *testing.T) {
+	first := cyber.NewCatalog(t.TempDir())
+	second := cyber.NewCatalog(t.TempDir())
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("raw evidence")), Request: req}, nil
+	})
+	firstTool := buildWebFetchTool(transport, newWebFetchCache(), catalogExchangeRecorder(first))
+	secondTool := buildWebFetchTool(transport, newWebFetchCache(), catalogExchangeRecorder(second))
+	args := map[string]any{"url": "https://example.test/same"}
+	callWebFetch(t, firstTool.Func, args)
+	result := callWebFetch(t, secondTool.Func, args)
+	if result["cached"] != false {
+		t.Fatal("second instance reused first instance evidence")
+	}
+	callWebFetch(t, firstTool.Func, map[string]any{"url": "https://example.test/private", "headers": map[string]string{"Authorization": "Bearer alice", "Cookie": "session=alice"}})
+	firstItems, err := first.ListExchanges()
+	if err != nil || len(firstItems) != 2 {
+		t.Fatalf("first evidence: %+v, %v", firstItems, err)
+	}
+	secondItems, err := second.ListExchanges()
+	if err != nil || len(secondItems) != 1 {
+		t.Fatalf("second evidence: %+v, %v", secondItems, err)
+	}
+	if !strings.Contains(firstItems[1].ReqHeaders, "Authorization: Bearer alice") || !strings.Contains(firstItems[1].ReqHeaders, "Cookie: session=alice") {
+		t.Fatalf("authentication headers were lost: %q", firstItems[1].ReqHeaders)
+	}
+	if _, err := first.SetAllowedHosts([]string{"example.test"}); err != nil {
+		t.Fatal(err)
+	}
+	replayTransport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Header.Get("Authorization") != "Bearer alice" || req.Header.Get("Cookie") != "session=alice" {
+			t.Fatalf("authenticated fetch replay became anonymous: %v", req.Header)
+		}
+		return transport.RoundTrip(req)
+	})
+	ctx := toolssubagent.WithSubagentRole(context.Background(), "verifier")
+	if _, err := BuildExchangeReplayTool(first, replayTransport).Func(ctx, json.RawMessage(`{"id":"`+firstItems[1].ID+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+}
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 

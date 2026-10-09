@@ -264,6 +264,11 @@ func cmdMCPServe() {
 
 	providerType := cli.ResolveProvider(cfg)
 	model := cli.ResolveModel(cfg)
+	shared.RegisterCustomModes(cfg)
+	mode, err := agent.RequireMode(cli.ResolveMode(cfg))
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
 
 	// Collect plugin lifecycle hooks
 	pluginSystem, err := plugin.NewSystem(context.Background(), plugin.SystemConfig{
@@ -280,13 +285,16 @@ func cmdMCPServe() {
 
 	pluginHooks := agent.ConvertPluginHooks(pluginSystem.LifecycleHooks())
 	skillCfgGet, skillCfgSet := shared.SkillConfigFns(cfg)
-
+	workingDir, wdErr := os.Getwd()
+	if wdErr != nil {
+		workingDir = homeDir
+	}
 	agentCfg := agent.CovoAgentConfig{
-		Mode:                     agent.ModeGeneral,
+		Mode:                     mode,
 		Provider:                 nil,
 		ProviderName:             providerType,
 		Model:                    model,
-		WorkingDir:               homeDir,
+		WorkingDir:               workingDir,
 		HomeDir:                  homeDir,
 		Logger:                   logger,
 		MCPServers:               shared.MCPAgentConfig(cfg),
@@ -295,6 +303,7 @@ func cmdMCPServe() {
 		AuxiliaryProviderBuilder: cli.ResolveAuxiliaryProviderBuilder(),
 		SkillConfigGet:           skillCfgGet,
 		SkillConfigSet:           skillCfgSet,
+		LeanTools:                shared.LeanToolsEnabledFor(cfg, string(mode)),
 	}
 
 	if cli.HasProviderConfigured() {

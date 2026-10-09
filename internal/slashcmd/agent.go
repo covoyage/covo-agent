@@ -17,9 +17,8 @@ func handleMode(sctx *SlashContext, parts []string) bool {
 		return true
 	}
 	if len(parts) < 2 {
-		// List all available modes
 		sctx.UI.App.PrintSystem(fmt.Sprintf("Current mode: %s", sctx.Runtime.ActiveMode()))
-		sctx.UI.App.PrintSystem("Available modes: general, code")
+		sctx.UI.App.PrintSystem("Available modes: " + strings.Join(agent.AllModeNames(), ", "))
 		for _, cm := range agent.ListCustomModes() {
 			desc := cm.Description
 			if desc == "" {
@@ -38,6 +37,7 @@ func handleMode(sctx *SlashContext, parts []string) bool {
 	}
 	sctx.Runtime.SwitchToMode(newMode)
 	sctx.UI.App.PrintSystem(i18n.T("system.switched_mode", "mode", string(newMode)))
+	requestRender(sctx)
 	return true
 }
 
@@ -191,4 +191,10 @@ func handleFooter(sctx *SlashContext, parts []string) bool {
 		sctx.UI.App.PrintSystem(i18n.T("system.footer_off"))
 	}
 	return true
+}
+
+func requestRender(sctx *SlashContext) {
+	if sctx != nil && sctx.UI.RequestRender != nil {
+		sctx.UI.RequestRender()
+	}
 }

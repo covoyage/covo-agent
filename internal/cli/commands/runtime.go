@@ -20,4 +20,7 @@ type RunOptions struct {
 	Continue           bool
 	ShowSessionPicker  bool
 	InitialPrompt      string
+	Surface            string
+	Remote             string
+	RemoteRuntime      bool
 }

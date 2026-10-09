@@ -245,3 +245,37 @@ func TestMarketplace_InstallRecordsProvenance(t *testing.T) {
 		t.Fatal("uninstall should drop the manifest record")
 	}
 }
+
+func TestMarketplace_InstallGenericLoadsBundle(t *testing.T) {
+	plugin := []byte(`{"name":"demo-bundle","skills":["skills"]}`)
+	entries := []PluginEntry{
+		{Name: "demo-bundle", Type: PluginTypeCommand, Version: "0.1.0"},
+	}
+	m := newTestMarketplaceWithPayload(t, entries, map[string][]byte{
+		"/plugins/demo-bundle.json": plugin,
+	})
+	path, err := m.Install("demo-bundle")
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("plugin.json missing: %v", err)
+	}
+}
+
+func TestMarketplace_InstallGenericRejectsInvalidBundle(t *testing.T) {
+	plugin := []byte(`{"name":`)
+	entries := []PluginEntry{
+		{Name: "bad-bundle", Type: PluginTypeCommand},
+	}
+	m := newTestMarketplaceWithPayload(t, entries, map[string][]byte{
+		"/plugins/bad-bundle.json": plugin,
+	})
+	if _, err := m.Install("bad-bundle"); err == nil {
+		t.Fatal("expected invalid bundle to fail")
+	}
+	pluginDir := filepath.Join(m.homeDir, "plugins", "bad-bundle")
+	if _, err := os.Stat(pluginDir); !os.IsNotExist(err) {
+		t.Fatal("invalid install must not leave a plugin directory")
+	}
+}

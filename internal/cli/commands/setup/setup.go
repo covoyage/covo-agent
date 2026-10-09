@@ -3,6 +3,7 @@ package setup
 import (
 	"bufio"
 	"fmt"
+	"github.com/covoyage/covo-agent/internal/agent"
 	"github.com/covoyage/covo-agent/internal/cli"
 	"github.com/covoyage/covo-agent/internal/cli/commands/model"
 	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
@@ -128,7 +129,7 @@ func RunFirstTimeSetup(cfg *cli.Config, homeDir string) {
 	}
 
 	// ── Mode ──────────────────────────────────────────────────
-	modeChoice := shared.SelectOne("Default mode", []string{"general", "code"}, "general")
+	modeChoice := shared.SelectOne("Default mode", agent.AllModeNames(), "general")
 	cfg.Mode = modeChoice
 
 	// ── Advanced options ──────────────────────────────────────

@@ -52,8 +52,11 @@ func (s *interactiveSession) openSettings() {
 		}
 	}
 	modeIdx := 0
-	if s.mode == agent.ModeGeneral {
+	switch s.mode {
+	case agent.ModeGeneral:
 		modeIdx = 1
+	case agent.ModeCyber:
+		modeIdx = 2
 	}
 	yoloIdx := 0
 	if shared.RuntimeState.SessionYolo() {
@@ -61,9 +64,13 @@ func (s *interactiveSession) openSettings() {
 	}
 	entries := []component.SettingEntry{
 		{
-			Key:         "mode",
-			Label:       i18n.T("settings.label_mode"),
-			Options:     []component.SettingOption{{Value: "code", Label: i18n.T("settings.opt_code")}, {Value: "general", Label: i18n.T("settings.opt_general")}},
+			Key:   "mode",
+			Label: i18n.T("settings.label_mode"),
+			Options: []component.SettingOption{
+				{Value: "code", Label: i18n.T("settings.opt_code")},
+				{Value: "general", Label: i18n.T("settings.opt_general")},
+				{Value: "cyber", Label: i18n.T("settings.opt_cyber")},
+			},
 			Current:     int64(modeIdx),
 			Description: i18n.T("settings.desc_mode"),
 		},
@@ -363,6 +370,10 @@ func (s *interactiveSession) wireFooter() {
 			modeIcon = "⚙"
 			modeStyle = pal.Accent
 			md = i18n.T("statusline.mode_code")
+		case "cyber":
+			modeIcon = "🛡"
+			modeStyle = pal.Accent
+			md = i18n.T("statusline.mode_cyber")
 		case "general":
 			modeIcon = "◆"
 			modeStyle = pal.Success
@@ -646,7 +657,8 @@ func (s *interactiveSession) buildCronScheduler() *tools.CronScheduler {
 		}
 		runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
-		req := s.requestFor(s.mode, s.llm, s.providerType, s.model)
+		jobMode := s.mode
+		req := s.requestFor(jobMode, s.llm, s.providerType, s.model)
 		if job.Model != "" {
 			req.Model = job.Model
 		}

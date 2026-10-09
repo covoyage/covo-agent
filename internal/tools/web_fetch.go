@@ -88,7 +88,11 @@ func BuildWebFetchTool(transport http.RoundTripper) *agentcore.Tool {
 	return buildWebFetchTool(transport, defaultWebFetchCache)
 }
 
-func buildWebFetchTool(transport http.RoundTripper, cache *webFetchCache) *agentcore.Tool {
+func buildWebFetchTool(transport http.RoundTripper, cache *webFetchCache, recorders ...ExchangeRecorder) *agentcore.Tool {
+	var recorder ExchangeRecorder
+	if len(recorders) > 0 {
+		recorder = recorders[0]
+	}
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -257,6 +261,15 @@ func buildWebFetchTool(transport http.RoundTripper, cache *webFetchCache) *agent
 				"truncated":    truncated,
 				"cached":       false,
 				"blocked":      blocked,
+			}
+			if recorder != nil {
+				requestHeaders := req.Header
+				if resp.Request != nil {
+					requestHeaders = resp.Request.Header
+				}
+				if id := recorder(http.MethodGet, finalURL, resp.StatusCode, formatHeaders(requestHeaders), "", rawText); id != "" {
+					out["exchange_id"] = id
+				}
 			}
 			if blocked {
 				snippet, _ := truncateRunesTo(strings.TrimSpace(text), 400)

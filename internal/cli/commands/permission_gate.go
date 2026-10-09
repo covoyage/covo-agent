@@ -2,9 +2,11 @@ package commands
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -33,18 +35,26 @@ type ApprovalRequest struct {
 }
 
 var dangerousTools = map[string]bool{
-	"bash":           true,
-	"process":        true,
-	"write_file":     true,
-	"edit_block":     true,
-	"write":          true,
-	"edit":           true,
-	"git_commit":     true,
-	"git_push":       true,
-	"delete_file":    true,
-	"execute_code":   true,
-	"computer_use":   true,
-	"exit_plan_mode": true, // requires user approval before transitioning Plan → Act
+	"bash":             true,
+	"process":          true,
+	"write_file":       true,
+	"edit_block":       true,
+	"write":            true,
+	"edit":             true,
+	"git_commit":       true,
+	"git_push":         true,
+	"delete_file":      true,
+	"execute_code":     true,
+	"computer_use":     true,
+	"exit_plan_mode":   true, // requires user approval before transitioning Plan → Act
+	"scan":             true, // in-scope recon recipes still require approval
+	"scan_profile":     true,
+	"request_intake":   true,
+	"web_param_probe":  true,
+	"remote_node_exec": true,
+	"exchange_replay":  true,
+	"exchange_compare": true,
+	"csrf_retest":      true,
 }
 
 // ApprovalCategory groups tools into categories for per-category auto-approval.
@@ -102,6 +112,56 @@ func toolCategory(toolName string) ApprovalCategory {
 	return ""
 }
 
+// scanRecipeName returns the recipe a scan call asks for, or "" if absent.
+func scanRecipeName(argsJSON []byte) string {
+	var args struct {
+		Recipe string `json:"recipe"`
+	}
+	json.Unmarshal(argsJSON, &args)
+	return strings.ToLower(strings.TrimSpace(args.Recipe))
+}
+
+// approvalPatternKey binds active network approvals to the exact call arguments.
+func approvalPatternKey(toolName string, argsJSON []byte) string {
+	switch toolName {
+	case "scan", "scan_profile", "request_intake", "web_param_probe", "exchange_replay", "exchange_compare", "csrf_retest", "remote_node_exec":
+		sum := sha256.Sum256(argsJSON)
+		return fmt.Sprintf("tool:%s:%x", toolName, sum[:12])
+	}
+	return "tool:" + toolName
+}
+
+func readOnlyCyberToolCall(name string, args []byte) bool {
+	switch name {
+	case "scan":
+		return scanRecipeName(args) == "list"
+	case "scan_profile":
+		trimmed := strings.TrimSpace(string(args))
+		return trimmed == "" || trimmed == "{}"
+	case "request_intake":
+		var params struct {
+			Action string `json:"action"`
+		}
+		return json.Unmarshal(args, &params) == nil && (params.Action == "" || params.Action == "status")
+	}
+	return false
+}
+
+// safePatternToken keeps only characters a recipe name can legitimately
+// contain, so model-supplied text cannot reshape the allowlist key.
+func safePatternToken(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() > 32 {
+		return b.String()[:32]
+	}
+	return b.String()
+}
+
 type PermissionGate struct {
 	app         *chat.ChatApp
 	mu          sync.Mutex
@@ -149,7 +209,7 @@ func NewPermissionGate(app *chat.ChatApp) *PermissionGate {
 
 func (pg *PermissionGate) Checker() func(ctx context.Context, toolName string, args []byte) bool {
 	return func(ctx context.Context, toolName string, args []byte) bool {
-		if !dangerousTools[toolName] {
+		if !dangerousTools[toolName] || readOnlyCyberToolCall(toolName, args) {
 			return true
 		}
 
@@ -170,14 +230,14 @@ func (pg *PermissionGate) Checker() func(ctx context.Context, toolName string, a
 		}
 
 		// Allowlist check for non-bash tools (bash already checked by the approval pattern system)
-		if toolName != "bash" && toolName != "process" && pg.ApprovalSystem != nil {
-			patternKey := "tool:" + toolName
-			if pg.ApprovalSystem.IsApproved("", patternKey) {
+		if toolName != "bash" && toolName != "process" {
+			// recipe "list" only reads the catalog — no process is spawned.
+			if pg.ApprovalSystem != nil && pg.ApprovalSystem.IsApproved("", approvalPatternKey(toolName, args)) {
 				return true
 			}
 		}
 
-		summary := pg.buildSummary(toolName, args)
+		summary := buildSummary(toolName, args)
 
 		// Show pattern reason if available
 		if pg.PendingPatternProvider != nil {
@@ -265,7 +325,7 @@ func (pg *PermissionGate) HasPending() bool {
 	return pg.ch != nil
 }
 
-func (pg *PermissionGate) buildSummary(toolName string, argsJSON []byte) string {
+func buildSummary(toolName string, argsJSON []byte) string {
 	switch toolName {
 	case "bash", "process":
 		var args struct {
@@ -331,6 +391,65 @@ func (pg *PermissionGate) buildSummary(toolName string, argsJSON []byte) string 
 			c = c[:57] + "..."
 		}
 		return fmt.Sprintf("execute: %s", c)
+	case "scan":
+		var args struct {
+			Recipe  string            `json:"recipe"`
+			Target  string            `json:"target"`
+			Options map[string]string `json:"options"`
+		}
+		json.Unmarshal(argsJSON, &args)
+		target := strings.TrimSpace(args.Target)
+		if r := []rune(target); len(r) > 60 {
+			target = string(r[:57]) + "..."
+		}
+		if target == "" {
+			return fmt.Sprintf("scan recipe %s", args.Recipe)
+		}
+		for _, key := range []string{"RHOSTS", "RHOST", "dc", "domain", "url"} {
+			if host := strings.TrimSpace(args.Options[key]); host != "" {
+				if len(host) > 60 {
+					host = host[:60]
+				}
+				return fmt.Sprintf("scan %s: %s (%s=%s)", args.Recipe, target, key, strings.Join(strings.Fields(host), " "))
+			}
+		}
+		return fmt.Sprintf("scan %s: %s", args.Recipe, target)
+	case "csrf_retest":
+		var args struct {
+			PageID   string `json:"page_id"`
+			SubmitID string `json:"submit_id"`
+		}
+		json.Unmarshal(argsJSON, &args)
+		return fmt.Sprintf("csrf_retest GET %s → POST %s", safePatternToken(args.PageID), safePatternToken(args.SubmitID))
+	case "scan_profile", "request_intake":
+		var args struct {
+			Action       string   `json:"action"`
+			AllowedHosts []string `json:"allowed_hosts"`
+			Hosts        []string `json:"hosts"`
+		}
+		json.Unmarshal(argsJSON, &args)
+		hosts := args.AllowedHosts
+		if toolName == "request_intake" {
+			hosts = args.Hosts
+		}
+		return fmt.Sprintf("%s %.16s hosts=%.100s", toolName, args.Action, strings.Join(hosts, ","))
+	case "exchange_replay", "exchange_compare":
+		var args struct {
+			ID  string `json:"id"`
+			URL string `json:"url"`
+		}
+		json.Unmarshal(argsJSON, &args)
+		destination := ""
+		if parsed, err := url.Parse(args.URL); err == nil && parsed.Hostname() != "" {
+			destination = parsed.Hostname()
+		}
+		return fmt.Sprintf("%s exchange=%.32s host=%.80s", toolName, args.ID, destination)
+	case "remote_node_exec":
+		var args struct {
+			ID string `json:"id"`
+		}
+		json.Unmarshal(argsJSON, &args)
+		return fmt.Sprintf("remote_node_exec node=%.32s", args.ID)
 	case "exit_plan_mode":
 		var args struct {
 			Plan string `json:"plan"`
@@ -426,8 +545,8 @@ func (pg *PermissionGate) registerApproval(toolName, argsJSON, choice string) {
 		return
 	}
 
-	// Non-bash tools (Write, Edit, etc.): use tool name as approval key
-	patternKey := "tool:" + toolName
+	// Non-bash tools use the same key that the checker tests before execution.
+	patternKey := approvalPatternKey(toolName, []byte(argsJSON))
 	switch choice {
 	case "session":
 		pg.ApprovalSystem.ApproveSession("", patternKey)

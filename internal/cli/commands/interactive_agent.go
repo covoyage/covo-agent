@@ -81,8 +81,15 @@ func (s *interactiveSession) switchToMode(newMode agent.AgentMode) {
 		return
 	}
 	s.mode = newMode
+	s.cfg.Mode = string(newMode)
+	if err := cli.SaveConfig(s.cfg); err != nil {
+		log.Printf("save config: %v", err)
+	}
 	if s.stickyFooter != nil {
 		s.stickyFooter.SetMode(string(newMode))
+	}
+	if s.app != nil && s.app.Host() != nil {
+		s.app.Host().RequestRender()
 	}
 }
 

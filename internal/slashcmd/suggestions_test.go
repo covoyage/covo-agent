@@ -13,7 +13,7 @@ func TestBuildSlashSuggestions_HasAllCommands(t *testing.T) {
 		t.Fatalf("expected at least %d suggestions, got %d", expectedMin, len(cmds))
 	}
 
-	required := []string{"help", "clear", "mode general", "mode code",
+	required := []string{"help", "clear", "mode general", "mode code", "mode cyber",
 		"provider openai", "model", "memory agent", "memory user",
 		"skill", "session", "resume", "save",
 		"compact", "tools", "context", "curator",

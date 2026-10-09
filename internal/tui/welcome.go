@@ -48,7 +48,6 @@ func sessionCardLines(info WelcomeInfo) []string {
 		{"Workspace", info.WorkingDir},
 		{"Capabilities", fmt.Sprintf("%d tools · %d skills", info.ToolCount, info.SkillCount)},
 	}
-
 	const width = 74
 	lines := []string{
 		"+" + strings.Repeat("-", width-2) + "+",
@@ -59,9 +58,13 @@ func sessionCardLines(info WelcomeInfo) []string {
 		value := core.TruncateToWidth(row[1], int64(width-18), "…")
 		lines = append(lines, padBoxLine(fmt.Sprintf("%-12s %s", row[0]+":", value), width))
 	}
+	shortcuts := i18n.T("app.welcome_shortcuts")
+	if strings.EqualFold(info.Mode, "cyber") {
+		shortcuts = i18n.T("app.welcome_shortcuts_cyber")
+	}
 	return append(lines,
 		"+"+strings.Repeat("-", width-2)+"+",
-		padBoxLine(i18n.T("app.welcome_shortcuts"), width),
+		padBoxLine(shortcuts, width),
 		"+"+strings.Repeat("-", width-2)+"+",
 	)
 }

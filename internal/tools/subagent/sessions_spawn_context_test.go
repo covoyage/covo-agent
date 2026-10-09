@@ -20,6 +20,17 @@ func TestSummarizeParentState_Empty(t *testing.T) {
 	}
 }
 
+func TestSessionsSpawnRejectsReservedParentRole(t *testing.T) {
+	runner := func(context.Context, string, []string, int) (string, error) {
+		t.Fatal("reserved parent role reached runner")
+		return "", nil
+	}
+	tool := BuildSessionsSpawnTool(runner, nil, nil, nil, nil, nil)
+	if _, err := tool.Func(context.Background(), json.RawMessage(`{"task":"change scope","role":"parent","background":false}`)); err == nil {
+		t.Fatal("parent role was accepted by spawn tool")
+	}
+}
+
 func TestSummarizeParentState_IncludesUserMessages(t *testing.T) {
 	msgs := []agentcore.Message{
 		{Role: agentcore.RoleUser, Content: "Please fix the login bug"},
@@ -566,5 +577,47 @@ func TestSessionsSpawnBatch_DefaultContextMode_Isolated(t *testing.T) {
 	}
 	if msgs := ParentMessagesFromContext(capturedCtx); msgs != nil {
 		t.Errorf("expected no parent messages in default mode, got %v", msgs)
+	}
+}
+
+func TestSessionsSpawnBatch_ReconRoleForcesCyberContext(t *testing.T) {
+	var capturedTask string
+	var capturedCtx context.Context
+	var capturedToolsets []string
+	got := make(chan struct{}, 1)
+
+	runner := func(ctx context.Context, task string, toolsets []string, maxTurns int) (string, error) {
+		got <- struct{}{}
+		capturedTask = task
+		capturedCtx = ctx
+		capturedToolsets = append([]string(nil), toolsets...)
+		<-got
+		return "done", nil
+	}
+
+	tool := BuildSessionsSpawnBatchTool(runner, nil, nil, nil)
+	args, _ := json.Marshal(map[string]any{
+		"tasks": []map[string]any{
+			{"id": "r1", "task": "map example.com", "role": "recon"},
+		},
+	})
+	if _, err := tool.Func(context.Background(), args); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if SubagentRoleFromContext(capturedCtx) != "recon" {
+		t.Fatalf("role=%q", SubagentRoleFromContext(capturedCtx))
+	}
+	if !strings.Contains(capturedTask, "reconnaissance specialist") {
+		t.Fatalf("task missing recon prompt: %q", capturedTask)
+	}
+	foundCyber := false
+	for _, name := range capturedToolsets {
+		if name == "cyber" {
+			foundCyber = true
+			break
+		}
+	}
+	if !foundCyber {
+		t.Fatalf("toolsets=%v, want cyber", capturedToolsets)
 	}
 }

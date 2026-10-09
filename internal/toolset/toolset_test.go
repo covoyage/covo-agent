@@ -64,6 +64,28 @@ func TestResolveToolsets_Full(t *testing.T) {
 			t.Errorf("missing expected tool in full: %s", want)
 		}
 	}
+	for _, blocked := range []string{"scan", "finding_upsert", "asset_upsert"} {
+		if toolSet[blocked] {
+			t.Errorf("full should not include cyber-only tool %s", blocked)
+		}
+	}
+}
+
+func TestEnsureCyberToolset(t *testing.T) {
+	got := EnsureCyberToolset([]string{"full"})
+	found := false
+	for _, name := range got {
+		if name == "cyber" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("EnsureCyberToolset=%v, want cyber", got)
+	}
+	again := EnsureCyberToolset(got)
+	if len(again) != len(got) {
+		t.Fatalf("EnsureCyberToolset should be idempotent: %v vs %v", again, got)
+	}
 }
 
 func TestResolveToolsets_Deduplication(t *testing.T) {

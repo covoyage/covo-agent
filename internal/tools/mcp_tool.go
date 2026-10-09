@@ -27,6 +27,21 @@ func NewMCPStore() *MCPStore {
 	return &MCPStore{servers: make(map[string]*mcpServer)}
 }
 
+// SplitMCPToolName parses the stable "mcp__<server>__<tool>" form.
+func SplitMCPToolName(name string) (server, tool string, ok bool) {
+	name = strings.TrimSpace(name)
+	name = strings.TrimPrefix(name, "mcp__")
+	i := strings.Index(name, "__")
+	if i <= 0 || i+2 >= len(name) {
+		return "", "", false
+	}
+	return name[:i], name[i+2:], true
+}
+
+func MCPToolName(server, tool string) string {
+	return "mcp__" + server + "__" + tool
+}
+
 // AutoConnect connects to an MCP server with the given config and stores
 // it for use by the mcp tool. Returns the number of tools discovered.
 func (s *MCPStore) AutoConnect(ctx context.Context, name, command string, args []string, envVarNames []string, timeoutSec int) (int, error) {
@@ -630,6 +645,18 @@ func buildMCPTool(store *MCPStore) *agentcore.Tool {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
 			}
 
+			if params.Action == "" && strings.Contains(params.Name, "__") {
+				params.Action = "call"
+			}
+			if server, tool, ok := SplitMCPToolName(params.Tool); ok && params.Server == "" {
+				params.Server = server
+				params.Tool = tool
+			}
+			if server, tool, ok := SplitMCPToolName(params.Name); ok && params.Action == "call" && params.Server == "" {
+				params.Server = server
+				params.Tool = tool
+			}
+
 			switch params.Action {
 			case "connect":
 				return handleConnect(ctx, store, params)
@@ -824,6 +851,9 @@ func handleList(store *MCPStore) (any, error) {
 				InputSchema: t.InputSchema,
 			})
 		}
+		for i := range infos {
+			infos[i].Name = MCPToolName(s.config.Name, infos[i].Name)
+		}
 		servers = append(servers, serverInfo{
 			Name:      s.config.Name,
 			Command:   s.config.Command,
@@ -853,6 +883,10 @@ func handleCall(ctx context.Context, store *MCPStore, params struct {
 	Tool      string            `json:"tool"`
 	Arguments map[string]any    `json:"arguments"`
 }) (any, error) {
+	if server, tool, ok := SplitMCPToolName(params.Tool); ok {
+		params.Server = server
+		params.Tool = tool
+	}
 	if params.Server == "" {
 		return nil, fmt.Errorf("server is required for call")
 	}

@@ -85,6 +85,11 @@ func newSlashContextBuilder(config slashCompositionConfig) *slashcmd.ContextBuil
 			RestoreComposerDraft: config.RestoreComposerDraft,
 			SubmitPrompt:         config.SubmitPrompt,
 			AttachImage:          config.AttachImage,
+			RequestRender: func() {
+				if config.App != nil && config.App.Host() != nil {
+					config.App.Host().RequestRender()
+				}
+			},
 		},
 		IO: slashcmd.IODependencies{
 			ExportSessionHTML:     exportSessionHTML,

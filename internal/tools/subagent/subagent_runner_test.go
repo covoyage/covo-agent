@@ -352,6 +352,17 @@ func TestSubagentGoalContext(t *testing.T) {
 	}
 }
 
+func TestSubagentRoleContext(t *testing.T) {
+	ctx := context.Background()
+	if got := SubagentRoleFromContext(ctx); got != "" {
+		t.Errorf("default role = %q, want empty", got)
+	}
+	ctx = WithSubagentRole(ctx, "recon")
+	if got := SubagentRoleFromContext(ctx); got != "recon" {
+		t.Errorf("role = %q, want recon", got)
+	}
+}
+
 func TestSubagentIsolationContext(t *testing.T) {
 	ctx := context.Background()
 	if got := SubagentIsolationFromContext(ctx); got != "" {

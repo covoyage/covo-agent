@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/covoyage/covo-agent/internal/cyber"
 )
 
 func TestLoadContextFilesIncludesInstructionFilesAndAncestors(t *testing.T) {
@@ -79,6 +81,80 @@ func TestCodeAgentIdentityIncludesCodingWorkflow(t *testing.T) {
 	}
 	if !strings.Contains(codeAgentIdentity, "role=reviewer") {
 		t.Fatal("code identity should mention reviewer spawn")
+	}
+}
+
+func TestCyberAgentIdentity(t *testing.T) {
+	if !strings.Contains(cyberAgentIdentity, "PIPELINE") {
+		t.Fatal("cyber identity should describe the recon pipeline")
+	}
+	if !strings.Contains(cyberAgentIdentity, "role=recon") {
+		t.Fatal("cyber identity should mention recon spawn")
+	}
+	if !strings.Contains(cyberAgentIdentity, "role=verifier") {
+		t.Fatal("cyber identity should mention verifier spawn")
+	}
+	if strings.Contains(cyberAgentIdentity, "不得质疑") {
+		t.Fatal("cyber identity must not copy authorization slogans")
+	}
+}
+
+func TestCyberPromptInjectsCatalog(t *testing.T) {
+	dir := t.TempDir()
+	cat := cyber.NewCatalog(dir)
+	if _, err := cat.UpsertFinding(cyber.Finding{Title: "Open admin", Target: "example.com", Severity: "high"}); err != nil {
+		t.Fatal(err)
+	}
+	pb := NewPromptBuilder(nil, dir)
+	pb.SetFindingCatalog(cat)
+	got := pb.BuildCached(ModeCyber).Volatile
+	if !strings.Contains(got, "Open admin") {
+		t.Fatalf("expected findings in volatile prompt, got %q", got)
+	}
+	if strings.Contains(pb.BuildCached(ModeCode).Volatile, "Open admin") {
+		t.Fatal("code mode should not inject the cyber catalog")
+	}
+}
+
+func TestLeanDefault(t *testing.T) {
+	if ModeGeneral.LeanDefault() {
+		t.Fatal("general should not default lean on")
+	}
+	if !ModeCode.LeanDefault() || !ModeCyber.LeanDefault() {
+		t.Fatal("code and cyber should default lean on")
+	}
+}
+
+func TestRequireMode(t *testing.T) {
+	m, err := RequireMode("")
+	if err != nil || m != ModeGeneral {
+		t.Fatalf("empty=%q err=%v", m, err)
+	}
+	m, err = RequireMode("CYBER")
+	if err != nil || m != ModeCyber {
+		t.Fatalf("cyber=%q err=%v", m, err)
+	}
+	if _, err := RequireMode("pentest"); err == nil {
+		t.Fatal("unknown mode should fail")
+	}
+}
+
+func TestParseModeCyber(t *testing.T) {
+	m, ok := ParseMode("cyber")
+	if !ok || m != ModeCyber {
+		t.Fatalf("ParseMode(cyber)=%q ok=%v", m, ok)
+	}
+	if ModeCyber.IsCustom() {
+		t.Fatal("cyber is a built-in mode")
+	}
+	found := false
+	for _, name := range AllModeNames() {
+		if name == "cyber" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("AllModeNames should include cyber")
 	}
 }
 

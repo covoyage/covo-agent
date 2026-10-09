@@ -26,6 +26,10 @@ go.work
 *~
 .workbuddy/
 
+# Agent runtime state: cyber findings/assets ledgers carry captured
+# credentials, and outputs/ holds full scan spills.
+.covo/
+
 # OS
 .DS_Store
 Thumbs.db

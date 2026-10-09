@@ -21,6 +21,9 @@ type Options struct {
 	// Prompt is the input prompt to execute.
 	Prompt string
 
+	// Mode is the agent mode: general, code, or cyber. Empty uses config default.
+	Mode string
+
 	// Tools is a whitelist of tool names to allow. Empty = all tools.
 	Tools []string
 	// DisallowedTools is a blacklist of tool names to block.
@@ -298,6 +301,9 @@ func ValidateOptions(opts *Options) error {
 		return fmt.Errorf("invalid reasoning effort: %s (expected 'low', 'medium', or 'high')", opts.ReasoningEffort)
 	}
 
+	if _, err := agent.RequireMode(opts.Mode); err != nil {
+		return err
+	}
 	// Check for conflicting tools (same tool in both lists)
 	allowSet := make(map[string]bool)
 	for _, t := range opts.Tools {

@@ -11,9 +11,12 @@ import (
 	"time"
 
 	"github.com/covoyage/covo-agent/internal/agent/safety"
+	"github.com/covoyage/covo-agent/internal/cyber"
 	"github.com/covoyage/covo-agent/internal/diff"
 	"github.com/covoyage/covo-agent/internal/doomloop"
 	"github.com/covoyage/covo-agent/internal/lsp"
+	"github.com/covoyage/covo-agent/internal/sandbox"
+	toolssubagent "github.com/covoyage/covo-agent/internal/tools/subagent"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -365,6 +368,9 @@ func (ca *CovoAgent) trajectoryBeforeHook() agentcore.BeforeHook {
 
 func (ca *CovoAgent) permissionGateBeforeHook() agentcore.BeforeHook {
 	return func(ctx context.Context, hc *agentcore.HookContext) error {
+		if scope, scoped := toolssubagent.IntakeScopeFromContext(ctx); scoped && !intakeToolAllowed(scope, hc) {
+			return fmt.Errorf("automatic verifier tool %q exceeds the recorded intake endpoint", hc.ToolName)
+		}
 		// Step 1: Approval system pattern check (for bash/process commands)
 		if hc.ToolName == "bash" || hc.ToolName == "process" {
 			var args struct {
@@ -418,6 +424,10 @@ func (ca *CovoAgent) permissionGateBeforeHook() agentcore.BeforeHook {
 		}
 
 		// Step 2: TUI permission gate (for all dangerous tools)
+		if ca.mode.IsCyberFamily() && hc.ToolName == "remote_node_exec" && ca.permissionChecker == nil &&
+			ca.approvalSystem != nil && ca.approvalSystem.IsNonInteractive() {
+			return fmt.Errorf("remote_node_exec needs an explicit tool policy in non-interactive cyber sessions")
+		}
 		if ca.permissionChecker == nil {
 			return nil
 		}
@@ -867,6 +877,18 @@ func (ca *CovoAgent) combinedBeforeToolCall() func(
 	doomloopCheck := ca.doomloopBudgetBeforeHook()
 	claudeHookCheck := ca.claudeHooksPreToolUse()
 	return func(ctx context.Context, tc agentcore.ToolCall) *agentcore.ToolCallOverride {
+		role := toolssubagent.SubagentRoleFromContext(ctx)
+		if ca.mode.IsCyberFamily() && role != "" {
+			if catalog := ca.FindingCatalog(); catalog != nil {
+				_ = catalog.RecordAgentTool(toolssubagent.SubagentViewRefFromContext(ctx), role, tc.Name)
+			}
+		}
+		if ca.mode.IsCyberFamily() && ca.sandbox != nil && ca.sandbox.Type() == sandbox.TypeDocker && cyber.HandsOnRoles[role] && (tc.Name == "bash" || tc.Name == "execute_code") {
+			return &agentcore.ToolCallOverride{Block: true, IsError: true, Result: "host shell is disabled for this engagement; use the sandbox tool"}
+		}
+		if ca.mode.IsCyberFamily() && !cyber.AllowOrchestratorTool(role, tc.Name) {
+			return &agentcore.ToolCallOverride{Block: true, IsError: true, Result: fmt.Sprintf("%s is reserved for spawned hands-on roles; the parent orchestrates", tc.Name)}
+		}
 		if ov := guardrailCheck(ctx, tc); ov != nil {
 			return ov
 		}
