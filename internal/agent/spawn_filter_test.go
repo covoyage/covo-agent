@@ -1,10 +1,30 @@
 package agent
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/covoyage/covonaut/agentcore"
 )
+
+func TestRestrictChildToolsets(t *testing.T) {
+	allowed := []string{"filesystem", "search"}
+	got, err := restrictChildToolsets([]string{"shell", "filesystem"}, allowed)
+	if err != nil || !reflect.DeepEqual(got, []string{"filesystem"}) {
+		t.Fatalf("intersection: %v, %v", got, err)
+	}
+	if _, err := restrictChildToolsets([]string{"shell"}, allowed); err == nil {
+		t.Fatal("empty intersection enabled default tools")
+	}
+	got, err = restrictChildToolsets(nil, allowed)
+	if err != nil || !reflect.DeepEqual(got, allowed) {
+		t.Fatalf("inheritance: %v, %v", got, err)
+	}
+	got[0] = "changed"
+	if allowed[0] != "filesystem" {
+		t.Fatal("inherited capabilities alias parent")
+	}
+}
 
 // TestFilterInjectableParentMessages_DropsToolAndSystem verifies that in "full"
 // context mode only standard user/assistant messages are injected into the

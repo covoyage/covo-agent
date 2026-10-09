@@ -26,13 +26,21 @@ func ApplyChildNetworkRestriction(cmd *exec.Cmd) error {
 
 	originalPath := cmd.Path
 	originalArgs := cmd.Args
+	launcher, err := trustedLauncher("unshare")
+	if err != nil {
+		return err
+	}
+	if err := probeLauncher(launcher, "-Urn", "--", "/bin/true"); err != nil {
+		return err
+	}
 
 	// unshare -Urn -- <original command> <original args...>
 	// -U: new user namespace (allows unprivileged network namespace creation)
 	// -r: map current user to root in the new namespace
 	// -n: new network namespace (no interfaces = no network)
-	cmd.Path = "unshare"
-	cmd.Args = append([]string{"unshare", "-Urn", "--", originalPath}, originalArgs[1:]...)
+	cmd.Path = launcher
+	cmd.Args = append([]string{launcher, "-Urn", "--", originalPath}, originalArgs[1:]...)
+	prepareLauncherEnvironment(cmd)
 
 	return nil
 }
@@ -40,7 +48,7 @@ func ApplyChildNetworkRestriction(cmd *exec.Cmd) error {
 // platformNetworkRestrictionAvailable returns true if this platform can
 // restrict child process network access.
 func platformNetworkRestrictionAvailable() bool {
-	_, err := exec.LookPath("unshare")
+	_, err := trustedLauncher("unshare")
 	return err == nil
 }
 

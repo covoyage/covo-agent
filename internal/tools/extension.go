@@ -631,7 +631,12 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		toolssubagent.BuildWorkflowTool(e.spawnRunner, e.subagentReg),
 		toolssubagent.BuildAdvancedWorkflowTool(e.spawnRunner, e.subagentReg, e.homeDir),
 		toolssubagent.BuildScriptWorkflowTool(e.spawnRunner, e.subagentReg, e.homeDir),
-		toolssubagent.BuildSessionsForkTool(e.spawnRunner, e.subagentReg, e.forkGuard),
+		toolssubagent.BuildSessionsForkTool(e.spawnRunner, e.subagentReg, e.forkGuard, func() []agentcore.Message {
+			if e.parentMessages == nil {
+				return nil
+			}
+			return e.parentMessages()
+		}),
 		toolsmemory.BuildMemoryExtractTool(e.dreamCycle),
 		toolsmemory.BuildMemoryDreamTool(e.dreamCycle),
 		toolsmemory.BuildMemoryDreamStatsTool(e.dreamCycle),

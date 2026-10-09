@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/covoyage/covo-agent/internal/sandbox/ossandbox"
 )
 
 // Provider runs a standalone, self-contained task on an external coding agent.
@@ -68,6 +70,9 @@ func (p *cliProvider) RunOpt(ctx context.Context, task, cwd string, opts RunOpti
 		return "", fmt.Errorf("external agent %q: %w", p.name, err)
 	}
 	cmd := exec.CommandContext(ctx, path, p.args(task)...)
+	if err := ossandbox.PrepareChildCommand(ctx, cmd); err != nil {
+		return "", err
+	}
 	if cwd != "" {
 		cmd.Dir = cwd
 	}

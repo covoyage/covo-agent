@@ -12,8 +12,8 @@ import (
 )
 
 type localSandbox struct {
-	cfg     Config
-	workDir string
+	cfg       Config
+	workDir   string
 	envPolicy EnvPolicy
 }
 
@@ -66,10 +66,8 @@ func (s *localSandbox) Run(ctx context.Context, command string, timeout time.Dur
 	}
 
 	// Apply child process network restriction if the OS-level sandbox requires it.
-	if ossandbox.ShouldRestrictChildNetwork() {
-		if err := ossandbox.ApplyChildNetworkRestriction(cmd); err != nil {
-			return nil, fmt.Errorf("apply child network restriction: %w", err)
-		}
+	if err := ossandbox.PrepareChildCommand(ctx, cmd); err != nil {
+		return nil, fmt.Errorf("prepare child command: %w", err)
 	}
 
 	var stdout, stderr strings.Builder

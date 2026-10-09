@@ -11,6 +11,12 @@ HTTP capture and its cache are local to each tool instance, and captured request
 
 Finding updates validate merged evidence and cannot change the target, established endpoint, or method under the same ID. Use a new finding for a different identity.
 
+Local sandbox commands, interactive bash, background processes, cron pre-run commands, native scans, local MCP servers, and external-agent launches share OS child-command preparation. Explicitly requested CLI sandboxes fail startup when unavailable. Active network-restricted profiles use a trusted, absolute, root-owned launcher (`sandbox-exec` on macOS, `unshare` on Linux), reject writable launcher paths and dynamic-loader injection variables, and probe support before execution. This is child network denial, not an allowed-host firewall; default/workspace profiles do not restrict scanner destinations at the OS level. Other runtime-managed processes and remote/container backends are not covered by this local launch hook.
+
+MCP requests reject pre-cancelled contexts. Stdio and HTTP transports send bounded best-effort `notifications/cancelled` messages for cancelled or timed-out requests (except initialization); local pending requests are cleaned up, and late stdio responses are ignored safely. A blocked stdio write closes the connection to unblock callers. Successfully initialized stdio servers remain alive until disconnect, rather than depending on the initialization context's lifetime.
+
+`sessions_fork` requires `task` and captures history from runtime state, not model-supplied `history` or `depth`. Snapshots retain completed tool call/result pairs, drop the unfinished trailing tool batch and parent system messages, and clear historical approval metadata. Child capabilities and policy settings are inherited independently from history; toolsets stay within the parent's configured restriction. Live process/connection handles and existing approval decisions are not inherited.
+
 | 工具 | 功能 | 并发声明 |
 |------|------|----------|
 | `advanced_workflow` | Orchestrate a multi-phase workflow with advanced features: - Conditional phase execution (skip phases based on prior ... | undeclared |
@@ -111,7 +117,7 @@ Finding updates validate merged evidence and cannot change the target, establish
 | `send_message` | Send a desktop notification to the user's screen. | undeclared |
 | `serial` | Serial/UART communication for embedded hardware. | undeclared |
 | `session_search` | Search past conversation sessions (not the workspace). | safe |
-| `sessions_fork` | Fork the current conversation into a subagent that inherits the FULL parent conversation history. | undeclared |
+| `sessions_fork` | Fork the runtime conversation snapshot into a subagent, preserving completed tool call/result pairs. | undeclared |
 | `sessions_history` | Read bounded, redacted conversation history from past sessions. | safe |
 | `sessions_list` | List recent sessions with title, start time, and preview. | safe |
 | `sessions_send` | Send a message to another session or notification channel. | undeclared |

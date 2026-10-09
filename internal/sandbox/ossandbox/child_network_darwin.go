@@ -4,7 +4,6 @@ package ossandbox
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 )
 
@@ -33,10 +32,18 @@ func ApplyChildNetworkRestriction(cmd *exec.Cmd) error {
 (deny network*)
 (allow default)
 `
+	launcher, err := trustedLauncher("/usr/bin/sandbox-exec")
+	if err != nil {
+		return err
+	}
+	if err := probeLauncher(launcher, "-p", seatbeltProfile, "--", "/usr/bin/true"); err != nil {
+		return err
+	}
 
 	// sandbox-exec -p '<profile>' -- <original command> <original args...>
-	cmd.Path = "/usr/bin/sandbox-exec"
-	cmd.Args = append([]string{"sandbox-exec", "-p", seatbeltProfile, "--", originalPath}, originalArgs[1:]...)
+	cmd.Path = launcher
+	cmd.Args = append([]string{launcher, "-p", seatbeltProfile, "--", originalPath}, originalArgs[1:]...)
+	prepareLauncherEnvironment(cmd)
 
 	return nil
 }
@@ -44,14 +51,8 @@ func ApplyChildNetworkRestriction(cmd *exec.Cmd) error {
 // platformNetworkRestrictionAvailable returns true if this platform can
 // restrict child process network access.
 func platformNetworkRestrictionAvailable() bool {
-	if _, err := exec.LookPath("sandbox-exec"); err == nil {
-		return true
-	}
-	// /usr/bin/sandbox-exec always exists on macOS, but check anyway
-	if _, err := os.Stat("/usr/bin/sandbox-exec"); err == nil {
-		return true
-	}
-	return false
+	_, err := trustedLauncher("/usr/bin/sandbox-exec")
+	return err == nil
 }
 
 // NetworkRestrictionDetails returns a human-readable description of how

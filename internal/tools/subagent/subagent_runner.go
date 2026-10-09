@@ -72,6 +72,17 @@ type ctxKeyIsolation struct{}
 type ctxKeySubagentRole struct{}
 type ctxSubagentCredentialPool struct{}
 type ctxKeyParentMessages struct{}
+type ctxKeyStructuredFork struct{}
+
+func WithStructuredFork(ctx context.Context, messages []agentcore.Message) context.Context {
+	ctx = WithParentMessageTurns(WithParentMessages(ctx, messages), 0)
+	return context.WithValue(ctx, ctxKeyStructuredFork{}, true)
+}
+
+func IsStructuredFork(ctx context.Context) bool {
+	value, _ := ctx.Value(ctxKeyStructuredFork{}).(bool)
+	return value
+}
 
 // SubagentProgressCallback receives lifecycle events from child execution.
 // eventType is one of: "start", "thinking", "tool", "complete", "timeout", "error".
@@ -235,6 +246,7 @@ func SubagentCredentialPoolFromContext(ctx context.Context) CredentialPool {
 // In "state" mode, a compact summary is generated and prepended to the task.
 // In "full" mode, the messages are injected into the child agent's initial state.
 func WithParentMessages(ctx context.Context, msgs []agentcore.Message) context.Context {
+	ctx = context.WithValue(ctx, ctxKeyStructuredFork{}, false)
 	return context.WithValue(ctx, ctxKeyParentMessages{}, msgs)
 }
 

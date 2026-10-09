@@ -16,6 +16,7 @@ import (
 
 	"github.com/covoyage/covo-agent/internal/cyber"
 	internalsandbox "github.com/covoyage/covo-agent/internal/sandbox"
+	"github.com/covoyage/covo-agent/internal/sandbox/ossandbox"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -251,6 +252,9 @@ func BuildScanToolWithTransport(workDir string, catalog *cyber.Catalog, sb inter
 				cmd.WaitDelay = 5 * time.Second
 				cmd.Stdout = &stdout
 				cmd.Stderr = &stderr
+				if err := ossandbox.PrepareChildCommand(runCtx, cmd); err != nil {
+					return nil, fmt.Errorf("prepare scan process: %w", err)
+				}
 				runErr = cmd.Run()
 				ok = runErr == nil || exitOK(runErr, plan.AllowedExit)
 			}

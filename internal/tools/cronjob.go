@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/covoyage/covo-agent/internal/sandbox/ossandbox"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -662,6 +663,9 @@ func RunPreRun(ctx context.Context, cmdLine string) error {
 		cmd = exec.CommandContext(runCtx, "cmd", "/C", cmdLine)
 	} else {
 		cmd = exec.CommandContext(runCtx, "sh", "-c", cmdLine)
+	}
+	if err := ossandbox.PrepareChildCommand(runCtx, cmd); err != nil {
+		return err
 	}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		detail := strings.TrimSpace(string(out))

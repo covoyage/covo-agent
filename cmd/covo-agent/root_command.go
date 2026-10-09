@@ -80,7 +80,7 @@ func newRootCommand() *cobra.Command {
 			// Apply OS-level sandbox early, before any file operations.
 			// Only apply for interactive/print and exec, not other subcommands.
 			if cmd.Name() == "covo-agent" || cmd.Name() == "exec" {
-				commands.ApplySandboxIfRequested(opts.sandbox, runtime)
+				return commands.ApplySandboxIfRequested(opts.sandbox, runtime)
 			}
 			return nil
 		},

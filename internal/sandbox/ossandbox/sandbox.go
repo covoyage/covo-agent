@@ -1,9 +1,11 @@
 package ossandbox
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"sync"
 )
 
@@ -13,9 +15,29 @@ type SandboxState struct {
 	profile         string
 	applied         bool
 	restrictNetwork bool // child processes should have network blocked
+	required        bool
 }
 
 var globalState = &SandboxState{}
+
+func PrepareChildCommand(ctx context.Context, cmd *exec.Cmd) error {
+	if ctx == nil || cmd == nil {
+		return fmt.Errorf("child command and context are required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	globalState.mu.RLock()
+	unavailable := globalState.required && !globalState.applied
+	globalState.mu.RUnlock()
+	if unavailable {
+		return fmt.Errorf("required OS sandbox is not active; refusing child execution")
+	}
+	if ShouldRestrictChildNetwork() {
+		return ApplyChildNetworkRestriction(cmd)
+	}
+	return nil
+}
 
 // ApplyOptions configures the sandbox application.
 type ApplyOptions struct {
@@ -43,6 +65,9 @@ type ApplyResult struct {
 // should have their network blocked — this is enforced at the child-execution
 // layer, not by the kernel sandbox.
 func Apply(opts ApplyOptions) ApplyResult {
+	globalState.mu.Lock()
+	globalState.required = opts.Profile == ProfileStrict || opts.Profile == ProfileReadOnly
+	globalState.mu.Unlock()
 	if opts.Profile == ProfileOff {
 		opts.Logger.Info("sandbox disabled (profile: off)")
 		return ApplyResult{
@@ -61,6 +86,9 @@ func Apply(opts ApplyOptions) ApplyResult {
 			Message: fmt.Sprintf("profile resolution failed: %v", err),
 		}
 	}
+	globalState.mu.Lock()
+	globalState.required = globalState.required || profile.RestrictNetwork
+	globalState.mu.Unlock()
 
 	// Check platform support
 	supported, details := platformSupportInfo()

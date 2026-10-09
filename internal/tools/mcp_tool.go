@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/covoyage/covo-agent/internal/evolution"
+	"github.com/covoyage/covo-agent/internal/sandbox/ossandbox"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -126,6 +128,7 @@ type stdioClient struct {
 	stdin   io.WriteCloser
 	scanner *bufio.Scanner
 	mu      sync.Mutex
+	writeMu sync.Mutex
 	pending map[int64]chan<- rpcResponse
 	nextID  int64
 	closeMu sync.Mutex
@@ -199,8 +202,11 @@ func newStdioClient(ctx context.Context, command string, args, env []string) (*s
 		return nil, fmt.Errorf("command not found: %s", command)
 	}
 
-	cmd := exec.CommandContext(ctx, command, args...)
+	cmd := exec.Command(command, args...)
 	cmd.Env = buildSafeEnv(env)
+	if err := ossandbox.PrepareChildCommand(ctx, cmd); err != nil {
+		return nil, fmt.Errorf("prepare MCP process: %w", err)
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -280,6 +286,9 @@ func (c *stdioClient) CallTool(ctx context.Context, name string, args map[string
 }
 
 func (c *stdioClient) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -294,7 +303,6 @@ func (c *stdioClient) call(ctx context.Context, method string, params any) (json
 	defer func() {
 		c.mu.Lock()
 		delete(c.pending, id)
-		close(ch)
 		c.mu.Unlock()
 	}()
 
@@ -308,20 +316,12 @@ func (c *stdioClient) call(ctx context.Context, method string, params any) (json
 		return nil, fmt.Errorf("marshal: %w", err)
 	}
 
-	c.mu.Lock()
-	_, err = fmt.Fprintf(c.stdin, "%s\n", req)
-	c.mu.Unlock()
+	err = c.writeRPC(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("write: %w", err)
 	}
 
 	timeout := 120 * time.Second
-	if deadline, ok := ctx.Deadline(); ok {
-		timeout = time.Until(deadline)
-		if timeout < 0 {
-			return nil, ctx.Err()
-		}
-	}
 
 	select {
 	case resp, ok := <-ch:
@@ -336,10 +336,50 @@ func (c *stdioClient) call(ctx context.Context, method string, params any) (json
 		}
 		return *resp.Result, nil
 	case <-ctx.Done():
+		if method != "initialize" {
+			c.notifyCancellation(id, "request context cancelled")
+		}
 		return nil, ctx.Err()
 	case <-time.After(timeout):
+		if method != "initialize" {
+			c.notifyCancellation(id, "request timed out")
+		}
 		return nil, fmt.Errorf("MCP call timeout (%s)", method)
 	}
+}
+
+func (c *stdioClient) writeRPC(ctx context.Context, data []byte) error {
+	done := make(chan error, 1)
+	go func() {
+		c.writeMu.Lock()
+		defer c.writeMu.Unlock()
+		c.mu.Lock()
+		closed := c.closed
+		c.mu.Unlock()
+		if closed {
+			done <- fmt.Errorf("client is closed")
+			return
+		}
+		_, err := fmt.Fprintf(c.stdin, "%s\n", data)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		c.Close()
+		return ctx.Err()
+	}
+}
+
+func (c *stdioClient) notifyCancellation(id int64, reason string) {
+	data, err := json.Marshal(rpcRequest{JSONRPC: "2.0", Method: "notifications/cancelled", Params: map[string]any{"requestId": id, "reason": reason}})
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = c.writeRPC(ctx, data)
 }
 
 func (c *stdioClient) sendNotification(method string, params any) error {
@@ -351,10 +391,9 @@ func (c *stdioClient) sendNotification(method string, params any) error {
 	if err != nil {
 		return err
 	}
-	c.mu.Lock()
-	_, err = fmt.Fprintf(c.stdin, "%s\n", req)
-	c.mu.Unlock()
-	return err
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return c.writeRPC(ctx, req)
 }
 
 func (c *stdioClient) readLoop() {
@@ -375,26 +414,27 @@ func (c *stdioClient) readLoop() {
 
 		c.mu.Lock()
 		ch, ok := c.pending[*resp.ID]
-		c.mu.Unlock()
 		if ok {
 			select {
 			case ch <- resp:
 			default:
 			}
 		}
+		c.mu.Unlock()
 	}
 }
 
 func (c *stdioClient) Close() {
 	c.closeMu.Lock()
 	defer c.closeMu.Unlock()
+	c.mu.Lock()
 	if c.closed {
+		c.mu.Unlock()
 		return
 	}
 	c.closed = true
 
 	// Drain and close all pending channels so waiting callers don't timeout
-	c.mu.Lock()
 	for id, ch := range c.pending {
 		close(ch)
 		delete(c.pending, id)
@@ -466,6 +506,9 @@ func (c *httpClient) CallTool(ctx context.Context, name string, args map[string]
 }
 
 func (c *httpClient) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -473,6 +516,7 @@ func (c *httpClient) call(ctx context.Context, method string, params any) (json.
 	}
 	c.nextID++
 	id := c.nextID
+	sessionID := c.sessionID
 	c.mu.Unlock()
 
 	reqBody, err := json.Marshal(rpcRequest{
@@ -491,8 +535,8 @@ func (c *httpClient) call(ctx context.Context, method string, params any) (json.
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
-	if c.sessionID != "" {
-		httpReq.Header.Set("Mcp-Session-Id", c.sessionID)
+	if sessionID != "" {
+		httpReq.Header.Set("Mcp-Session-Id", sessionID)
 	}
 	for k, v := range c.headers {
 		httpReq.Header.Set(k, v)
@@ -500,12 +544,18 @@ func (c *httpClient) call(ctx context.Context, method string, params any) (json.
 
 	resp, err := c.httpCli.Do(httpReq)
 	if err != nil {
+		if (ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded)) && method != "initialize" {
+			c.notifyCancellation(id)
+		}
 		return nil, fmt.Errorf("HTTP POST: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		if (ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded)) && method != "initialize" {
+			c.notifyCancellation(id)
+		}
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
@@ -536,7 +586,36 @@ func (c *httpClient) call(ctx context.Context, method string, params any) (json.
 func (c *httpClient) Close() {
 	c.closeMu.Lock()
 	defer c.closeMu.Unlock()
+	c.mu.Lock()
 	c.closed = true
+	c.mu.Unlock()
+}
+
+func (c *httpClient) notifyCancellation(id int64) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	data, err := json.Marshal(rpcRequest{JSONRPC: "2.0", Method: "notifications/cancelled", Params: map[string]any{"requestId": id, "reason": "request cancelled"}})
+	if err != nil {
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(data))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.mu.Lock()
+	sessionID := c.sessionID
+	c.mu.Unlock()
+	if sessionID != "" {
+		req.Header.Set("Mcp-Session-Id", sessionID)
+	}
+	for name, value := range c.headers {
+		req.Header.Set(name, value)
+	}
+	resp, err := c.httpCli.Do(req)
+	if err == nil {
+		resp.Body.Close()
+	}
 }
 
 func buildMCPTool(store *MCPStore) *agentcore.Tool {

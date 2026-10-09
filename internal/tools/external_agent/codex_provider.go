@@ -36,6 +36,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/covoyage/covo-agent/internal/sandbox/ossandbox"
 )
 
 // minCodexVersion is the oldest Codex CLI that ships the app-server --stdio
@@ -91,6 +93,9 @@ func (p *codexProvider) RunOpt(ctx context.Context, task, cwd string, opts RunOp
 	// before we can deliver turn/interrupt. Lifecycle is managed manually
 	// below (interrupt protocol, then kill as a fallback).
 	cmd := exec.Command(path, "app-server", "--stdio")
+	if err := ossandbox.PrepareChildCommand(ctx, cmd); err != nil {
+		return "", err
+	}
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
@@ -206,7 +211,11 @@ func (p *codexProvider) RunOpt(ctx context.Context, task, cwd string, opts RunOp
 }
 
 func (p *codexProvider) verifyVersion(ctx context.Context) error {
-	out, err := exec.CommandContext(ctx, "codex", "--version").Output()
+	cmd := exec.CommandContext(ctx, "codex", "--version")
+	if err := ossandbox.PrepareChildCommand(ctx, cmd); err != nil {
+		return err
+	}
+	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("codex: version check failed: %w", err)
 	}

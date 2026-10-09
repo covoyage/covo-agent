@@ -132,10 +132,8 @@ func (s *ProcessStore) Spawn(command string, cwd string, usePTY bool) (*ProcessS
 	cmd.Dir = resolvedCwd
 
 	// Apply child process network restriction if the OS-level sandbox requires it.
-	if ossandbox.ShouldRestrictChildNetwork() {
-		if err := ossandbox.ApplyChildNetworkRestriction(cmd); err != nil {
-			return nil, fmt.Errorf("apply child network restriction: %w", err)
-		}
+	if err := ossandbox.PrepareChildCommand(context.Background(), cmd); err != nil {
+		return nil, fmt.Errorf("prepare child process: %w", err)
 	}
 
 	id := s.NextID()

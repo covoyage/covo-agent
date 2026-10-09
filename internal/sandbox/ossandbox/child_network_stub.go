@@ -9,6 +9,9 @@ import (
 
 // ApplyChildNetworkRestriction is a no-op on unsupported platforms.
 func ApplyChildNetworkRestriction(cmd *exec.Cmd) error {
+	if ShouldRestrictChildNetwork() {
+		return fmt.Errorf("child network restriction is unavailable on this platform")
+	}
 	return nil
 }
 

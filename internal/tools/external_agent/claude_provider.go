@@ -33,6 +33,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/covoyage/covo-agent/internal/sandbox/ossandbox"
 )
 
 // minClaudeVersion is the oldest Claude Code CLI that speaks the control
@@ -109,6 +111,9 @@ func (p *claudeProvider) RunOpt(ctx context.Context, task, cwd string, opts RunO
 	// before we can deliver the interrupt control request. Lifecycle is
 	// managed manually below (interrupt protocol, then kill as a fallback).
 	cmd := exec.Command(path, args...)
+	if err := ossandbox.PrepareChildCommand(ctx, cmd); err != nil {
+		return "", err
+	}
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
@@ -259,7 +264,11 @@ func buildClaudeArgs(opts RunOptions) []string {
 }
 
 func (p *claudeProvider) verifyVersion(ctx context.Context) error {
-	out, err := exec.CommandContext(ctx, "claude", "--version").Output()
+	cmd := exec.CommandContext(ctx, "claude", "--version")
+	if err := ossandbox.PrepareChildCommand(ctx, cmd); err != nil {
+		return err
+	}
+	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("claude: version check failed: %w", err)
 	}

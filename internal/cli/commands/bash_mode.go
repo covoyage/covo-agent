@@ -67,13 +67,11 @@ func executeShellCommand(
 	cmd.Dir = wd
 
 	// Apply child process network restriction if the OS-level sandbox requires it.
-	if ossandbox.ShouldRestrictChildNetwork() {
-		if err := ossandbox.ApplyChildNetworkRestriction(cmd); err != nil {
-			app.PrintSystem(theme.CurrentPalette().Error.Render(
-				fmt.Sprintf("network restriction error: %v", err),
-			))
-			return
-		}
+	if err := ossandbox.PrepareChildCommand(cmdCtx, cmd); err != nil {
+		app.PrintSystem(theme.CurrentPalette().Error.Render(
+			fmt.Sprintf("child preparation error: %v", err),
+		))
+		return
 	}
 	tools.IsolateCommand(cmd)
 

@@ -228,7 +228,7 @@ func (r *SubagentRegistry) List(activeOnly bool) []*SubagentRun {
 		if activeOnly && run.Status != "running" {
 			continue
 		}
-		runs = append(runs, run)
+		runs = append(runs, snapshotSubagentRun(run))
 	}
 	// Sort by started_at desc
 	for i := 0; i < len(runs); i++ {
@@ -245,7 +245,20 @@ func (r *SubagentRegistry) Get(id string) (*SubagentRun, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	run, ok := r.runs[id]
-	return run, ok
+	if !ok {
+		return nil, false
+	}
+	return snapshotSubagentRun(run), true
+}
+
+func snapshotSubagentRun(run *SubagentRun) *SubagentRun {
+	snapshot := *run
+	snapshot.InputMessages = append([]string(nil), run.InputMessages...)
+	if run.EndedAt != nil {
+		endedAt := *run.EndedAt
+		snapshot.EndedAt = &endedAt
+	}
+	return &snapshot
 }
 
 func (r *SubagentRegistry) Interrupt(id string) bool {
@@ -294,15 +307,15 @@ func (r *SubagentRegistry) Close(id string) bool {
 }
 
 func (r *SubagentRegistry) SendInput(id, message string) bool {
-	r.mu.RLock()
+	r.mu.Lock()
 	run, ok := r.runs[id]
 	if !ok || run.Status != "running" {
-		r.mu.RUnlock()
+		r.mu.Unlock()
 		return false
 	}
 	ch := run.inputChan
 	run.InputMessages = append(run.InputMessages, message)
-	r.mu.RUnlock()
+	r.mu.Unlock()
 	select {
 	case ch <- message:
 		return true

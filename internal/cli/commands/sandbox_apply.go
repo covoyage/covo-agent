@@ -13,14 +13,14 @@ import (
 // ApplySandboxIfRequested applies the OS-level sandbox for the given --sandbox
 // flag value, or the COVO_SANDBOX environment variable when the flag is empty.
 // This must be called very early in process startup, before any file operations.
-func ApplySandboxIfRequested(sandboxProfile string, runtime *cli.CommandRuntime) {
+func ApplySandboxIfRequested(sandboxProfile string, runtime *cli.CommandRuntime) error {
 	profileName := sandboxProfile
 	if profileName == "" {
 		// Check environment variable
 		profileName = os.Getenv("COVO_SANDBOX")
 	}
 	if profileName == "" {
-		return // sandbox not requested
+		return nil // sandbox not requested
 	}
 
 	profile := ossandbox.ParseProfileName(profileName)
@@ -55,6 +55,7 @@ func ApplySandboxIfRequested(sandboxProfile string, runtime *cli.CommandRuntime)
 			fmt.Fprintf(os.Stderr, "[sandbox] child process network will be restricted (%s)\n", details)
 		}
 	} else if result.Message != "" && profile != ossandbox.ProfileOff {
-		os.Stderr.WriteString("[sandbox] " + result.Message + "\n")
+		return fmt.Errorf("requested sandbox is unavailable: %s", result.Message)
 	}
+	return nil
 }

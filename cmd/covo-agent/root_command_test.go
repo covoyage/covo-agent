@@ -42,6 +42,18 @@ func TestRootCommandLanguageAlias(t *testing.T) {
 	}
 }
 
+func TestRootCommandRejectsUnavailableSandbox(t *testing.T) {
+	t.Chdir(t.TempDir())
+	root := newRootCommand()
+	if err := root.ParseFlags([]string{"--sandbox", "missing-test-sandbox-profile"}); err != nil {
+		t.Fatal(err)
+	}
+	err := root.PersistentPreRunE(root, nil)
+	if err == nil || !strings.Contains(err.Error(), "requested sandbox is unavailable") {
+		t.Fatalf("requested sandbox failure was not propagated: %v", err)
+	}
+}
+
 func TestRootCommandParsesOneshotShorthand(t *testing.T) {
 	root := newRootCommand()
 	if err := root.ParseFlags([]string{"-z", "summarize this"}); err != nil {

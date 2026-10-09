@@ -13,7 +13,7 @@
 - **终端交互工作流**：流式回复、工具状态、鼠标选择、会话历史、模型选择器、主题和 Shell 补全。
 - **多种运行方式**：交互式 TUI、单次输出，以及受策略约束的无头运行。
 - **编程工具**：文件搜索与编辑、补丁应用、Shell 执行、代码分析、Review、测试生成、Git Worktree 和检查点。
-- **安全模式**：自主侦察、验证与利用。父 agent 先在 `scan_profile.allowed_hosts` 设置操作者授权的主机，再运行面向主机或 URL 的 `scan` 配方（nmap、subfinder、ffuf、nuclei 等）。已知的次级目标也会校验，任意网络 `extra` 参数会拒绝；但外部扫描进程没有网络沙箱隔离。finding、asset、coverage 和 HTTP replay 证据写入 engagement 台账。
+- **安全模式**：自主侦察、验证与利用。父 agent 先在 `scan_profile.allowed_hosts` 设置操作者授权的主机，再运行面向主机或 URL 的 `scan` 配方（nmap、subfinder、ffuf、nuclei 等）。已知的次级目标也会校验，任意网络 `extra` 参数会拒绝。本机原生扫描进程遵循已启用系统沙箱的子进程网络禁用策略；默认或 workspace 配置不会在系统层强制目标白名单。finding、asset、coverage 和 HTTP replay 证据写入 engagement 台账。
 - **有限的原生 Web 检查**：本地缺少 `curl` 时，`scan` 的 curl 配方可在无额外参数的情况下执行一次受范围约束的 Go HTTP GET。`web_param_probe` 只对已录制 GET 请求的一个现有 query 参数发送无害标记。两者只产出证据，不等于漏洞结论或完整模板/浏览器扫描。
 - **Web 证据流程**：`web_context` 汇总端点，不返回原始请求头和正文。`csrf_retest` 从已录制 GET 刷新 token 后向同源表单发送一次 POST；必须有主机授权和 POST 审批，不返回或保存新 token。POST 成功并不能替代阴性对照，也不等于确认 CSRF 漏洞。
 - **持久上下文**：会话、记忆 Provider、技能、目标、快照、承诺事项、Profile 和项目级配置。

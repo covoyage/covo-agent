@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -58,6 +59,77 @@ func TestNormalizeContextMode(t *testing.T) {
 func waitToolForTest() (*agentcore.Tool, *SubagentRegistry) {
 	registry := NewSubagentRegistry()
 	return BuildSessionsWaitTool(registry), registry
+}
+
+func TestRegistryReadSnapshots(t *testing.T) {
+	registry := NewSubagentRegistry()
+	id := registry.Start("snapshot task", 1)
+	if !registry.SendInput(id, "original input") {
+		t.Fatal("input not sent")
+	}
+	running, _ := registry.Get(id)
+	registry.Complete(id, false)
+	if running.Status != "running" || running.EndedAt != nil {
+		t.Fatal("previous snapshot changed after completion")
+	}
+	completed, _ := registry.Get(id)
+	endedAt := *completed.EndedAt
+	for _, snapshot := range []*SubagentRun{completed, registry.List(false)[0]} {
+		snapshot.Status = "changed"
+		snapshot.InputMessages[0] = "changed"
+		*snapshot.EndedAt = endedAt.Add(time.Hour)
+	}
+	current, _ := registry.Get(id)
+	if current.Status != "completed" || current.InputMessages[0] != "original input" || !current.EndedAt.Equal(endedAt) {
+		t.Fatalf("snapshot mutation changed registry: %+v", current)
+	}
+	if missing, ok := registry.Get("missing"); ok || missing != nil {
+		t.Fatal("missing run returned a snapshot")
+	}
+}
+
+func TestRegistryConcurrentSnapshotAccess(t *testing.T) {
+	registry := NewSubagentRegistry()
+	id := registry.Start("concurrent task", 1)
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	for worker := 0; worker < 3; worker++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			for iteration := 0; iteration < 200; iteration++ {
+				registry.SendInput(id, "input")
+			}
+		}()
+	}
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		<-start
+		for iteration := 0; iteration < 200; iteration++ {
+			if run, ok := registry.Get(id); ok {
+				runSummary(run)
+			}
+			for _, run := range registry.List(false) {
+				runSummary(run)
+			}
+		}
+	}()
+	close(start)
+	workers.Wait()
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		for iteration := 0; iteration < 200; iteration++ {
+			registry.Complete(id, false)
+		}
+	}()
+	for iteration := 0; iteration < 200; iteration++ {
+		summarizeRuns(registry, []string{id})
+		splitUnseen(registry, &waitSeen{seen: make(map[string]bool)})
+	}
+	workers.Wait()
 }
 
 func callWait(t *testing.T, tool *agentcore.Tool, args string, timeout time.Duration) map[string]any {

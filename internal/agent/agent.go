@@ -465,6 +465,29 @@ func filterInjectableParentMessages(msgs []agentcore.Message) []agentcore.Messag
 	return filtered
 }
 
+func restrictChildToolsets(requested, allowed []string) ([]string, error) {
+	if len(allowed) == 0 {
+		return requested, nil
+	}
+	if len(requested) == 0 {
+		return append([]string(nil), allowed...), nil
+	}
+	permitted := make(map[string]bool, len(allowed))
+	for _, name := range allowed {
+		permitted[name] = true
+	}
+	var filtered []string
+	for _, name := range requested {
+		if permitted[name] {
+			filtered = append(filtered, name)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("child toolsets are outside the parent's configured capabilities")
+	}
+	return filtered, nil
+}
+
 func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	// Auto-create GitWorktree if COVO_WORKTREE=true and not explicitly provided
 	if cfg.GitWorktree == nil && os.Getenv("COVO_WORKTREE") == "true" && cfg.WorkingDir != "" {
@@ -612,6 +635,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	}
 
 	// Default SpawnRunner: creates a child agentcore.Agent with restricted toolsets
+	var ca *CovoAgent
 	spawnRunner := cfg.SpawnRunner
 	if spawnRunner == nil {
 		provider := cfg.Provider
@@ -669,21 +693,29 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 				}
 			}
 			childCfg := CovoAgentConfig{
-				Mode:            childMode,
-				SubagentRole:    childRole,
-				Provider:        childProvider,
-				ProviderName:    providerName,
-				Model:           childModel,
-				WorkingDir:      childWorkingDir,
-				HomeDir:         homeDir,
-				Platform:        childPlatform,
-				LeanTools:       cfg.LeanTools || childMode.LeanDefault(),
-				ExecutionMode:   execMode,
-				Concurrency:     concurrency,
-				ComputerUse:     computerUse,
-				CredentialPool:  childCredPool,
-				ToolsetOverride: toolsetNames,
-				GitWorktree:     childWorktree,
+				SkillURLs:           append([]string(nil), cfg.SkillURLs...),
+				Mode:                childMode,
+				SubagentRole:        childRole,
+				Provider:            childProvider,
+				ProviderName:        providerName,
+				Model:               childModel,
+				WorkingDir:          childWorkingDir,
+				HomeDir:             homeDir,
+				Platform:            childPlatform,
+				LeanTools:           cfg.LeanTools || childMode.LeanDefault(),
+				ExecutionMode:       execMode,
+				Concurrency:         concurrency,
+				ComputerUse:         computerUse,
+				CredentialPool:      childCredPool,
+				ToolsetOverride:     toolsetNames,
+				WorkspaceOnly:       cfg.WorkspaceOnly,
+				ExtraWorkspaceRoots: append([]string(nil), cfg.ExtraWorkspaceRoots...),
+				ToolNameFilter:      cfg.ToolNameFilter,
+				ToolProfile:         cfg.ToolProfile,
+				ApprovalCfg:         cfg.ApprovalCfg,
+				SkillDisabled:       append([]string(nil), cfg.SkillDisabled...),
+				SkillExtraDirs:      append([]string(nil), cfg.SkillExtraDirs...),
+				GitWorktree:         childWorktree,
 				// 0 (max_turns omitted) resolves to unbounded, same as the
 				// main loop; an explicit budget is honored verbatim.
 				MaxTurns:      maxTurns,
@@ -698,11 +730,24 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 				// rollout tracing is enabled.
 				ParentRolloutID: parentRolloutID,
 			}
+			if cfg.MCPServers != nil {
+				childCfg.MCPServers = make(map[string]agenttools.MCPConfig, len(cfg.MCPServers))
+				for name, server := range cfg.MCPServers {
+					server.Args = append([]string(nil), server.Args...)
+					server.Env = append([]string(nil), server.Env...)
+					childCfg.MCPServers[name] = server
+				}
+			}
+			childCfg.ToolsetOverride, err = restrictChildToolsets(toolsetNames, cfg.ToolsetOverride)
+			if err != nil {
+				return "", err
+			}
 			child, err := NewCovoAgent(childCfg)
 			if err != nil {
 				return "", fmt.Errorf("spawn: create child agent: %w", err)
 			}
 			defer child.Close()
+			child.SetExecutionPhase(ca.ExecutionPhase())
 
 			// Record the subagent lifecycle into the parent's rollout so the
 			// parent trace links to the child at per-turn granularity.
@@ -749,6 +794,9 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 			// own system prompt.
 			if parentMsgs := toolssubagent.ParentMessagesFromContext(ctx); len(parentMsgs) > 0 {
 				injectable := filterInjectableParentMessages(parentMsgs)
+				if toolssubagent.IsStructuredFork(ctx) {
+					injectable = parentMsgs
+				}
 				// "turns:N" context mode: keep only the most recent N
 				// injectable parent messages.
 				if n := toolssubagent.ParentMessageTurnsFromContext(ctx); n > 0 && len(injectable) > n {
@@ -812,7 +860,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	toolsExt.SetWorkshopStore(workshopStore)
 	toolsExt.SetSkillManager(skillMgr)
 
-	ca := &CovoAgent{
+	ca = &CovoAgent{
 		baseCfg:          cfg,
 		mode:             cfg.Mode,
 		homeDir:          cfg.HomeDir,
