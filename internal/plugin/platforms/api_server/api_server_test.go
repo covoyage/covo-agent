@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -273,7 +274,7 @@ func TestChatCompletions(t *testing.T) {
 	var gotChannel atomic.Value
 	a.OnMessage(func(msg plugin.IncomingMessage) {
 		gotChannel.Store(msg.ChannelID)
-		_ = a.SendMessage(context.Background(), msg.ChannelID, plugin.OutgoingMessage{Text: "agent answer"})
+		_ = a.SendMessage(context.Background(), msg.ChannelID, plugin.OutgoingMessage{Text: "agent answer", RequestID: msg.RequestID})
 	})
 
 	resp, body := postJSON(t, addr+"/v1/chat/completions", map[string]string{"X-Session-Id": "sess-1"}, map[string]any{
@@ -293,8 +294,8 @@ func TestChatCompletions(t *testing.T) {
 		Created int64  `json:"created"`
 		Model   string `json:"model"`
 		Choices []struct {
-			Index        int `json:"index"`
-			Message      struct {
+			Index   int `json:"index"`
+			Message struct {
 				Role    string `json:"role"`
 				Content string `json:"content"`
 			} `json:"message"`
@@ -329,12 +330,15 @@ func TestChatCompletions(t *testing.T) {
 	if out2["model"] != "covo-agent" {
 		t.Fatalf("default model = %v", out2["model"])
 	}
-	if ch := gotChannel.Load(); ch != "openai" {
-		t.Fatalf("default channel = %v, want openai", ch)
+	if ch := gotChannel.Load().(string); !strings.HasPrefix(ch, "openai-") {
+		t.Fatalf("default channel = %v, want isolated anonymous session", ch)
 	}
 
 	// Auth: chat endpoint enforces the same Bearer token as /api/message.
 	b, _ := newTestAdapter(t, "s3cret")
+	b.OnMessage(func(msg plugin.IncomingMessage) {
+		_ = b.SendMessage(context.Background(), msg.ChannelID, plugin.OutgoingMessage{Text: "answer", RequestID: msg.RequestID})
+	})
 	if err := b.Start(context.Background()); err != nil {
 		t.Fatalf("Start b: %v", err)
 	}
@@ -363,7 +367,10 @@ func TestChatCompletionsIdempotency(t *testing.T) {
 	addr := "http://" + a.listener.Addr().String()
 
 	count := make(chan struct{}, 8)
-	a.OnMessage(func(plugin.IncomingMessage) { count <- struct{}{} })
+	a.OnMessage(func(msg plugin.IncomingMessage) {
+		count <- struct{}{}
+		_ = a.SendMessage(context.Background(), msg.ChannelID, plugin.OutgoingMessage{Text: "answer", RequestID: msg.RequestID})
+	})
 
 	headers := map[string]string{"Idempotency-Key": "chat-1"}
 	payload := map[string]any{"messages": []map[string]string{{"role": "user", "content": "hi"}}}
@@ -381,5 +388,43 @@ func TestChatCompletionsIdempotency(t *testing.T) {
 	case <-count:
 		t.Fatal("duplicate dispatch on chat endpoint for same Idempotency-Key")
 	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+func TestChatCompletionTimeoutAndLateReplyIsolation(t *testing.T) {
+	a, _ := newTestAdapter(t, "")
+	a.replyTimeout = 20 * time.Millisecond
+	requests := make(chan plugin.IncomingMessage, 2)
+	a.OnMessage(func(msg plugin.IncomingMessage) { requests <- msg })
+	request := func() *http.Request {
+		req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"test"}]}`))
+		req.Header.Set("X-Session-Id", "same-session")
+		return req
+	}
+	first := httptest.NewRecorder()
+	a.serveChatCompletions(first, request())
+	old := <-requests
+	if first.Code != http.StatusGatewayTimeout {
+		t.Fatalf("timeout reported success: %d %s", first.Code, first.Body.String())
+	}
+	a.replyTimeout = time.Second
+	second := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { defer close(done); a.serveChatCompletions(second, request()) }()
+	current := <-requests
+	conflict := httptest.NewRecorder()
+	a.serveChatCompletions(conflict, request())
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("concurrent session accepted: %d", conflict.Code)
+	}
+	if err := a.SendMessage(context.Background(), old.ChannelID, plugin.OutgoingMessage{Text: "old answer", RequestID: old.RequestID}); err == nil {
+		t.Fatal("late response accepted")
+	}
+	if err := a.SendMessage(context.Background(), current.ChannelID, plugin.OutgoingMessage{Text: "current answer", RequestID: current.RequestID}); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if second.Code != 200 || !strings.Contains(second.Body.String(), "current answer") || strings.Contains(second.Body.String(), "old answer") {
+		t.Fatalf("response mismatch: %s", second.Body.String())
 	}
 }

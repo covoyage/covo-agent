@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/covoyage/covo-agent/internal/agent/approval"
+
 	"github.com/covoyage/covonaut/tui/chat"
 
 	"github.com/covoyage/covo-agent/internal/i18n"
@@ -34,28 +36,7 @@ type ApprovalRequest struct {
 	Description string
 }
 
-var dangerousTools = map[string]bool{
-	"bash":             true,
-	"process":          true,
-	"write_file":       true,
-	"edit_block":       true,
-	"write":            true,
-	"edit":             true,
-	"git_commit":       true,
-	"git_push":         true,
-	"delete_file":      true,
-	"execute_code":     true,
-	"computer_use":     true,
-	"exit_plan_mode":   true, // requires user approval before transitioning Plan → Act
-	"scan":             true, // in-scope recon recipes still require approval
-	"scan_profile":     true,
-	"request_intake":   true,
-	"web_param_probe":  true,
-	"remote_node_exec": true,
-	"exchange_replay":  true,
-	"exchange_compare": true,
-	"csrf_retest":      true,
-}
+var dangerousTools = approval.DangerousTools()
 
 // ApprovalCategory groups tools into categories for per-category auto-approval.
 type ApprovalCategory string
@@ -165,6 +146,8 @@ func safePatternToken(s string) string {
 type PermissionGate struct {
 	app         *chat.ChatApp
 	mu          sync.Mutex
+	requestOnce sync.Once
+	requestSlot chan struct{}
 	ch          chan ApprovalChoice
 	pendingTool string
 	pendingArgs string
@@ -209,18 +192,22 @@ func NewPermissionGate(app *chat.ChatApp) *PermissionGate {
 
 func (pg *PermissionGate) Checker() func(ctx context.Context, toolName string, args []byte) bool {
 	return func(ctx context.Context, toolName string, args []byte) bool {
-		if !dangerousTools[toolName] || readOnlyCyberToolCall(toolName, args) {
+		if ctx.Err() != nil {
+			return false
+		}
+		required := approval.ApprovalRequired(ctx)
+		if !required && !approval.RequiresToolApproval(toolName, args) {
 			return true
 		}
 
 		// YOLO bypass — skip all tool approval prompts.
-		if pg.YoloMode || shared.RuntimeState.SessionYolo() {
+		if !required && (pg.YoloMode || shared.RuntimeState.SessionYolo()) {
 			return true
 		}
 
 		// Per-category auto-approve: if the tool's category is auto-approved
 		// for this session, skip the prompt.
-		if cat := toolCategory(toolName); cat != "" {
+		if cat := toolCategory(toolName); !required && cat != "" {
 			pg.mu.Lock()
 			autoApproved := pg.autoApprovedCategories[cat]
 			pg.mu.Unlock()
@@ -230,13 +217,23 @@ func (pg *PermissionGate) Checker() func(ctx context.Context, toolName string, a
 		}
 
 		// Allowlist check for non-bash tools (bash already checked by the approval pattern system)
-		if toolName != "bash" && toolName != "process" {
+		if !required && toolName != "bash" && toolName != "process" {
 			// recipe "list" only reads the catalog — no process is spawned.
 			if pg.ApprovalSystem != nil && pg.ApprovalSystem.IsApproved("", approvalPatternKey(toolName, args)) {
 				return true
 			}
 		}
 
+		pg.requestOnce.Do(func() { pg.requestSlot = make(chan struct{}, 1) })
+		select {
+		case pg.requestSlot <- struct{}{}:
+		case <-ctx.Done():
+			return false
+		}
+		defer func() { <-pg.requestSlot }()
+		if ctx.Err() != nil {
+			return false
+		}
 		summary := buildSummary(toolName, args)
 
 		// Show pattern reason if available
@@ -252,33 +249,44 @@ func (pg *PermissionGate) Checker() func(ctx context.Context, toolName string, a
 		pg.mu.Lock()
 		pg.pendingTool = toolName
 		pg.pendingArgs = string(args)
-		pg.ch = make(chan ApprovalChoice, 1)
+		ch := make(chan ApprovalChoice, 1)
+		pg.ch = ch
 		showOverlay := pg.showApprovalOverlay
 		pg.mu.Unlock()
+		defer func() {
+			pg.mu.Lock()
+			if pg.ch == ch {
+				pg.ch = nil
+			}
+			pg.mu.Unlock()
+		}()
+		respond := func(choice ApprovalChoice) {
+			pg.mu.Lock()
+			defer pg.mu.Unlock()
+			if pg.ch != ch || ctx.Err() != nil {
+				return
+			}
+			select {
+			case ch <- choice:
+			default:
+			}
+		}
 
 		// Show TUI approval picker
 		if showOverlay != nil {
-			showOverlay(summary, func(choice ApprovalChoice) {
-				pg.mu.Lock()
-				ch := pg.ch
-				pg.mu.Unlock()
-				if ch != nil {
-					ch <- choice
-				}
-			}, func() {
-				pg.mu.Lock()
-				ch := pg.ch
-				pg.mu.Unlock()
-				if ch != nil {
-					ch <- ChoiceDeny
-				}
-			})
+			showOverlay(summary, respond, func() { respond(ChoiceDeny) })
 		} else {
+			if pg.app == nil {
+				return false
+			}
 			pg.app.PrintSystem(i18n.T("approval.text_prompt", "description", summary))
 		}
 
 		select {
-		case choice := <-pg.ch:
+		case choice := <-ch:
+			if ctx.Err() != nil {
+				return false
+			}
 			pg.mu.Lock()
 			pendingTool := pg.pendingTool
 			pendingArgs := pg.pendingArgs
@@ -287,7 +295,9 @@ func (pg *PermissionGate) Checker() func(ctx context.Context, toolName string, a
 
 			switch choice {
 			case ChoiceDeny:
-				pg.app.PrintSystem(i18n.T("approval.denied", "description", pendingTool))
+				if pg.app != nil {
+					pg.app.PrintSystem(i18n.T("approval.denied", "description", pendingTool))
+				}
 				return false
 			case ChoiceSession:
 				pg.registerApproval(pendingTool, pendingArgs, "session")
@@ -315,7 +325,10 @@ func (pg *PermissionGate) Respond(choice ApprovalChoice) {
 	ch := pg.ch
 	pg.mu.Unlock()
 	if ch != nil {
-		ch <- choice
+		select {
+		case ch <- choice:
+		default:
+		}
 	}
 }
 

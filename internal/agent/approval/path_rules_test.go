@@ -97,11 +97,10 @@ func TestCheckPathPolicy_AskFallsThrough(t *testing.T) {
 
 	sys := &System{config: Config{Logger: slog.Default()}, logger: slog.Default()}
 
-	// Edit a .lock file should return nil (ask → falls through to TUI gate).
-	args, _ := json.Marshal(map[string]string{"path": "package-lock.json"})
+	args, _ := json.Marshal(map[string]string{"path": "deps.lock"})
 	d := sys.CheckPathPolicy("edit_block", args)
-	if d != nil {
-		t.Errorf("expected nil for ask rule (falls through to TUI), got: %+v", d)
+	if d == nil || d.Approved || !d.RequiresApproval {
+		t.Errorf("expected explicit approval requirement for ask rule, got: %+v", d)
 	}
 }
 

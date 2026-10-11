@@ -513,6 +513,7 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		fileops.BuildEditBlockTool(),
 		// Batch 5: mcp
 		buildMCPTool(e.mcpStore),
+		buildMCPAuditTool(e.mcpStore),
 		// Batch 6: process, monitor, sandbox, swarm, swarm_orchestrate, secrets
 		toolssandbox.BuildProcessTool(e.processStore),
 		toolssandbox.BuildMonitorTool(e.processStore),
@@ -552,7 +553,7 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		}, cyberVisibility),
 		buildToolCallTool(agent, cyberVisibility),
 		// Batch 8: apply_patch
-		fileops.BuildApplyPatchTool(),
+		fileops.BuildApplyPatchTool(e.workDir),
 		// Batch 9: human_handoff
 		buildHumanHandoffTool(e.handoffCallback),
 		// Batch 9b: ask_user (structured questions with options + default)

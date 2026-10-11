@@ -117,7 +117,7 @@ var Toolsets = map[string]ToolsetDef{
 	"mcp": {
 		Name:        "mcp",
 		Description: "MCP (Model Context Protocol) server management and tool calling",
-		Tools:       []string{"mcp"},
+		Tools:       []string{"mcp", "mcp_audit"},
 	},
 	"discovery": {
 		Name:        "discovery",

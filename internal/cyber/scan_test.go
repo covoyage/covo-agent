@@ -28,6 +28,37 @@ func TestPlanScanRejectsUnknown(t *testing.T) {
 	}
 }
 
+func TestPlanAIInfrastructureScan(t *testing.T) {
+	options := map[string]string{"fingerprints": t.TempDir(), "advisories": t.TempDir()}
+	request := ScanRequest{Recipe: "ai-infra-guard", Target: "https://example.com", Options: options}
+	plan, err := PlanScan(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := strings.Join(plan.Command, " ")
+	for _, wanted := range []string{"ai-infra-guard scan --target https://example.com", "--fps ", "--vul ", "--limit 10", "--timeout 5"} {
+		if !strings.Contains(command, wanted) {
+			t.Fatalf("missing %q in %q", wanted, command)
+		}
+	}
+	for _, target := range []string{"--localscan", "file:///etc/passwd", "https://user:secret@example.com", "https://example.com#fragment"} {
+		request.Target = target
+		if _, err := PlanScan(request); err == nil {
+			t.Fatalf("accepted unsafe target %q", target)
+		}
+	}
+	request.Target = "https://example.com"
+	request.Extra = []string{"--target", "https://other.example"}
+	if _, err := PlanScan(request); err == nil {
+		t.Fatal("accepted secondary target flags")
+	}
+	request.Extra = nil
+	request.Options["proxy-url"] = "https://other.example"
+	if _, err := PlanScan(request); err == nil {
+		t.Fatal("accepted unscoped proxy option")
+	}
+}
+
 func TestRecipeCatalogCoversSecurityTesting(t *testing.T) {
 	if len(Recipes()) < 50 {
 		t.Fatalf("catalog too small: %d", len(Recipes()))
@@ -133,6 +164,8 @@ func TestScanScopeRejectsHiddenNetworkTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, req := range []ScanRequest{
+		{Recipe: "ai-infra-guard", Target: "https://outside.test"},
+		{Recipe: "ai-infra-guard", Target: "https://allowed.test", Extra: []string{"--target", "https://outside.test"}},
 		{Recipe: "nmap", Target: "allowed.test", Extra: []string{"-iL", "other-hosts.txt"}},
 		{Recipe: "metasploit", Target: "auxiliary/scanner/smb/smb_version", Options: map[string]string{"RHOSTS": "outside.test"}},
 		{Recipe: "metasploit", Target: "auxiliary/scanner/smb/smb_version", Options: map[string]string{"RHOSTS": "allowed.test", "RHOST": "outside.test"}},
@@ -146,6 +179,9 @@ func TestScanScopeRejectsHiddenNetworkTargets(t *testing.T) {
 		if err := catalog.CheckScanRequestScope(req); err == nil {
 			t.Fatalf("hidden target accepted: %+v", req)
 		}
+	}
+	if err := catalog.CheckScanRequestScope(ScanRequest{Recipe: "ai-infra-guard", Target: "https://allowed.test"}); err != nil {
+		t.Fatalf("authorized AI scan target rejected: %v", err)
 	}
 	if err := catalog.CheckScanRequestScope(ScanRequest{Recipe: "metasploit", Target: "auxiliary/scanner/smb/smb_version", Options: map[string]string{"RHOSTS": "allowed.test"}}); err != nil {
 		t.Fatal(err)

@@ -62,8 +62,15 @@ type pathPolicyFile struct {
 
 // loadPathRules compiles path-based rules from the policy file.
 func loadPathRules(pf *pathPolicyFile) {
+	compiled := compilePathRules(pf)
+	globalPathRules.mu.Lock()
+	globalPathRules.rules = compiled
+	globalPathRules.mu.Unlock()
+}
+
+func compilePathRules(pf *pathPolicyFile) []pathRule {
 	if pf == nil {
-		return
+		return nil
 	}
 	var compiled []pathRule
 
@@ -83,9 +90,7 @@ func loadPathRules(pf *pathPolicyFile) {
 		}
 	}
 
-	globalPathRules.mu.Lock()
-	globalPathRules.rules = compiled
-	globalPathRules.mu.Unlock()
+	return compiled
 }
 
 // compilePathRule parses a rule string like "Edit(**/*.pem)" into a pathRule.
@@ -132,6 +137,9 @@ func (s *System) CheckPathPolicy(toolName string, arguments json.RawMessage) *De
 	globalPathRules.mu.RLock()
 	rules := globalPathRules.rules
 	globalPathRules.mu.RUnlock()
+	if snapshot := s.policySnapshot(); snapshot != nil {
+		rules = snapshot.paths
+	}
 
 	if len(rules) == 0 {
 		return nil
@@ -162,9 +170,7 @@ func (s *System) CheckPathPolicy(toolName string, arguments json.RawMessage) *De
 			case PathRuleAllow:
 				return &Decision{Approved: true}
 			case PathRuleAsk:
-				// "ask" means the tool should go through the TUI permission gate.
-				// Return nil to fall through to the permission checker.
-				return nil
+				return &Decision{RequiresApproval: true, Message: "approval required by path policy"}
 			}
 		}
 	}

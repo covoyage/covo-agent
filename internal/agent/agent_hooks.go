@@ -10,12 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/agent/approval"
 	"github.com/covoyage/covo-agent/internal/agent/safety"
 	"github.com/covoyage/covo-agent/internal/cyber"
 	"github.com/covoyage/covo-agent/internal/diff"
 	"github.com/covoyage/covo-agent/internal/doomloop"
 	"github.com/covoyage/covo-agent/internal/lsp"
 	"github.com/covoyage/covo-agent/internal/sandbox"
+	"github.com/covoyage/covo-agent/internal/tools/fileops"
 	toolssubagent "github.com/covoyage/covo-agent/internal/tools/subagent"
 	"github.com/covoyage/covonaut/agentcore"
 )
@@ -132,11 +134,14 @@ func (ca *CovoAgent) toolGuardrailAfterHook() agentcore.AfterHook {
 }
 
 var fileWriteToolNames = map[string]string{
-	"write_file": "path",
-	"edit_block": "path",
-	"edit":       "file_path",
-	"move":       "path",
-	"patch":      "path",
+	"write_file":  "path",
+	"write":       "path",
+	"append_file": "file_path",
+	"edit_block":  "path",
+	"edit":        "file_path",
+	"move":        "source",
+	"delete":      "path",
+	"patch":       "path",
 }
 
 // diffApprovalTools is the subset of file-mutating tools for which we can
@@ -299,27 +304,67 @@ func generateSimpleDiff(oldText, newText, filename string) string {
 func (ca *CovoAgent) fileSafetyBeforeHook() agentcore.BeforeHook {
 	return func(ctx context.Context, hc *agentcore.HookContext) error {
 		paramKey, ok := fileWriteToolNames[hc.ToolName]
-		if !ok {
+		if !ok && hc.ToolName != "apply_patch" && hc.ToolName != "delete_file" {
 			return nil
 		}
 
 		var args map[string]interface{}
 		if err := json.Unmarshal(hc.Arguments, &args); err != nil {
-			return nil
+			return err
 		}
 
-		path, _ := args[paramKey].(string)
-		if path == "" {
-			return nil
-		}
-
-		if err := ca.CheckWriteSafe(path); err != nil {
-			return fmt.Errorf("file write blocked by safety check: %w", err)
-		}
-
-		if ca.readOnlyMgr != nil {
-			if err := ca.readOnlyMgr.CheckReadOnly(path); err != nil {
+		var paths []string
+		if hc.ToolName == "apply_patch" {
+			patch, _ := args["patch"].(string)
+			workspace, _ := args["workspace_dir"].(string)
+			if workspace == "" {
+				workspace = ca.workDir
+			}
+			var err error
+			paths, err = fileops.PatchPaths(patch, workspace)
+			if err != nil {
 				return err
+			}
+		} else {
+			path, _ := args[paramKey].(string)
+			if path == "" {
+				path, _ = args["path"].(string)
+			}
+			if path == "" {
+				path, _ = args["file_path"].(string)
+			}
+			if path != "" {
+				paths = append(paths, path)
+			}
+			if hc.ToolName == "delete_file" {
+				if targets, ok := args["targets"].([]any); ok {
+					for _, target := range targets {
+						if path, ok := target.(string); ok {
+							paths = append(paths, path)
+						}
+					}
+				}
+			}
+			if hc.ToolName == "move" {
+				for _, key := range []string{"dest", "destination", "new_path", "to"} {
+					if target, ok := args[key].(string); ok {
+						paths = append(paths, target)
+					}
+				}
+			}
+		}
+
+		for _, path := range paths {
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(ca.workDir, path)
+			}
+			if err := ca.CheckWriteSafe(path); err != nil {
+				return fmt.Errorf("file write blocked by safety check: %w", err)
+			}
+			if ca.readOnlyMgr != nil {
+				if err := ca.readOnlyMgr.CheckReadOnly(path); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -368,9 +413,14 @@ func (ca *CovoAgent) trajectoryBeforeHook() agentcore.BeforeHook {
 
 func (ca *CovoAgent) permissionGateBeforeHook() agentcore.BeforeHook {
 	return func(ctx context.Context, hc *agentcore.HookContext) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if scope, scoped := toolssubagent.IntakeScopeFromContext(ctx); scoped && !intakeToolAllowed(scope, hc) {
 			return fmt.Errorf("automatic verifier tool %q exceeds the recorded intake endpoint", hc.ToolName)
 		}
+		requiresApproval := approval.RequiresToolApproval(hc.ToolName, hc.Arguments)
+		policyAsk := false
 		// Step 1: Approval system pattern check (for bash/process commands)
 		if hc.ToolName == "bash" || hc.ToolName == "process" {
 			var args struct {
@@ -379,18 +429,20 @@ func (ca *CovoAgent) permissionGateBeforeHook() agentcore.BeforeHook {
 			json.Unmarshal(hc.Arguments, &args)
 			if args.Command != "" && ca.approvalSystem != nil {
 				decision := ca.approvalSystem.CheckCommand(ctx, args.Command, "")
+				if decision.Approved {
+					requiresApproval = false
+				}
 				if !decision.Approved {
-					if decision.Hardline {
-						return fmt.Errorf("hardline block: %s", decision.Message)
+					if !decision.RequiresApproval {
+						return fmt.Errorf("approval denied: %s", decision.Message)
 					}
+					requiresApproval = true
+					policyAsk = true
 					// Store pattern info for TUI display
 					ca.pendingPattern = decision.Description
 					// Fire pre-approval hook
 					ca.approvalSystem.FirePreApproval(args.Command, decision.PatternKey, decision.Description)
 					// Fall through to TUI gate
-				} else {
-					// Approved by pattern check (safe, allowlisted, or YOLO)
-					return nil
 				}
 			}
 		}
@@ -403,8 +455,9 @@ func (ca *CovoAgent) permissionGateBeforeHook() agentcore.BeforeHook {
 				if !d.Approved {
 					return fmt.Errorf("%s", d.Message)
 				}
-				// Tool explicitly allowed by policy — skip TUI gate.
-				return nil
+				if !policyAsk {
+					requiresApproval = false
+				}
 			}
 		}
 
@@ -415,11 +468,15 @@ func (ca *CovoAgent) permissionGateBeforeHook() agentcore.BeforeHook {
 		// fall through to the TUI permission gate.
 		if ca.approvalSystem != nil {
 			if d := ca.approvalSystem.CheckPathPolicy(hc.ToolName, hc.Arguments); d != nil {
-				if !d.Approved {
+				if !d.Approved && !d.RequiresApproval {
 					return fmt.Errorf("%s", d.Message)
 				}
-				// Path explicitly allowed by policy — skip TUI gate.
-				return nil
+				if d.RequiresApproval {
+					policyAsk = true
+					requiresApproval = true
+				} else if !policyAsk {
+					requiresApproval = false
+				}
 			}
 		}
 
@@ -429,7 +486,13 @@ func (ca *CovoAgent) permissionGateBeforeHook() agentcore.BeforeHook {
 			return fmt.Errorf("remote_node_exec needs an explicit tool policy in non-interactive cyber sessions")
 		}
 		if ca.permissionChecker == nil {
+			if ca.approvalSystem != nil && requiresApproval && (policyAsk || !ca.isYolo()) {
+				return fmt.Errorf("tool %q requires approval but no permission requester is available", hc.ToolName)
+			}
 			return nil
+		}
+		if policyAsk {
+			ctx = approval.WithRequiredApproval(ctx)
 		}
 		if !ca.permissionChecker(ctx, hc.ToolName, hc.Arguments) {
 			return fmt.Errorf("tool %q rejected by user", hc.ToolName)

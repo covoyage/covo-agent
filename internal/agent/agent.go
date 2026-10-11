@@ -935,7 +935,10 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 
 	ca.rateLimitState = NewRateLimitState()
 	ca.toolGuardrail = NewToolGuardrail()
-	ca.approvalSystem = initApprovalSystem(cfg)
+	ca.approvalSystem, err = initApprovalSystem(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("initialize approval policy: %w", err)
+	}
 	ca.thinkScrubber = NewStreamingThinkScrubber()
 	ca.shellHooks = NewShellHookManager(cfg.HomeDir, envBool("COVO_ACCEPT_HOOKS", false))
 	ca.shellHooks.LoadProjectHooksFile(cfg.WorkingDir)

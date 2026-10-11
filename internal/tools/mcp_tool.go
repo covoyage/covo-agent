@@ -78,15 +78,22 @@ func (s *MCPStore) AutoConnect(ctx context.Context, name, command string, args [
 	}
 
 	s.mu.Lock()
+	fingerprint, err := mcpDefinitionFingerprint(tools)
+	if err != nil {
+		s.mu.Unlock()
+		client.Close()
+		return 0, err
+	}
 	s.servers[name] = &mcpServer{
 		config: mcpServerConfig{
 			Name:    name,
 			Command: command,
 		},
-		client:    client,
-		closeConn: client.Close,
-		tools:     tools,
-		connected: true,
+		client:           client,
+		closeConn:        client.Close,
+		tools:            tools,
+		auditFingerprint: fingerprint,
+		connected:        true,
 	}
 	s.mu.Unlock()
 
@@ -94,12 +101,13 @@ func (s *MCPStore) AutoConnect(ctx context.Context, name, command string, args [
 }
 
 type mcpServer struct {
-	config    mcpServerConfig
-	closeConn func()
-	client    mcpClient
-	toolsMu   sync.RWMutex
-	tools     []mcpToolDef
-	connected bool
+	config           mcpServerConfig
+	closeConn        func()
+	client           mcpClient
+	toolsMu          sync.RWMutex
+	tools            []mcpToolDef
+	auditFingerprint string
+	connected        bool
 }
 
 type mcpServerConfig struct {
@@ -821,6 +829,11 @@ func handleConnect(ctx context.Context, store *MCPStore, params struct {
 	}
 
 	closeConn := client.Close
+	fingerprint, err := mcpDefinitionFingerprint(tools)
+	if err != nil {
+		client.Close()
+		return nil, err
+	}
 
 	store.mu.Lock()
 	if existing, ok := store.servers[params.Name]; ok {
@@ -834,10 +847,11 @@ func handleConnect(ctx context.Context, store *MCPStore, params struct {
 			Env:     nil,
 			Timeout: timeout,
 		},
-		closeConn: closeConn,
-		client:    client,
-		tools:     tools,
-		connected: true,
+		closeConn:        closeConn,
+		client:           client,
+		tools:            tools,
+		auditFingerprint: fingerprint,
+		connected:        true,
 	}
 	store.mu.Unlock()
 
@@ -1069,6 +1083,14 @@ func handleRefresh(ctx context.Context, store *MCPStore, params struct {
 	}
 
 	server.toolsMu.Lock()
+	if server.auditFingerprint == "" {
+		fingerprint, err := mcpDefinitionFingerprint(server.tools)
+		if err != nil {
+			server.toolsMu.Unlock()
+			return nil, err
+		}
+		server.auditFingerprint = fingerprint
+	}
 	server.tools = tools
 	server.toolsMu.Unlock()
 

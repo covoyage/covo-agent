@@ -335,7 +335,7 @@ func (g *Gateway) handleMessage(ctx context.Context, plat plugin.PlatformProvide
 				Detail: "pairing code " + code,
 			})
 			hint := i18n.T("pairing.access_denied", "code", code)
-			if err := plat.Send(ctx, msg.ChannelID, hint); err != nil {
+			if err := sendMessageReply(ctx, plat, msg, hint); err != nil {
 				slog.Warn("gateway: send pairing code failed",
 					"platform", platformName, "user", msg.UserName, "error", err)
 			}
@@ -356,7 +356,7 @@ func (g *Gateway) handleMessage(ctx context.Context, plat plugin.PlatformProvide
 				ChannelID: msg.ChannelID, UserID: msg.UserID, UserName: msg.UserName,
 				Detail: reason,
 			})
-			if err := plat.Send(ctx, msg.ChannelID,
+			if err := sendMessageReply(ctx, plat, msg,
 				i18n.T("gateway.suspended", "reason", reason)); err != nil {
 				slog.Warn("gateway: send suspend notice failed", "error", err)
 			}
@@ -414,7 +414,7 @@ func (g *Gateway) handleMessage(ctx context.Context, plat plugin.PlatformProvide
 		response += footer
 	}
 
-	if err := plat.Send(ctx, msg.ChannelID, response); err != nil {
+	if err := sendMessageReply(ctx, plat, msg, response); err != nil {
 		slog.Warn("gateway: send response failed",
 			"platform", msg.Platform,
 			"channel", msg.ChannelID,
@@ -432,6 +432,13 @@ func (g *Gateway) handleMessage(ctx context.Context, plat plugin.PlatformProvide
 		ChannelID: msg.ChannelID, UserID: msg.UserID, UserName: msg.UserName,
 		Text: response,
 	})
+}
+
+func sendMessageReply(ctx context.Context, platform plugin.PlatformProvider, incoming plugin.IncomingMessage, text string) error {
+	if incoming.RequestID == "" {
+		return platform.Send(ctx, incoming.ChannelID, text)
+	}
+	return platform.SendMessage(ctx, incoming.ChannelID, plugin.OutgoingMessage{Text: text, RequestID: incoming.RequestID})
 }
 
 // applyAutoTranscription looks for an audio attachment on the incoming

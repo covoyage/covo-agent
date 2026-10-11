@@ -43,6 +43,46 @@ func TestCheckToolPolicy_NoRules(t *testing.T) {
 	}
 }
 
+func TestInstancePoliciesRemainIsolated(t *testing.T) {
+	enableExecPolicy(t)
+	firstDir, secondDir := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(firstDir, "policy.yaml"), []byte("deny: [python3]\ntools:\n  deny: [edit]\npaths:\n  deny: ['Read(.env)']\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secondDir, "policy.yaml"), []byte("allow: ['*']\ntools:\n  allow: [edit]\npaths:\n  allow: ['Read(.env)']\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	first := NewSystem(Config{StorageDir: t.TempDir()})
+	second := NewSystem(Config{StorageDir: t.TempDir()})
+	if err := first.LoadPolicyFromDirs(firstDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.LoadPolicyFromDirs(secondDir); err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []struct {
+		system  *System
+		allowed bool
+	}{{first, false}, {second, true}} {
+		if d := check.system.CheckToolPolicy("edit_block"); d == nil || d.Approved != check.allowed {
+			t.Fatalf("isolated tool policy: %+v", d)
+		}
+		if d := check.system.CheckPolicy("python3 test.py"); d == nil || d.Approved != check.allowed {
+			t.Fatalf("isolated command policy: %+v", d)
+		}
+		if d := check.system.CheckPathPolicy("read", []byte(`{"path":".env"}`)); d == nil || d.Approved != check.allowed {
+			t.Fatalf("isolated path policy: %+v", d)
+		}
+	}
+	empty := NewSystem(Config{StorageDir: t.TempDir()})
+	if err := empty.LoadPolicyFromDirs(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if empty.CheckToolPolicy("edit_block") != nil {
+		t.Fatal("new instance inherited another policy")
+	}
+}
+
 func TestCheckToolPolicy_DenyGroup(t *testing.T) {
 	enableExecPolicy(t)
 	resetToolPolicy()

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/covoyage/covo-agent/internal/evolution"
+
 	"github.com/covoyage/covonaut/skill"
 	"gopkg.in/yaml.v3"
 )
@@ -63,6 +65,20 @@ func skillAvailable(item skill.Skill, goos string) bool {
 }
 
 func skillUnavailableReason(item skill.Skill, goos string) (string, bool) {
+	if item.FilePath != "" && !evolution.MatchesBundledSkill(filepath.Dir(item.FilePath)) {
+		result, err := evolution.ScanSkill(filepath.Dir(item.FilePath), "external")
+		if err != nil {
+			return "security audit failed: " + err.Error(), true
+		}
+		if result.Incomplete {
+			return "security audit incomplete", true
+		}
+		for _, finding := range result.Findings {
+			if finding.Severity == "critical" || finding.Severity == "high" {
+				return "security audit: " + finding.PatternID + " in " + finding.File, true
+			}
+		}
+	}
 	req := parseSkillRequirements(item.FilePath)
 	if len(req.Platforms) > 0 && !platformMatches(req.Platforms, goos) {
 		return "platform", true

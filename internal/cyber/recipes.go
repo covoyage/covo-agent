@@ -2,7 +2,9 @@ package cyber
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -117,6 +119,7 @@ func RecipeSummaries() []map[string]string {
 
 func buildRecipeCatalog() []RecipeSpec {
 	return []RecipeSpec{
+		{Name: "ai-infra-guard", Binary: "ai-infra-guard", Summary: "AI infrastructure fingerprints and advisory candidates (not confirmed vulnerabilities)", TargetKind: TargetURL, Timeout: 3 * time.Minute, OptionsArgs: aiInfraGuardArgs},
 		// --- host / port recon ---
 		{Name: "nmap", Binary: "nmap", Summary: "Port/service scan", TargetKind: TargetHost, Timeout: 3 * time.Minute, Args: positional([]string{"-Pn", "-sV", "--top-ports", "1000"})},
 		{Name: "rustscan", Binary: "rustscan", Summary: "Fast port discovery", TargetKind: TargetHost, Timeout: 3 * time.Minute, Args: flagThen([]string{"-a"}, []string{"--ulimit", "5000", "-g", "--scripts", "none"})},
@@ -226,6 +229,32 @@ func buildRecipeCatalog() []RecipeSpec {
 		{Name: "falco", Binary: "falco", Summary: "Runtime security rules validate", TargetKind: TargetFile, Timeout: 1 * time.Minute, Args: falcoArgs},
 		{Name: "cloudmapper", Binary: "cloudmapper", Summary: "AWS collect/report", TargetKind: TargetQuery, Timeout: 5 * time.Minute, Args: positional([]string{"collect"})},
 	}
+}
+
+func aiInfraGuardArgs(target string, options map[string]string, extra []string) ([]string, error) {
+	if len(extra) != 0 {
+		return nil, fmt.Errorf("ai-infra-guard does not accept extra flags")
+	}
+	parsed, err := url.Parse(target)
+	if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.Fragment != "" {
+		return nil, fmt.Errorf("ai-infra-guard requires one HTTP(S) URL without userinfo or fragment")
+	}
+	for key := range options {
+		if key != "fingerprints" && key != "advisories" {
+			return nil, fmt.Errorf("unsupported ai-infra-guard option %q", key)
+		}
+	}
+	for _, key := range []string{"fingerprints", "advisories"} {
+		location := options[key]
+		if !filepath.IsAbs(location) {
+			return nil, fmt.Errorf("%s requires an explicit absolute local rules directory", key)
+		}
+		info, err := os.Lstat(location)
+		if err != nil || !info.IsDir() {
+			return nil, fmt.Errorf("%s must be an existing nonsymlink directory", key)
+		}
+	}
+	return []string{"scan", "--target", target, "--fps", options["fingerprints"], "--vul", options["advisories"], "--timeout", "5", "--limit", "10", "--lang", "en"}, nil
 }
 
 // BlockedWrappers are catalog candidates deliberately kept out of the default

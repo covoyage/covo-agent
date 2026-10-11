@@ -86,7 +86,7 @@ func (h *Hub) fetchIndex() ([]SkillInfo, error) {
 		return nil, fmt.Errorf("registry returned %s", resp.Status)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readRegistryBody(resp.Body, 2<<20)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
@@ -139,6 +139,16 @@ func (h *Hub) Search(query string) ([]SkillInfo, error) {
 }
 
 func (h *Hub) Install(name string) (string, error) {
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name || strings.ContainsAny(name, `/\`) {
+		return "", fmt.Errorf("invalid skill name")
+	}
+	entry, err := h.findIndexEntry(name)
+	if err != nil {
+		return "", fmt.Errorf("verify skill index: %w", err)
+	}
+	if entry == nil {
+		return "", fmt.Errorf("skill %q is not listed in the registry index", name)
+	}
 	resp, err := h.client.Get(h.registryURL + "/skills/" + url.PathEscape(name) + "/SKILL.md")
 	if err != nil {
 		return "", fmt.Errorf("fetch skill %q: %w", name, err)
@@ -152,7 +162,7 @@ func (h *Hub) Install(name string) (string, error) {
 		return "", fmt.Errorf("registry returned %s for skill %q", resp.Status, name)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readRegistryBody(resp.Body, 1<<20)
 	if err != nil {
 		return "", fmt.Errorf("read skill %q: %w", name, err)
 	}
@@ -161,7 +171,7 @@ func (h *Hub) Install(name string) (string, error) {
 	// mismatch means the index and the skill content disagree — treat that
 	// as a supply-chain signal and refuse the install.
 	digest := fmt.Sprintf("%x", sha256.Sum256(body))
-	if entry, err := h.findIndexEntry(name); err == nil && entry != nil && entry.SHA256 != "" {
+	if entry.SHA256 != "" {
 		if !strings.EqualFold(entry.SHA256, digest) {
 			return "", fmt.Errorf(
 				"skill %q blocked: content digest %s does not match registry pin %s",
@@ -189,6 +199,25 @@ func (h *Hub) Install(name string) (string, error) {
 	// --- end security scan ---
 
 	skillDir := filepath.Join(h.skillsDir, name)
+	if info, err := os.Lstat(skillDir); err == nil {
+		if !info.IsDir() {
+			return "", fmt.Errorf("skill package must be a real directory")
+		}
+		result, err := evolution.ScanSkill(skillDir, h.registryURL)
+		if err != nil {
+			return "", fmt.Errorf("audit existing skill package: %w", err)
+		}
+		if result.Incomplete {
+			return "", fmt.Errorf("skill package audit incomplete: %v", result.SkippedFiles)
+		}
+		for _, finding := range result.Findings {
+			if finding.Severity == "critical" || finding.Severity == "high" {
+				return "", fmt.Errorf("skill package blocked: %s in %s", finding.PatternID, finding.File)
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		return "", fmt.Errorf("create skill dir: %w", err)
 	}
@@ -206,6 +235,17 @@ func (h *Hub) Install(name string) (string, error) {
 	})
 
 	return path, nil
+}
+
+func readRegistryBody(reader io.Reader, limit int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, fmt.Errorf("registry response exceeds %d byte limit", limit)
+	}
+	return body, nil
 }
 
 // findIndexEntry looks up a skill in the registry index. Errors (including

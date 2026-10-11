@@ -159,7 +159,7 @@ func IsWriteSafeWithWorkspaces(path string, homeDir string, workDir string, extr
 		return fmt.Errorf("cannot write to system binary directory: %s", real)
 	}
 
-	return IsPathSafeWithWorkspace(path, homeDir, workDir, workspaceOnly)
+	return IsPathSafeWithWorkspaces(path, homeDir, workDir, extraRoots, workspaceOnly)
 }
 
 func resolvePath(path string) (string, error) {
@@ -167,12 +167,26 @@ func resolvePath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	real, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return abs, nil
+	ancestor := abs
+	for {
+		real, err := filepath.EvalSymlinks(ancestor)
+		if err == nil {
+			remainder, err := filepath.Rel(ancestor, abs)
+			if err != nil {
+				return "", err
+			}
+			return filepath.Join(real, remainder), nil
 		}
-		return "", err
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		if info, statErr := os.Lstat(ancestor); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", err
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			return "", err
+		}
+		ancestor = parent
 	}
-	return real, nil
 }

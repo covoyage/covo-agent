@@ -99,8 +99,9 @@ func NewACPCommand() *cobra.Command {
 			// WebSocket relay mode: start a WebSocket-to-stdio bridge
 			if wsMode {
 				relay, err := acpadapt.NewWSRelay(acpadapt.WSRelayConfig{
-					Addr:   wsAddr,
-					Logger: logger,
+					Addr:      wsAddr,
+					AuthToken: os.Getenv("COVO_ACP_WS_TOKEN"),
+					Logger:    logger,
 				})
 				if err != nil {
 					return fmt.Errorf("create WS relay: %w", err)
@@ -123,7 +124,7 @@ func NewACPCommand() *cobra.Command {
 	acpCmd.Flags().BoolVar(&doSetup, "setup", false, "run interactive provider/model setup")
 	acpCmd.Flags().BoolVar(&version, "version", false, "show version and exit")
 	acpCmd.Flags().BoolVar(&wsMode, "ws", false, "start as WebSocket relay server (for remote IDE integration)")
-	acpCmd.Flags().StringVar(&wsAddr, "addr", ":17891", "WebSocket relay listen address (use with --ws)")
+	acpCmd.Flags().StringVar(&wsAddr, "addr", "127.0.0.1:17891", "WebSocket relay address; non-loopback requires COVO_ACP_WS_TOKEN (use with --ws)")
 	acpCmd.Flags().StringVar(&remote, "remote", "", "remote workspace (user@host:/path or ssh://user@host/path)")
 	acpCmd.Flags().BoolVar(&remoteRuntime, "remote-runtime", false, "upload this binary and run acp on --remote")
 	return acpCmd

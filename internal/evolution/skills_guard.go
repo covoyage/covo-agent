@@ -29,17 +29,20 @@ type Finding struct {
 	Line        int    `json:"line"`
 	Match       string `json:"match"`
 	Description string `json:"description"`
+	Candidate   bool   `json:"candidate"`
 }
 
 // ScanResult aggregates all findings from scanning a skill directory.
 type ScanResult struct {
-	SkillName  string    `json:"skill_name"`
-	Source     string    `json:"source"`
-	TrustLevel string    `json:"trust_level"`
-	Verdict    string    `json:"verdict"` // safe, caution, dangerous
-	Findings   []Finding `json:"findings"`
-	ScannedAt  string    `json:"scanned_at"`
-	Summary    string    `json:"summary"`
+	SkillName    string    `json:"skill_name"`
+	Source       string    `json:"source"`
+	TrustLevel   string    `json:"trust_level"`
+	Verdict      string    `json:"verdict"` // safe, caution, dangerous
+	Findings     []Finding `json:"findings"`
+	ScannedAt    string    `json:"scanned_at"`
+	Summary      string    `json:"summary"`
+	Incomplete   bool      `json:"incomplete"`
+	SkippedFiles []string  `json:"skipped_files,omitempty"`
 }
 
 // InstallDecision represents a policy decision on whether to allow install.
@@ -249,6 +252,9 @@ var scannableExtensions = map[string]bool{
 	".js": true, ".ts": true, ".rb": true, ".yaml": true, ".yml": true,
 	".json": true, ".toml": true, ".cfg": true, ".ini": true, ".conf": true,
 	".html": true, ".css": true, ".xml": true,
+	".go": true, ".rs": true, ".c": true, ".h": true, ".lua": true, ".ps1": true,
+	".svg": true, ".sql": true, ".lock": true, ".name": true,
+	".skillignore": true, ".clawhubignore": true, ".gitignore": true, ".gitattributes": true,
 }
 
 // suspiciousBinaryExtensions lists file extensions that indicate binary payloads.
@@ -256,6 +262,7 @@ var suspiciousBinaryExtensions = map[string]bool{
 	".exe": true, ".dll": true, ".so": true, ".dylib": true, ".bin": true,
 	".dat": true, ".com": true, ".msi": true, ".dmg": true, ".app": true,
 	".deb": true, ".rpm": true,
+	".pyc": true, ".pyo": true, ".pyd": true,
 }
 
 // invisibleChars reuses the canonical set from the security package.
@@ -282,22 +289,37 @@ var installPolicy = map[string][3]struct{ allowed, askUser bool }{
 
 // ScanSkill scans an entire skill directory. It performs structural checks,
 // regex-based threat matching on every scannable file, and invisible Unicode
-// detection. It respects .skillignore and .clawhubignore files.
+// detection. Package-controlled ignore rules cannot suppress security checks.
 func ScanSkill(skillPath string, source string) (*ScanResult, error) {
 	skillName := filepath.Base(skillPath)
 	trustLevel := resolveTrustLevel(source)
-	ignoreFn := loadSkillIgnore(skillPath)
+	ignoreFn := func(string) bool { return false }
+	info, err := os.Lstat(skillPath)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("skill root must be a nonsymlink directory")
+	}
+	root, err := os.OpenRoot(skillPath)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
 
 	scannedAt := time.Now().UTC().Format(time.RFC3339)
 
 	var findings []Finding
+	var skipped []string
+	var scannedBytes int64
+	var entries int
 
 	// Structural checks
 	structFindings := checkStructure(skillPath, ignoreFn)
 	findings = append(findings, structFindings...)
 
 	// Walk files
-	err := filepath.WalkDir(skillPath, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(skillPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -306,9 +328,22 @@ func ScanSkill(skillPath string, source string) (*ScanResult, error) {
 		if err != nil {
 			return err
 		}
+		entries++
+		if entries > maxFileCount*2 || scannedBytes >= maxTotalSizeKB*1024 {
+			skipped = append(skipped, relPath+" (audit budget exhausted)")
+			return filepath.SkipAll
+		}
 
 		// Skip directories
 		if d.IsDir() {
+			if d.Name() == ".git" {
+				skipped = append(skipped, relPath+" (version-control metadata excluded)")
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			skipped = append(skipped, relPath)
 			return nil
 		}
 
@@ -334,13 +369,30 @@ func ScanSkill(skillPath string, source string) (*ScanResult, error) {
 		}
 
 		// Only scan text-based files
-		if !scannableExtensions[ext] {
+		if ext != "" && !scannableExtensions[ext] {
+			skipped = append(skipped, relPath)
 			return nil
 		}
 
 		// Scan the file
-		fileFindings := scanFile(path, relPath)
-		findings = append(findings, fileFindings...)
+		file, err := root.Open(relPath)
+		if err != nil {
+			skipped = append(skipped, relPath)
+			return nil
+		}
+		content, err := io.ReadAll(io.LimitReader(file, maxSingleFileKB*1024+1))
+		file.Close()
+		scannedBytes += int64(len(content))
+		if err != nil || len(content) > maxSingleFileKB*1024 || scannedBytes > maxTotalSizeKB*1024 {
+			skipped = append(skipped, relPath)
+			return nil
+		}
+		text, err := decodeSkillText(content)
+		if err != nil {
+			skipped = append(skipped, relPath)
+			return nil
+		}
+		findings = append(findings, ScanContent(text, relPath)...)
 
 		return nil
 	})
@@ -353,15 +405,20 @@ func ScanSkill(skillPath string, source string) (*ScanResult, error) {
 
 	verdict := determineVerdict(findings)
 	summary := buildSummary(skillName, source, trustLevel, verdict, findings)
+	if len(skipped) > 0 {
+		summary += " Audit incomplete; unreviewed package content remains."
+	}
 
 	return &ScanResult{
-		SkillName:  skillName,
-		Source:     source,
-		TrustLevel: trustLevel,
-		Verdict:    verdict,
-		Findings:   findings,
-		ScannedAt:  scannedAt,
-		Summary:    summary,
+		SkillName:    skillName,
+		Source:       source,
+		TrustLevel:   trustLevel,
+		Verdict:      verdict,
+		Findings:     findings,
+		ScannedAt:    scannedAt,
+		Summary:      summary,
+		Incomplete:   len(skipped) > 0,
+		SkippedFiles: skipped,
 	}, nil
 }
 
@@ -393,14 +450,20 @@ func ScanContent(content string, fileName string) []Finding {
 		matches := tp.re.FindAllStringIndex(content, -1)
 		for _, m := range matches {
 			lineNum := lineNumber(content, m[0])
+			severity := tp.severity
+			switch tp.patternID {
+			case "python_getenv_secret", "python_environ_get_secret", "python_os_environ", "node_process_env", "ruby_env_secret", "env_exfil_requests", "env_exfil_httpx":
+				severity = "medium"
+			}
 			findings = append(findings, Finding{
 				PatternID:   tp.patternID,
-				Severity:    tp.severity,
+				Severity:    severity,
 				Category:    tp.category,
 				File:        fileName,
 				Line:        lineNum,
 				Match:       ellipsize(content[m[0]:m[1]], 120),
 				Description: tp.description,
+				Candidate:   true,
 			})
 		}
 	}
@@ -428,6 +491,9 @@ func ScanContent(content string, fileName string) []Finding {
 func ShouldAllowInstall(result *ScanResult, force bool) InstallDecision {
 	if result == nil {
 		return InstallDecision{Allowed: false, Reason: "no scan result", AskUser: false}
+	}
+	if result.Incomplete {
+		return InstallDecision{Allowed: false, Reason: "skill security audit is incomplete"}
 	}
 
 	policy, ok := installPolicy[result.TrustLevel]
@@ -486,9 +552,12 @@ func FormatScanReport(result *ScanResult) string {
 	sb.WriteString(fmt.Sprintf("  Scanned:    %s\n", result.ScannedAt))
 	sb.WriteString(fmt.Sprintf("  Findings:   %d\n\n", len(result.Findings)))
 
-	if len(result.Findings) == 0 {
+	if result.Incomplete {
+		sb.WriteString(fmt.Sprintf("  Audit incomplete: %d unreviewed entries; absence of findings is not a clean result.\n\n", len(result.SkippedFiles)))
+	}
+	if len(result.Findings) == 0 && !result.Incomplete {
 		sb.WriteString("  ✅ No issues found.\n\n")
-	} else {
+	} else if len(result.Findings) > 0 {
 		// Count by severity
 		counts := map[string]int{}
 		for _, f := range result.Findings {
@@ -669,12 +738,20 @@ func checkStructure(skillDir string, ignore func(string) bool) []Finding {
 	var fileCount int
 	var maxFileSize int64
 	var maxFileName string
+	var entries int
 
 	err := filepath.WalkDir(skillDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip problematic entries
 		}
+		entries++
+		if entries > maxFileCount*2 {
+			return filepath.SkipAll
+		}
 		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 

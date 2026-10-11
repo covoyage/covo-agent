@@ -1,9 +1,13 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/covoyage/covo-agent/internal/agent/approval"
 )
 
 func TestApprovalPatternKeyIsPerCall(t *testing.T) {
@@ -56,6 +60,58 @@ func TestActiveCyberApprovalModes(t *testing.T) {
 		if got := readOnlyCyberToolCall(call.name, []byte(call.args)); got != call.readOnly {
 			t.Errorf("%s(%s) read-only = %t, want %t", call.name, call.args, got, call.readOnly)
 		}
+	}
+}
+
+func TestExecutionAndMutationToolsRequireApproval(t *testing.T) {
+	gate := NewPermissionGate(nil)
+	for _, name := range []string{"sandbox", "mcp", "remote_exec", "apply_patch", "append_file"} {
+		if gate.Checker()(context.Background(), name, []byte(`{"command":"echo test","action":"connect"}`)) {
+			t.Errorf("%s bypassed approval", name)
+		}
+	}
+	if !gate.Checker()(context.Background(), "mcp", []byte(`{"action":"list"}`)) {
+		t.Fatal("read-only MCP list requires approval")
+	}
+}
+
+func TestCancelledApprovalCallbackCannotApproveNextRequest(t *testing.T) {
+	gate := NewPermissionGate(nil)
+	callbacks := make(chan func(ApprovalChoice), 2)
+	gate.showApprovalOverlay = func(_ string, choose func(ApprovalChoice), _ func()) { callbacks <- choose }
+	ctx, cancel := context.WithCancel(context.Background())
+	first := make(chan bool, 1)
+	go func() { first <- gate.Checker()(ctx, "write_file", []byte(`{"path":"first"}`)) }()
+	old := <-callbacks
+	cancel()
+	if <-first {
+		t.Fatal("cancelled request approved")
+	}
+	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second)
+	defer cancel2()
+	second := make(chan bool, 1)
+	go func() { second <- gate.Checker()(ctx2, "write_file", []byte(`{"path":"second"}`)) }()
+	current := <-callbacks
+	old(ChoiceOnce)
+	gate.mu.Lock()
+	queued := len(gate.ch)
+	gate.mu.Unlock()
+	if queued != 0 {
+		t.Fatal("stale callback reached new request")
+	}
+	current(ChoiceOnce)
+	current(ChoiceOnce)
+	if !<-second {
+		t.Fatal("current request not approved")
+	}
+}
+
+func TestPolicyAskOverridesAutomaticApproval(t *testing.T) {
+	gate := NewPermissionGate(nil)
+	gate.YoloMode = true
+	ctx := approval.WithRequiredApproval(context.Background())
+	if gate.Checker()(ctx, "read_file", []byte(`{"path":"deps.lock"}`)) {
+		t.Fatal("policy ask bypassed by read-only or YOLO classification")
 	}
 }
 

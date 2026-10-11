@@ -58,12 +58,13 @@ type ApprovalEvent struct {
 
 // Decision is the outcome of an approval check.
 type Decision struct {
-	Approved      bool   `json:"approved"`
-	Hardline      bool   `json:"hardline,omitempty"`
-	SmartApproved bool   `json:"smart_approved,omitempty"`
-	Message       string `json:"message,omitempty"`
-	PatternKey    string `json:"pattern_key,omitempty"`
-	Description   string `json:"description,omitempty"`
+	Approved         bool   `json:"approved"`
+	RequiresApproval bool   `json:"requires_approval,omitempty"`
+	Hardline         bool   `json:"hardline,omitempty"`
+	SmartApproved    bool   `json:"smart_approved,omitempty"`
+	Message          string `json:"message,omitempty"`
+	PatternKey       string `json:"pattern_key,omitempty"`
+	Description      string `json:"description,omitempty"`
 }
 
 var (
@@ -100,6 +101,7 @@ var (
 type System struct {
 	mu     sync.Mutex
 	config Config
+	policy *policySnapshot
 
 	// Session-scoped state
 	sessionApproved map[string]map[string]bool // sessionKey -> {patternKey -> true}
@@ -136,6 +138,7 @@ func NewSystem(cfg Config) *System {
 	}
 	s := &System{
 		config:            cfg,
+		policy:            &policySnapshot{commands: &PolicyEngine{}},
 		sessionApproved:   make(map[string]map[string]bool),
 		sessionYolo:       make(map[string]bool),
 		permanentApproved: make(map[string]bool),
@@ -462,10 +465,11 @@ func (s *System) CheckCommand(ctx context.Context, command, sessionKey string) *
 
 	// 10. Approval required — caller must prompt the user
 	return &Decision{
-		Approved:    false,
-		PatternKey:  patternKey,
-		Description: description,
-		Message:     fmt.Sprintf("⚠️ This command is potentially dangerous (%s). Approval required.", description),
+		Approved:         false,
+		RequiresApproval: true,
+		PatternKey:       patternKey,
+		Description:      description,
+		Message:          fmt.Sprintf("⚠️ This command is potentially dangerous (%s). Approval required.", description),
 	}
 }
 

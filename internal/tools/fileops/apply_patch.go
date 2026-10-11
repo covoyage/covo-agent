@@ -508,7 +508,22 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-func BuildApplyPatchTool() *agentcore.Tool {
+func PatchPaths(patch, workspaceDir string) ([]string, error) {
+	ops, err := parseV4APatch(patch)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, op := range ops {
+		paths = append(paths, resolvePatchPath(op.filePath, workspaceDir))
+		if op.op == patchMove {
+			paths = append(paths, resolvePatchPath(op.newPath, workspaceDir))
+		}
+	}
+	return paths, nil
+}
+
+func BuildApplyPatchTool(workDirs ...string) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name: "apply_patch",
 		Description: strings.Join([]string{
@@ -564,6 +579,9 @@ func BuildApplyPatchTool() *agentcore.Tool {
 			}
 
 			workspaceDir := params.WorkspaceDir
+			if workspaceDir == "" && len(workDirs) > 0 {
+				workspaceDir = workDirs[0]
+			}
 			if workspaceDir == "" {
 				workspaceDir, _ = os.Getwd()
 			}

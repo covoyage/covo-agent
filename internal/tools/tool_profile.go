@@ -81,6 +81,7 @@ var profileCategories = map[string][]string{
 	"deploy":            {"coding"},
 	"structured_output": {"minimal", "coding", "messaging"},
 	"parse_duration":    {"coding"},
+	"mcp_audit":         {"coding"},
 
 	// --- web ---
 	"web_fetch":   {"coding"},

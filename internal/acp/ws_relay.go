@@ -3,24 +3,32 @@ package acp
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/sandbox/ossandbox"
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
 )
 
 // WSRelayConfig configures the ACP WebSocket relay server.
 type WSRelayConfig struct {
-	// Addr is the listen address (default: ":17891").
-	Addr string
+	// Addr is the listen address (default: "127.0.0.1:17891").
+	Addr            string
+	AuthToken       string
+	MaxConnections  int
+	MaxMessageBytes int64
 	// BinaryPath is the path to the covo-agent binary (default: os.Executable).
 	BinaryPath string
 	// Logger for relay events.
@@ -39,13 +47,15 @@ type WSRelayConfig struct {
 // between clients and leverages the existing stdio transport without
 // modifying the ACP library.
 type WSRelay struct {
-	cfg       WSRelayConfig
-	server    *http.Server
-	logger    *slog.Logger
-	mu        sync.Mutex
-	listener  net.Listener
-	conns     map[string]*wsConn
-	connCount int
+	cfg          WSRelayConfig
+	server       *http.Server
+	logger       *slog.Logger
+	mu           sync.Mutex
+	listener     net.Listener
+	conns        map[string]*wsConn
+	connCount    int
+	slots        chan struct{}
+	loopbackOnly bool
 }
 
 type wsConn struct {
@@ -56,7 +66,21 @@ type wsConn struct {
 // NewWSRelay creates a new WebSocket relay server.
 func NewWSRelay(cfg WSRelayConfig) (*WSRelay, error) {
 	if cfg.Addr == "" {
-		cfg.Addr = ":17891"
+		cfg.Addr = "127.0.0.1:17891"
+	}
+	host, _, err := net.SplitHostPort(cfg.Addr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid relay address: %w", err)
+	}
+	loopback := host == "localhost" || (net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback())
+	if !loopback && strings.TrimSpace(cfg.AuthToken) == "" {
+		return nil, fmt.Errorf("non-loopback ACP relay requires COVO_ACP_WS_TOKEN")
+	}
+	if cfg.MaxConnections <= 0 {
+		cfg.MaxConnections = 16
+	}
+	if cfg.MaxMessageBytes <= 0 {
+		cfg.MaxMessageBytes = 1 << 20
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -70,9 +94,11 @@ func NewWSRelay(cfg WSRelayConfig) (*WSRelay, error) {
 	}
 
 	return &WSRelay{
-		cfg:    cfg,
-		logger: cfg.Logger,
-		conns:  make(map[string]*wsConn),
+		cfg:          cfg,
+		logger:       cfg.Logger,
+		conns:        make(map[string]*wsConn),
+		slots:        make(chan struct{}, cfg.MaxConnections),
+		loopbackOnly: loopback,
 	}, nil
 }
 
@@ -93,9 +119,10 @@ func (r *WSRelay) Start(ctx context.Context) error {
 	r.mu.Unlock()
 
 	r.server = &http.Server{
-		Handler:      mux,
-		ReadTimeout:  0, // no timeout for long-lived connections
-		WriteTimeout: 0,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       0, // no timeout for long-lived connections
+		WriteTimeout:      0,
 	}
 
 	r.logger.Info("ACP WebSocket relay listening",
@@ -132,6 +159,34 @@ func (r *WSRelay) Shutdown() {
 // handleWebSocket handles a single WebSocket connection by spawning an ACP
 // subprocess and relaying messages bidirectionally.
 func (r *WSRelay) handleWebSocket(w http.ResponseWriter, req *http.Request) {
+	if r.cfg.AuthToken != "" && subtle.ConstantTimeCompare([]byte(req.Header.Get("Authorization")), []byte("Bearer "+r.cfg.AuthToken)) != 1 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	requestURL, err := url.Parse("http://" + req.Host)
+	if err != nil {
+		http.Error(w, "invalid host", http.StatusBadRequest)
+		return
+	}
+	host := requestURL.Hostname()
+	if r.loopbackOnly && host != "localhost" && (net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback()) {
+		http.Error(w, "invalid host", http.StatusForbidden)
+		return
+	}
+	if origin := req.Header.Get("Origin"); origin != "" {
+		parsed, err := url.Parse(origin)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host != req.Host {
+			http.Error(w, "invalid origin", http.StatusForbidden)
+			return
+		}
+	}
+	select {
+	case r.slots <- struct{}{}:
+	default:
+		http.Error(w, "connection limit reached", http.StatusServiceUnavailable)
+		return
+	}
+	defer func() { <-r.slots }()
 	conn, _, _, err := ws.UpgradeHTTP(req, w)
 	if err != nil {
 		r.logger.Warn("websocket upgrade failed", "err", err)
@@ -158,6 +213,10 @@ func (r *WSRelay) handleWebSocket(w http.ResponseWriter, req *http.Request) {
 	// Spawn the ACP server subprocess
 	cmd := exec.CommandContext(ctx, r.cfg.BinaryPath, "acp")
 	cmd.Env = os.Environ()
+	if err := ossandbox.PrepareChildCommand(ctx, cmd); err != nil {
+		r.logger.Error("prepare ACP subprocess", "err", err)
+		return
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -185,7 +244,7 @@ func (r *WSRelay) handleWebSocket(w http.ResponseWriter, req *http.Request) {
 			cancel()
 		}()
 		for {
-			data, err := wsutil.ReadClientText(conn)
+			data, err := readRelayMessage(conn, r.cfg.MaxMessageBytes)
 			if err != nil {
 				return
 			}
@@ -222,6 +281,25 @@ func (r *WSRelay) handleWebSocket(w http.ResponseWriter, req *http.Request) {
 	// Wait for the subprocess to exit
 	err = cmd.Wait()
 	r.logger.Info("ACP subprocess exited", "conn_id", connID, "err", err)
+}
+
+func readRelayMessage(source io.Reader, limit int64) ([]byte, error) {
+	reader := wsutil.NewReader(source, ws.StateServerSide)
+	header, err := reader.NextFrame()
+	if err != nil {
+		return nil, err
+	}
+	if header.OpCode != ws.OpText || header.Length > limit {
+		return nil, fmt.Errorf("unsupported or oversized relay message")
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("relay message exceeds limit")
+	}
+	return data, nil
 }
 
 // handleHealth returns a simple health check response.

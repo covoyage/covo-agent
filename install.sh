@@ -122,26 +122,30 @@ fetch_latest_version() {
 verify_checksum() {
     local file="$1"
     local name="$2"
+    local -a tool
     if command -v sha256sum >/dev/null 2>&1; then
-        local tool="sha256sum"
+        tool=(sha256sum)
     elif command -v shasum >/dev/null 2>&1; then
-        local tool="shasum -a 256"
+        tool=(shasum -a 256)
     else
-        echo -e "${ORANGE}Warning: no sha256 tool found; skipping checksum verification${NC}"
-        return 0
+        echo -e "${RED}Error: a SHA-256 tool is required for installation${NC}" >&2
+        return 1
     fi
     local expected
-    expected=$(curl -fsSL "https://github.com/$REPO/releases/download/v$requested_version/checksums.txt" 2>/dev/null | grep -w "$name" | awk '{print $1}' || true)
-    if [ -z "$expected" ]; then
-        echo -e "${ORANGE}Warning: checksums.txt not found for v$requested_version; skipping verification${NC}"
-        return 0
+    if ! expected=$(curl -fsSL --max-time 30 --max-filesize 1048576 "https://github.com/$REPO/releases/download/v$requested_version/checksums.txt" |
+        awk -v name="$name" '$2 == name || $2 == "*" name {print tolower($1)}'); then
+        echo -e "${RED}Error: could not retrieve release checksums${NC}" >&2
+        return 1
+    fi
+    if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+        echo -e "${RED}Error: expected exactly one valid SHA-256 checksum for $name${NC}" >&2
+        return 1
     fi
     local actual
-    actual=$($tool "$file" | awk '{print $1}')
+    actual=$("${tool[@]}" "$file" | awk '{print tolower($1)}') || return 1
     if [ "$actual" != "$expected" ]; then
         echo -e "${RED}Error: checksum mismatch for $name${NC}" >&2
-        rm -f "$file"
-        exit 1
+        return 1
     fi
     echo -e "${MUTED}Checksum verified ($actual)${NC}"
 }

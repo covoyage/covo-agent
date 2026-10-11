@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/alecthomas/chroma/v2 v2.27.0
-	github.com/covoyage/covonaut v1.1.3
+	github.com/covoyage/covonaut v1.1.4
 	github.com/creack/pty v1.1.24
 	github.com/gobwas/ws v1.4.0
 	github.com/google/uuid v1.6.0
@@ -59,5 +59,3 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
-
-replace github.com/covoyage/covonaut => /Users/ning/projects/go/covonaut

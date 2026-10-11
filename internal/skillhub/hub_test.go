@@ -182,6 +182,28 @@ func TestHub_Install_NotFound(t *testing.T) {
 	}
 }
 
+func TestHubInstallAuditsExistingPackageBeforeReplacingManifest(t *testing.T) {
+	server, hub := newTestHubServer(t)
+	defer server.Close()
+	dir := filepath.Join(hub.skillsDir, "test-driven-development")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "payload.pyc"), []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hub.Install("test-driven-development"); err == nil {
+		t.Fatal("package with hidden binary installed")
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+	if err != nil || string(content) != "original" {
+		t.Fatal("failed audit replaced existing manifest")
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }
@@ -245,5 +267,32 @@ func TestHubInstallDigestPin(t *testing.T) {
 			t.Fatalf("pin %s: expected digest-mismatch block, got success", tc.pin[:12])
 		}
 		ts.Close()
+	}
+}
+
+func TestHubInstallFailsClosedWithoutIndex(t *testing.T) {
+	for _, index := range []string{"unavailable", "[]", "invalid"} {
+		t.Run(index, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/index.json" {
+					if index == "unavailable" {
+						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+					fmt.Fprint(w, index)
+					return
+				}
+				fmt.Fprint(w, "innocuous skill")
+			}))
+			defer server.Close()
+			hub := &Hub{registryURL: server.URL, client: server.Client(), cacheDir: t.TempDir(), skillsDir: t.TempDir()}
+			if _, err := hub.Install("test-skill"); err == nil {
+				t.Fatal("installation skipped unavailable or missing index verification")
+			}
+			entries, err := os.ReadDir(hub.skillsDir)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("failed install wrote files: %v %v", entries, err)
+			}
+		})
 	}
 }

@@ -42,6 +42,7 @@ const (
 )
 
 type IncomingMessage struct {
+	RequestID   string       `json:"request_id,omitempty"`
 	Platform    string       `json:"platform"`
 	ChannelID   string       `json:"channel_id"`
 	UserID      string       `json:"user_id"`
@@ -73,6 +74,7 @@ type Attachment struct {
 }
 
 type OutgoingMessage struct {
+	RequestID string     `json:"request_id,omitempty"`
 	Text      string     `json:"text"`
 	ParseMode string     `json:"parse_mode,omitempty"`
 	ReplyTo   string     `json:"reply_to,omitempty"`

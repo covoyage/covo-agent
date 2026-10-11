@@ -29,8 +29,8 @@ type PolicyEngine struct {
 }
 
 type policyFile struct {
-	Allow []string `yaml:"allow,omitempty"`
-	Deny  []string `yaml:"deny,omitempty"`
+	Allow []string        `yaml:"allow,omitempty"`
+	Deny  []string        `yaml:"deny,omitempty"`
 	Tools *toolPolicyFile `yaml:"tools,omitempty"`
 	Paths *pathPolicyFile `yaml:"paths,omitempty"`
 }
@@ -56,6 +56,71 @@ type toolPolicyFile struct {
 type toolGroupRules struct {
 	allow map[string]bool // expanded tool names that are explicitly allowed
 	deny  map[string]bool // expanded tool names that are explicitly denied
+}
+
+type policySnapshot struct {
+	commands *PolicyEngine
+	tools    toolGroupRules
+	paths    []pathRule
+}
+
+func readPolicySnapshot(path string) (*policySnapshot, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var file policyFile
+	if err := yaml.Unmarshal(data, &file); err != nil {
+		return nil, err
+	}
+	snapshot := &policySnapshot{commands: &PolicyEngine{}, paths: compilePathRules(file.Paths)}
+	for _, pattern := range file.Allow {
+		snapshot.commands.rules = append(snapshot.commands.rules, rule{action: RuleAllow, pattern: pattern})
+	}
+	for _, pattern := range file.Deny {
+		snapshot.commands.rules = append(snapshot.commands.rules, rule{action: RuleDeny, pattern: pattern})
+	}
+	if file.Tools != nil {
+		snapshot.tools = toolGroupRules{allow: expandToolNames(file.Tools.Allow), deny: expandToolNames(file.Tools.Deny)}
+	}
+	return snapshot, nil
+}
+
+func (s *System) LoadPolicyFromDirs(dirs ...string) error {
+	snapshot := &policySnapshot{commands: &PolicyEngine{}}
+	if cli.IsEnabled("exec-policy") {
+		for _, dir := range dirs {
+			found := false
+			for _, name := range []string{"policy.yaml", ".covo-agent-policy.yaml"} {
+				path := filepath.Join(dir, name)
+				if _, err := os.Stat(path); os.IsNotExist(err) {
+					continue
+				} else if err != nil {
+					return err
+				}
+				var err error
+				snapshot, err = readPolicySnapshot(path)
+				if err != nil {
+					return fmt.Errorf("load policy %s: %w", path, err)
+				}
+				found = true
+				break
+			}
+			if found {
+				break
+			}
+		}
+	}
+	s.mu.Lock()
+	s.policy = snapshot
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *System) policySnapshot() *policySnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.policy
 }
 
 // toolGroups maps a group alias to the concrete tool names it covers.
@@ -218,7 +283,11 @@ func (s *System) CheckPolicy(command string) *Decision {
 	if !cli.IsEnabled("exec-policy") {
 		return nil
 	}
-	action, pattern, matched := globalPolicy.check(command)
+	engine := globalPolicy
+	if snapshot := s.policySnapshot(); snapshot != nil {
+		engine = snapshot.commands
+	}
+	action, pattern, matched := engine.check(command)
 	if !matched {
 		return nil
 	}
@@ -254,6 +323,9 @@ func (s *System) CheckToolPolicy(toolName string) *Decision {
 	globalToolPolicy.mu.RLock()
 	rules := globalToolPolicy.rules
 	globalToolPolicy.mu.RUnlock()
+	if snapshot := s.policySnapshot(); snapshot != nil {
+		rules = snapshot.tools
+	}
 
 	if len(rules.deny) == 0 && len(rules.allow) == 0 {
 		return nil

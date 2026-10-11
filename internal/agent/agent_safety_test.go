@@ -21,6 +21,78 @@ func TestNonInteractiveCyberRemoteExecutionRequiresPolicy(t *testing.T) {
 	}
 }
 
+func TestCommandApprovalDenialIsFinal(t *testing.T) {
+	ctx := context.Background()
+	command := `python3 -c 'print("hello")'`
+	system := approval.NewSystem(approval.Config{Mode: "manual", StorageDir: t.TempDir(), NonInteractive: true})
+	agent := &CovoAgent{mode: ModeGeneral, approvalSystem: system}
+	args, _ := json.Marshal(map[string]string{"command": command})
+	hook := agent.permissionGateBeforeHook()
+	if err := hook(ctx, &agentcore.HookContext{ToolName: "bash", Arguments: args}); err == nil {
+		t.Fatal("non-interactive deny became allowed")
+	}
+	agent.permissionChecker = func(context.Context, string, []byte) bool { t.Fatal("final denial reached requester"); return true }
+	if err := hook(ctx, &agentcore.HookContext{ToolName: "bash", Arguments: args}); err == nil {
+		t.Fatal("requester overrode denial")
+	}
+}
+
+func TestAutomaticApprovalCannotSkipExplicitChecker(t *testing.T) {
+	system := approval.NewSystem(approval.Config{Mode: "manual", StorageDir: t.TempDir()})
+	calls := 0
+	agent := &CovoAgent{mode: ModeGeneral, approvalSystem: system, permissionChecker: func(context.Context, string, []byte) bool { calls++; return false }}
+	if err := agent.permissionGateBeforeHook()(context.Background(), &agentcore.HookContext{ToolName: "bash", Arguments: json.RawMessage(`{"command":"ls -la"}`)}); err == nil {
+		t.Fatal("safe command bypassed explicit denial")
+	}
+	if calls != 1 {
+		t.Fatalf("checker calls=%d", calls)
+	}
+}
+
+func TestMutationSafetyCoversEveryPatchTarget(t *testing.T) {
+	agent := &CovoAgent{mode: ModeGeneral, homeDir: t.TempDir(), workDir: t.TempDir(), workspaceOnly: true}
+	inside := filepath.Join(agent.workDir, "allowed.txt")
+	outside := filepath.Join(t.TempDir(), "blocked.txt")
+	for _, patch := range []string{
+		"*** Begin Patch\n*** Add File: " + inside + "\n+safe\n*** Add File: " + outside + "\n+unsafe\n*** End Patch",
+		"*** Begin Patch\n*** Move File: " + inside + " -> " + outside + "\n*** End Patch",
+	} {
+		args, _ := json.Marshal(map[string]string{"patch": patch})
+		if err := agent.fileSafetyBeforeHook()(context.Background(), &agentcore.HookContext{ToolName: "apply_patch", Arguments: args}); err == nil {
+			t.Fatal("patch target escaped workspace")
+		}
+	}
+	for _, name := range []string{"write", "append_file", "delete_file"} {
+		args, _ := json.Marshal(map[string]string{"path": outside, "file_path": outside})
+		if err := agent.fileSafetyBeforeHook()(context.Background(), &agentcore.HookContext{ToolName: name, Arguments: args}); err == nil {
+			t.Fatalf("%s escaped workspace", name)
+		}
+	}
+	args, _ := json.Marshal(map[string]string{"patch": "*** Begin Patch\n*** Add File: allowed.txt\n+safe\n*** End Patch"})
+	if err := agent.fileSafetyBeforeHook()(context.Background(), &agentcore.HookContext{ToolName: "apply_patch", Arguments: args}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteAndMoveUseRegisteredSchemaSafety(t *testing.T) {
+	workspace := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	agent := &CovoAgent{workDir: workspace, workspaceOnly: true}
+	for _, test := range []struct {
+		name string
+		args map[string]string
+	}{
+		{"delete", map[string]string{"path": outside}},
+		{"move", map[string]string{"source": "inside.txt", "dest": outside}},
+		{"move", map[string]string{"source": outside, "dest": "inside.txt"}},
+	} {
+		arguments, _ := json.Marshal(test.args)
+		if err := agent.fileSafetyBeforeHook()(context.Background(), &agentcore.HookContext{ToolName: test.name, Arguments: arguments}); err == nil {
+			t.Fatalf("%s schema bypassed workspace safety: %s", test.name, arguments)
+		}
+	}
+}
+
 func TestCyberChildRoleCannotBecomeParent(t *testing.T) {
 	if role, err := resolveCyberChildRole(ModeCyber, ""); err != nil || role != "leaf" {
 		t.Fatalf("empty child role=%q err=%v", role, err)

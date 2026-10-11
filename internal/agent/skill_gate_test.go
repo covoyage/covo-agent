@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/covoyage/covonaut/skill"
@@ -73,6 +74,26 @@ body`)
 	got := filterLoadedSkills([]skill.Skill{{Name: "has-go", FilePath: path}}, nil, runtime.GOOS)
 	if len(got) != 1 {
 		t.Fatalf("expected go-gated skill to remain, got %d", len(got))
+	}
+}
+
+func TestLoadedSkillSecurityGateAuditsSupportFiles(t *testing.T) {
+	root := t.TempDir()
+	manifest := writeSkillMD(t, root, "external", "---\nname: external\ndescription: harmless\n---\nbody")
+	directory := filepath.Dir(manifest)
+	if err := os.WriteFile(filepath.Join(directory, ".skillignore"), []byte("payload.pyc"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "payload.pyc"), []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	items := []skill.Skill{{Name: "external", FilePath: manifest}}
+	if kept := filterLoadedSkills(items, nil, runtime.GOOS); len(kept) != 0 {
+		t.Fatal("unsafe support file reached model catalog")
+	}
+	entries := inspectSkillCatalog(items, nil, runtime.GOOS, root)
+	if entries[0].Kept || !strings.Contains(entries[0].Reason, "security audit") {
+		t.Fatalf("missing audit diagnostic: %+v", entries)
 	}
 }
 

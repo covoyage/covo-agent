@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/plugin"
 )
@@ -32,7 +34,7 @@ const (
 
 	// maxTextBytes caps the text accepted through the OpenAI-compatible
 	// chat completions endpoint.
-	chatReplyWaitTimeout = 2 * time.Second
+	chatReplyWaitTimeout = 2 * time.Minute
 )
 
 type Adapter struct {
@@ -54,8 +56,10 @@ type Adapter struct {
 	// replyMu guards replyWaiters: channels registered while a synchronous
 	// reply is expected for a channel (the /v1/chat/completions handler
 	// captures the agent's answer through SendMessage this way).
-	replyMu      sync.Mutex
-	replyWaiters map[string]chan string
+	replyMu       sync.Mutex
+	replyWaiters  map[string]chan string
+	replySessions map[string]string
+	replyTimeout  time.Duration
 }
 
 // idempotencyEntry is a cached HTTP response for a replayed request.
@@ -237,7 +241,11 @@ func (a *Adapter) SendMessage(ctx context.Context, channelID string, msg plugin.
 
 	// A registered reply waiter captures the reply synchronously (used by
 	// /v1/chat/completions) instead of POSTing to a reply URL.
-	if ch := a.replyWaiterFor(channelID); ch != nil {
+	if msg.RequestID != "" {
+		ch := a.replyWaiterFor(msg.RequestID)
+		if ch == nil {
+			return fmt.Errorf("api_server: request is no longer pending")
+		}
 		select {
 		case ch <- msg.Text:
 		default:
@@ -476,28 +484,40 @@ func (a *Adapter) serveChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// channel_id: optional X-Session-Id header, else a generic client id.
+	// channel_id: optional X-Session-Id header, else an isolated anonymous session.
 	channelID := strings.TrimSpace(r.Header.Get("X-Session-Id"))
 	if channelID == "" {
-		channelID = "openai"
+		channelID = "openai-" + uuid.NewString()
 	}
 
+	requestID := uuid.NewString()
 	ch := make(chan string, 4)
 	a.replyMu.Lock()
 	if a.replyWaiters == nil {
 		a.replyWaiters = make(map[string]chan string)
 	}
-	a.replyWaiters[channelID] = ch
+	if a.replySessions == nil {
+		a.replySessions = make(map[string]string)
+	}
+	if a.replySessions[channelID] != "" {
+		a.replyMu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "session already has a pending request"})
+		return
+	}
+	a.replyWaiters[requestID] = ch
+	a.replySessions[channelID] = requestID
 	a.replyMu.Unlock()
 	defer func() {
 		a.replyMu.Lock()
-		if a.replyWaiters[channelID] == ch {
-			delete(a.replyWaiters, channelID)
+		delete(a.replyWaiters, requestID)
+		if a.replySessions[channelID] == requestID {
+			delete(a.replySessions, channelID)
 		}
 		a.replyMu.Unlock()
 	}()
 
 	incoming := plugin.IncomingMessage{
+		RequestID: requestID,
 		Platform:  PlatformName,
 		ChannelID: channelID,
 		UserID:    channelID,
@@ -511,13 +531,28 @@ func (a *Adapter) serveChatCompletions(w http.ResponseWriter, r *http.Request) {
 	callback := a.onMessage
 	a.mu.Unlock()
 
+	if callback == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "agent pipeline unavailable"})
+		return
+	}
+	callback(incoming)
+	timeout := a.replyTimeout
+	if timeout <= 0 {
+		timeout = chatReplyWaitTimeout
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	var reply string
-	if callback != nil {
-		callback(incoming)
-		select {
-		case reply = <-ch:
-		case <-time.After(chatReplyWaitTimeout):
+	select {
+	case reply = <-ch:
+		if r.Context().Err() != nil {
+			return
 		}
+	case <-r.Context().Done():
+		return
+	case <-timer.C:
+		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "agent reply timed out"})
+		return
 	}
 
 	resp := map[string]any{

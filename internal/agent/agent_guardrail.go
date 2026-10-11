@@ -40,7 +40,7 @@ func (h *guardrailLifecycleHook) BeforeTurn(_ context.Context, _ *agentcore.Agen
 
 // --- Approval system ---
 
-func initApprovalSystem(cfg CovoAgentConfig) *approval.System {
+func initApprovalSystem(cfg CovoAgentConfig) (*approval.System, error) {
 	approvalCfg := approval.Config{
 		Mode:       "manual",
 		StorageDir: cfg.HomeDir,
@@ -59,8 +59,10 @@ func initApprovalSystem(cfg CovoAgentConfig) *approval.System {
 		}
 	}
 	sys := approval.NewSystem(approvalCfg)
-	approval.LoadPolicyFromDirs(cfg.HomeDir, cfg.WorkingDir)
-	return sys
+	if err := sys.LoadPolicyFromDirs(cfg.HomeDir, cfg.WorkingDir); err != nil {
+		return nil, err
+	}
+	return sys, nil
 }
 
 // wireSmartApproval connects the LLM provider for smart approval mode.

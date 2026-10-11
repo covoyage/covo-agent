@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -28,6 +30,57 @@ func TestSelectReleaseAssetSupportsGoReleaserArchitectureNames(t *testing.T) {
 func TestNormalizeVersion(t *testing.T) {
 	if normalizeVersion("v1.2.3") != normalizeVersion("1.2.3") {
 		t.Fatal("version tag prefix should not affect comparison")
+	}
+}
+
+func TestInstallerChecksumFailsClosed(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash unavailable")
+	}
+	content, err := os.ReadFile("../../install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(content)
+	start := strings.Index(script, "verify_checksum() {")
+	if start < 0 {
+		t.Fatal("checksum function not found")
+	}
+	end := strings.Index(script[start:], "\ndownload_and_install()")
+	if start < 0 || end < 0 {
+		t.Fatal("checksum function not found")
+	}
+	function := script[start : start+end]
+	digest := strings.Repeat("a", 64)
+	for _, test := range []struct {
+		name, output, actual    string
+		curlFail, noTool, valid bool
+	}{
+		{name: "matching", output: digest + "  archive.tar.gz", actual: digest, valid: true},
+		{name: "unavailable", curlFail: true},
+		{name: "missing entry", output: digest + "  other.tar.gz"},
+		{name: "duplicate entry", output: digest + "  archive.tar.gz\n" + digest + "  archive.tar.gz"},
+		{name: "malformed digest", output: "invalid  archive.tar.gz"},
+		{name: "mismatch", output: digest + "  archive.tar.gz", actual: strings.Repeat("b", 64)},
+		{name: "missing tool", noTool: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			command := exec.Command("bash")
+			command.Env = append(os.Environ(), "CHECKSUM_OUTPUT="+test.output, "CHECKSUM_ACTUAL="+test.actual)
+			setup := "set -euo pipefail\nRED='' NC='' MUTED='' REPO=test requested_version=1\n"
+			setup += "curl() { printf '%s\\n' \"$CHECKSUM_OUTPUT\"; }\nsha256sum() { printf '%s  file\\n' \"$CHECKSUM_ACTUAL\"; }\n"
+			if test.curlFail {
+				setup += "curl() { return 22; }\n"
+			}
+			if test.noTool {
+				setup += "command() { return 1; }\n"
+			}
+			command.Stdin = strings.NewReader(setup + function + "\nverify_checksum ignored archive.tar.gz\n")
+			output, err := command.CombinedOutput()
+			if (err == nil) != test.valid {
+				t.Fatalf("valid=%v error=%v output=%s", test.valid, err, output)
+			}
+		})
 	}
 }
 
