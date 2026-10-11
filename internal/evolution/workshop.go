@@ -25,17 +25,21 @@ const (
 	ProposalApplied     SkillProposalStatus = "applied"
 	ProposalRejected    SkillProposalStatus = "rejected"
 	ProposalQuarantined SkillProposalStatus = "quarantined"
+	ProposalApplying    SkillProposalStatus = "applying"
 )
 
 type SkillProposal struct {
-	ID        string              `yaml:"id"`
-	Kind      SkillProposalKind   `yaml:"kind"`
-	Status    SkillProposalStatus `yaml:"status"`
-	SkillName string              `yaml:"skill_name"`
-	Body      string              `yaml:"body"`
-	Rationale string              `yaml:"rationale,omitempty"`
-	CreatedAt time.Time           `yaml:"created_at"`
-	UpdatedAt time.Time           `yaml:"updated_at"`
+	ID         string              `yaml:"id"`
+	Kind       SkillProposalKind   `yaml:"kind"`
+	Status     SkillProposalStatus `yaml:"status"`
+	SkillName  string              `yaml:"skill_name"`
+	Body       string              `yaml:"body"`
+	Rationale  string              `yaml:"rationale,omitempty"`
+	CreatedAt  time.Time           `yaml:"created_at"`
+	UpdatedAt  time.Time           `yaml:"updated_at"`
+	BaseHash   string              `yaml:"base_hash,omitempty"`
+	TargetPath string              `yaml:"target_path,omitempty"`
+	Plan       *SkillApplyPlan     `yaml:"apply_plan,omitempty"`
 }
 
 type WorkshopStore struct {
@@ -43,6 +47,7 @@ type WorkshopStore struct {
 	dir      string
 	filePath string
 	items    []SkillProposal
+	skillMgr *SkillManager
 }
 
 func NewWorkshopStore(dir string) *WorkshopStore {
@@ -56,15 +61,16 @@ func (s *WorkshopStore) Init() error {
 	if err := os.MkdirAll(s.dir, 0755); err != nil {
 		return fmt.Errorf("create workshop dir: %w", err)
 	}
-	s.load()
-	return nil
+	return s.load()
 }
 
 func (s *WorkshopStore) List() []SkillProposal {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]SkillProposal, len(s.items))
-	copy(result, s.items)
+	for index, proposal := range s.items {
+		result[index] = cloneProposal(proposal)
+	}
 	return result
 }
 
@@ -74,7 +80,7 @@ func (s *WorkshopStore) ListPending() []SkillProposal {
 	var result []SkillProposal
 	for _, p := range s.items {
 		if p.Status == ProposalPending {
-			result = append(result, p)
+			result = append(result, cloneProposal(p))
 		}
 	}
 	return result
@@ -85,7 +91,7 @@ func (s *WorkshopStore) Get(id string) (*SkillProposal, error) {
 	defer s.mu.RUnlock()
 	for _, p := range s.items {
 		if p.ID == id {
-			cp := p
+			cp := cloneProposal(p)
 			return &cp, nil
 		}
 	}
@@ -98,7 +104,7 @@ func (s *WorkshopStore) Create(kind SkillProposalKind, skillName, body, rational
 
 	// Check for existing pending proposal for the same skill
 	for _, p := range s.items {
-		if p.SkillName == skillName && p.Status == ProposalPending {
+		if p.SkillName == skillName && (p.Status == ProposalPending || p.Status == ProposalApplying) {
 			return nil, fmt.Errorf("pending proposal %q already exists for skill %q", p.ID, skillName)
 		}
 	}
@@ -113,6 +119,11 @@ func (s *WorkshopStore) Create(kind SkillProposalKind, skillName, body, rational
 		Rationale: rationale,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+	}
+	if s.skillMgr != nil {
+		if err := s.captureBase(&p); err != nil {
+			return nil, err
+		}
 	}
 	s.items = append(s.items, p)
 	if err := s.save(); err != nil {
@@ -206,15 +217,31 @@ func (s *WorkshopStore) Quarantine(id string) (*SkillProposal, error) {
 	return nil, fmt.Errorf("proposal %q not found", id)
 }
 
-func (s *WorkshopStore) load() {
-	data, err := os.ReadFile(s.filePath)
-	if err != nil {
-		return
+func cloneProposal(proposal SkillProposal) SkillProposal {
+	if proposal.Plan != nil {
+		plan := *proposal.Plan
+		proposal.Plan = &plan
 	}
-	_ = yaml.Unmarshal(data, &s.items)
+	return proposal
+}
+
+func (s *WorkshopStore) load() error {
+	data, err := os.ReadFile(s.filePath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read proposals: %w", err)
+	}
+	var items []SkillProposal
+	if err := yaml.Unmarshal(data, &items); err != nil {
+		return fmt.Errorf("decode proposals: %w", err)
+	}
+	s.items = items
 	if s.items == nil {
 		s.items = []SkillProposal{}
 	}
+	return nil
 }
 
 func (s *WorkshopStore) save() error {
@@ -222,5 +249,5 @@ func (s *WorkshopStore) save() error {
 	if err != nil {
 		return fmt.Errorf("marshal proposals: %w", err)
 	}
-	return os.WriteFile(s.filePath, data, 0644)
+	return atomicWorkshopWrite(s.filePath, data)
 }

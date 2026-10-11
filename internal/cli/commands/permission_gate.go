@@ -196,7 +196,7 @@ func (pg *PermissionGate) Checker() func(ctx context.Context, toolName string, a
 			return false
 		}
 		required := approval.ApprovalRequired(ctx)
-		if !required && !approval.RequiresToolApproval(toolName, args) {
+		if !required && !approval.RequiresApproval(ctx, toolName, args) {
 			return true
 		}
 

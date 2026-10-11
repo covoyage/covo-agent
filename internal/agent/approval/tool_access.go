@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+
+	"github.com/covoyage/covo-agent/internal/tools/capability"
 )
 
 type requiredApprovalKey struct{}
@@ -55,4 +57,23 @@ func RequiresToolApproval(name string, args []byte) bool {
 		return params.Action != "list" && params.Action != "get"
 	}
 	return true
+}
+
+func RequiresApproval(ctx context.Context, name string, args []byte) bool {
+	if metadata, ok := capability.FromContext(ctx); ok {
+		switch metadata.Kind {
+		case capability.Write, capability.Execute:
+			return true
+		case capability.Read:
+			return false
+		case capability.Conditional:
+			if !dangerousToolNames[name] {
+				return true
+			}
+			return RequiresToolApproval(name, args)
+		default:
+			return true
+		}
+	}
+	return RequiresToolApproval(name, args)
 }

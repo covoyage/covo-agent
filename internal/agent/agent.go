@@ -577,7 +577,12 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 
 	// Skill Workshop: proposal-based skill management
 	workshopStore := evolution.NewWorkshopStore(cfg.HomeDir)
-	_ = workshopStore.Init() // non-fatal
+	if err := workshopStore.Init(); err != nil {
+		return nil, fmt.Errorf("initialize workshop: %w", err)
+	}
+	if err := workshopStore.BindSkillManager(skillMgr); err != nil {
+		return nil, fmt.Errorf("recover workshop: %w", err)
+	}
 
 	sessionMgr, err := session.NewManager(cfg.HomeDir)
 	if err != nil {
@@ -1097,6 +1102,8 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 	// Undeclared tools stay fail-closed (exclusive); see concurrency.go.
 	agenttools.ApplyConcurrencyDeclarations(ca.core)
 	agenttools.ApplyToolContracts(ca.core)
+	agenttools.ApplyMutationLocks(ca.core, ca.workDir)
+	agenttools.ApplyReadSummaries(ca.core)
 
 	// Wire BackgroundReviewer to curator for post-session self-improvement
 	ca.backgroundReviewer = NewBackgroundReviewerFromFunc(
@@ -1217,6 +1224,16 @@ func (ca *CovoAgent) wrapContextEngine(cfg CovoAgentConfig) {
 			if enh, ok := wrapped.(*compression.EnhancedContextEngine); ok {
 				enh.SetStateProvider(ca.carriedStateForCompaction)
 				enh.SetCompressionSwitch(ca.compressionSwitch)
+				enh.SetImageAssetDir(func() string {
+					if ca.sessionMgr == nil {
+						return ""
+					}
+					id := ca.sessionMgr.CurrentID()
+					if id == "" || filepath.Base(id) != id || id == "." || id == ".." {
+						return ""
+					}
+					return filepath.Join(cfg.HomeDir, "session-assets", id)
+				})
 			}
 			ca.core.SetContextEngine(wrapped)
 		}
@@ -1959,6 +1976,8 @@ func (ca *CovoAgent) Rebuild(mode AgentMode, provider agentcore.Provider, provid
 	ca.core = agentcore.New(ca.cfg)
 	agenttools.ApplyConcurrencyDeclarations(ca.core)
 	agenttools.ApplyToolContracts(ca.core)
+	agenttools.ApplyMutationLocks(ca.core, ca.workDir)
+	agenttools.ApplyReadSummaries(ca.core)
 
 	// Re-wrap the context engine in EnhancedContextEngine (carried state,
 	// boundary markers, compression switch).

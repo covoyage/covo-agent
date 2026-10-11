@@ -23,6 +23,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/safego"
 	"github.com/covoyage/covo-agent/internal/sandbox"
 	toolscanvas "github.com/covoyage/covo-agent/internal/tools/canvas"
+	"github.com/covoyage/covo-agent/internal/tools/capability"
 	toolscodegraph "github.com/covoyage/covo-agent/internal/tools/codegraph"
 	toolscommitments "github.com/covoyage/covo-agent/internal/tools/commitments"
 	toolscontext "github.com/covoyage/covo-agent/internal/tools/context"
@@ -748,6 +749,11 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		e.tools = filterToolsByProfile(e.tools, e.toolProfile)
 	}
 
+	for _, tool := range e.tools {
+		if _, declared := capability.Lookup(tool); !declared {
+			capability.DeclareBuiltin(tool)
+		}
+	}
 	agent.RegisterTools(e.tools...)
 	if e.cyberMode && e.subagentRole == "parent" && e.spawnRunner != nil {
 		if err := e.catalog.RecoverIntake(); err != nil {

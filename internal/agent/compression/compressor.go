@@ -2,6 +2,7 @@ package compression
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -70,6 +71,7 @@ type EnhancedContextEngine struct {
 	// memoryRecaller, when set, is called after full compaction to recall
 	// relevant memory entries and inject them into the compaction summary.
 	memoryRecaller MemoryRecaller
+	imageAssetDir  func() string
 }
 
 func NewEnhancedContextEngine(inner agentcore.ContextEngine) *EnhancedContextEngine {
@@ -210,6 +212,7 @@ func (e *EnhancedContextEngine) Compress(ctx context.Context, msgs []agentcore.M
 	// recent messages. This creates a clear seam so the model knows where
 	// the compacted history ends and live context begins.
 	result = e.insertBoundaryAfterSummary(result)
+	result = e.preserveImages(msgs, result)
 
 	return result, cut, nil
 }
@@ -324,6 +327,14 @@ func (e *EnhancedContextEngine) MicroCompact(msgs []agentcore.Message) ([]agentc
 		// mid-rune, which would produce invalid UTF-8.
 		placeholder := fmt.Sprintf(microCompactPlaceholder, len(content))
 		head := truncateRunes(content, microCompactKeepHead, "…\n")
+		var envelope struct {
+			Details struct {
+				Summary json.RawMessage `json:"source_summary"`
+			} `json:"details"`
+		}
+		if json.Unmarshal([]byte(content), &envelope) == nil && len(envelope.Details.Summary) > 0 && len(envelope.Details.Summary) <= 2048 {
+			head += "\nRead source facts (reference data): " + string(envelope.Details.Summary) + "\n"
+		}
 		saved := int64(len(content)) - int64(len(head)) - int64(len(placeholder))
 		// saved <= 0 also guards against the case where rune-aware truncation
 		// did not actually shorten the content (e.g. CJK text with fewer runes

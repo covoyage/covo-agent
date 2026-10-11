@@ -3,6 +3,7 @@ package fileops
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"golang.org/x/text/unicode/norm"
@@ -19,25 +20,56 @@ func getFileMutexKey(path string) string {
 		absPath = path
 	}
 
-	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
-		return resolved
+	absPath = filepath.Clean(absPath)
+	for ancestor := absPath; ; ancestor = filepath.Dir(ancestor) {
+		if resolved, err := filepath.EvalSymlinks(ancestor); err == nil {
+			remainder, err := filepath.Rel(ancestor, absPath)
+			if err == nil {
+				return filepath.Join(resolved, remainder)
+			}
+		}
+		if filepath.Dir(ancestor) == ancestor {
+			break
+		}
 	}
 	return absPath
 }
 
 func withFileMutationLock(path string, fn func() error) error {
-	key := getFileMutexKey(path)
+	return WithFileMutationLocks([]string{path}, fn)
+}
+
+func WithFileMutationLocks(paths []string, fn func() error) error {
+	unique := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		unique[getFileMutexKey(path)] = true
+	}
+	keys := make([]string, 0, len(unique))
+	for key := range unique {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	locks := make([]*sync.Mutex, 0, len(keys))
 
 	fileMutationMu.Lock()
-	mu, ok := fileMutexes[key]
-	if !ok {
-		mu = &sync.Mutex{}
-		fileMutexes[key] = mu
+	for _, key := range keys {
+		mu, ok := fileMutexes[key]
+		if !ok {
+			mu = &sync.Mutex{}
+			fileMutexes[key] = mu
+		}
+		locks = append(locks, mu)
 	}
 	fileMutationMu.Unlock()
 
-	mu.Lock()
-	defer mu.Unlock()
+	for _, mu := range locks {
+		mu.Lock()
+	}
+	defer func() {
+		for index := len(locks) - 1; index >= 0; index-- {
+			locks[index].Unlock()
+		}
+	}()
 
 	return fn()
 }

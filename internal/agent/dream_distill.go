@@ -90,34 +90,7 @@ func (ca *CovoAgent) ApplySkillProposal(id string) (*evolution.SkillProposal, er
 	if ca.skillMgr == nil {
 		return nil, fmt.Errorf("skill manager is not available")
 	}
-	return store.Apply(id, func(pr evolution.SkillProposal) error {
-		fm, skillBody, err := evolution.ParseSkillFrontmatter(pr.Body)
-		if err != nil {
-			return fmt.Errorf("parse skill body frontmatter: %w", err)
-		}
-		description := pr.Rationale
-		if fm != nil && fm.Description != "" {
-			description = fm.Description
-		}
-		if description == "" {
-			description = fmt.Sprintf("Skill created from workshop proposal %s", pr.ID)
-		}
-		body := skillBody
-		if body == "" {
-			body = pr.Body
-		}
-		switch pr.Kind {
-		case evolution.ProposalCreate:
-			_, err := ca.skillMgr.CreateWithMeta(pr.SkillName, description, "", nil, body)
-			return err
-		case evolution.ProposalUpdate:
-			return ca.skillMgr.Edit(pr.SkillName, body)
-		case evolution.ProposalDelete:
-			return ca.skillMgr.Delete(pr.SkillName)
-		default:
-			return fmt.Errorf("unknown proposal kind: %s", pr.Kind)
-		}
-	})
+	return store.ApplySkill(id)
 }
 
 // DreamNow audits the memory system for stale/contradictory/bloated entries and

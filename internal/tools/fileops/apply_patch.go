@@ -353,6 +353,31 @@ func runeOffsetToByteOffset(text string, runeOffset int, normalized string) int 
 
 // applyPatchOps applies the operations (assumes validation already passed).
 func applyPatchOps(ops []patchOp, workspaceDir string) (map[string]any, error) {
+	paths := make([]string, 0, len(ops)*2)
+	for _, op := range ops {
+		paths = append(paths, resolvePatchPath(op.filePath, workspaceDir))
+		if op.op == patchMove {
+			paths = append(paths, resolvePatchPath(op.newPath, workspaceDir))
+		}
+	}
+	var result map[string]any
+	err := WithFileMutationLocks(paths, func() error {
+		validationErrs := validateOps(ops, workspaceDir)
+		if len(validationErrs) > 0 {
+			messages := make([]string, len(validationErrs))
+			for index, validation := range validationErrs {
+				messages[index] = validation.message
+			}
+			return fmt.Errorf("patch validation failed (no files modified): %s", strings.Join(messages, "; "))
+		}
+		var err error
+		result, err = applyPatchOpsLocked(ops, workspaceDir)
+		return err
+	})
+	return result, err
+}
+
+func applyPatchOpsLocked(ops []patchOp, workspaceDir string) (map[string]any, error) {
 	var filesModified []string
 	var filesCreated []string
 	var filesDeleted []string
@@ -364,12 +389,12 @@ func applyPatchOps(ops []patchOp, workspaceDir string) (map[string]any, error) {
 			path := resolvePatchPath(op.filePath, workspaceDir)
 			content := extractAddContent(op.hunks)
 
-			mutErr := withFileMutationLock(path, func() error {
+			mutErr := func() error {
 				if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 					return err
 				}
 				return os.WriteFile(path, []byte(content), 0644)
-			})
+			}()
 			if mutErr != nil {
 				errors = append(errors, fmt.Sprintf("Failed to write %s: %v", path, mutErr))
 				continue
@@ -380,7 +405,7 @@ func applyPatchOps(ops []patchOp, workspaceDir string) (map[string]any, error) {
 		case patchUpdate:
 			path := resolvePatchPath(op.filePath, workspaceDir)
 
-			mutErr := withFileMutationLock(path, func() error {
+			mutErr := func() error {
 				content, err := os.ReadFile(path)
 				if err != nil {
 					return err
@@ -428,7 +453,7 @@ func applyPatchOps(ops []patchOp, workspaceDir string) (map[string]any, error) {
 				}
 
 				return os.WriteFile(path, []byte(newContent), 0644)
-			})
+			}()
 			if mutErr != nil {
 				errors = append(errors, fmt.Sprintf("Failed to write %s: %v", path, mutErr))
 				continue
@@ -438,12 +463,12 @@ func applyPatchOps(ops []patchOp, workspaceDir string) (map[string]any, error) {
 
 		case patchDelete:
 			path := resolvePatchPath(op.filePath, workspaceDir)
-			mutErr := withFileMutationLock(path, func() error {
+			mutErr := func() error {
 				if err := tools.TrashPath(path); err != nil && !os.IsNotExist(err) {
 					return err
 				}
 				return nil
-			})
+			}()
 			if mutErr != nil {
 				errors = append(errors, fmt.Sprintf("Failed to delete %s: %v", path, mutErr))
 				continue
@@ -453,12 +478,12 @@ func applyPatchOps(ops []patchOp, workspaceDir string) (map[string]any, error) {
 		case patchMove:
 			srcPath := resolvePatchPath(op.filePath, workspaceDir)
 			dstPath := resolvePatchPath(op.newPath, workspaceDir)
-			mutErr := withFileMutationLock(srcPath, func() error {
+			mutErr := func() error {
 				if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 					return err
 				}
 				return os.Rename(srcPath, dstPath)
-			})
+			}()
 			if mutErr != nil {
 				errors = append(errors, fmt.Sprintf("Failed to move %s -> %s: %v", op.filePath, op.newPath, mutErr))
 				continue

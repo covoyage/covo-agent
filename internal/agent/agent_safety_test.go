@@ -8,9 +8,27 @@ import (
 	"testing"
 
 	"github.com/covoyage/covo-agent/internal/agent/approval"
+	"github.com/covoyage/covo-agent/internal/tools/capability"
 	toolssubagent "github.com/covoyage/covo-agent/internal/tools/subagent"
 	"github.com/covoyage/covonaut/agentcore"
 )
+
+func TestDeclaredRenamedToolEnforcesSafetyAndApproval(t *testing.T) {
+	core := agentcore.New(agentcore.Config{})
+	defer core.Close()
+	tool := &agentcore.Tool{Name: "custom_save"}
+	capability.Declare(tool, capability.Metadata{Kind: capability.Write, WriteParams: []string{"target"}})
+	core.RegisterTools(tool)
+	agent := &CovoAgent{core: core, workDir: t.TempDir(), homeDir: t.TempDir(), workspaceOnly: true, approvalSystem: approval.NewSystem(approval.Config{Mode: "manual", StorageDir: t.TempDir(), NonInteractive: true})}
+	args, _ := json.Marshal(map[string]string{"target": filepath.Join(t.TempDir(), "outside")})
+	hook := &agentcore.HookContext{ToolName: tool.Name, Arguments: args}
+	if err := agent.fileSafetyBeforeHook()(context.Background(), hook); err == nil {
+		t.Fatal("renamed tool bypassed target safety")
+	}
+	if err := agent.permissionGateBeforeHook()(context.Background(), hook); err == nil {
+		t.Fatal("renamed tool bypassed approval")
+	}
+}
 
 func TestNonInteractiveCyberRemoteExecutionRequiresPolicy(t *testing.T) {
 	system := approval.NewSystem(approval.Config{Mode: "manual", StorageDir: t.TempDir()})

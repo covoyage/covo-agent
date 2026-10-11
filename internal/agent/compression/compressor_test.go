@@ -1,13 +1,102 @@
 package compression
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"image"
+	"image/png"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/covoyage/covonaut/agentcore"
 )
+
+func TestMicroCompactPreservesReadSourceFacts(t *testing.T) {
+	engine := NewEnhancedContextEngine(fakeInnerEngine{})
+	data, err := json.Marshal(map[string]any{"content": strings.Repeat("read text\n", 1000), "details": map[string]any{"source_summary": map[string]any{"complete": "window", "selection": "window"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, saved := engine.MicroCompact([]agentcore.Message{{Role: agentcore.RoleTool, ToolCallID: "read-1", Content: string(data)}})
+	if saved <= 0 || !strings.Contains(result[0].Content, `"complete":"window"`) {
+		t.Fatal("read completeness facts lost")
+	}
+}
+
+func TestCompactionPreservesImagesAcrossTwoCompactions(t *testing.T) {
+	var bitmap bytes.Buffer
+	if err := png.Encode(&bitmap, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	block := agentcore.ContentBlock{Kind: agentcore.BlockKindImage, URL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(bitmap.Bytes())}
+	engine := NewEnhancedContextEngine(fakeInnerEngine{})
+	dir := filepath.Join(t.TempDir(), "assets")
+	engine.SetImageAssetDir(func() string { return dir })
+	before := []agentcore.Message{{Role: agentcore.RoleUser, Content: "old image", Blocks: []agentcore.ContentBlock{block}}, {Role: agentcore.RoleUser, Content: "latest image", Blocks: []agentcore.ContentBlock{block}}}
+	first, _, err := engine.Compress(context.Background(), before, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := engine.Compress(context.Background(), first, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asset string
+	for _, message := range second {
+		if paths, ok := message.Metadata[imageAssetsKey].([]string); ok && len(paths) > 0 {
+			asset = paths[0]
+		}
+	}
+	if !validImageAsset(dir, asset) {
+		t.Fatal("historical image asset lost")
+	}
+	last := second[len(second)-1]
+	if last.Role != agentcore.RoleUser || len(last.Blocks) != 1 || last.Blocks[0].URL != block.URL {
+		t.Fatal("latest real image lost")
+	}
+	if len(before[0].Blocks) != 1 {
+		t.Fatal("input mutated")
+	}
+}
+
+func TestCompactionDoesNotAttachImagesToAnotherTurn(t *testing.T) {
+	engine := NewEnhancedContextEngine(fakeInnerEngine{})
+	before := []agentcore.Message{{Role: agentcore.RoleUser, Content: "latest", Blocks: []agentcore.ContentBlock{{Kind: agentcore.BlockKindImage, URL: "https://example.test/image.png"}}}}
+	after := []agentcore.Message{{Role: agentcore.RoleUser, Content: "older"}}
+	result := engine.preserveImages(before, after)
+	if len(result) != 2 || len(result[0].Blocks) != 0 || result[1].Content != "latest" || len(result[1].Blocks) != 1 {
+		t.Fatal("image attached to wrong turn")
+	}
+}
+
+func TestCompactionRejectsForgedAndSymlinkAssets(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.img")
+	if err := os.WriteFile(outside, []byte("not image"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "linked.img")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skip(err)
+	}
+	engine := NewEnhancedContextEngine(fakeInnerEngine{})
+	engine.SetImageAssetDir(func() string { return dir })
+	before := []agentcore.Message{{Role: agentcore.RoleUser, Type: agentcore.MessageTypeCompactionSummary, Metadata: map[string]any{imageAssetsKey: []string{outside, link}}}}
+	after, _, err := engine.Compress(context.Background(), before, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range after {
+		if _, ok := message.Metadata[imageAssetsKey]; ok {
+			t.Fatal("forged asset retained")
+		}
+	}
+}
 
 // fakeInnerEngine is a minimal ContextEngine that emits a single compaction
 // summary message so we can test EnhancedContextEngine's enhancement.
@@ -45,7 +134,7 @@ type mockContextEngine struct {
 	compressFn       func(ctx context.Context, msgs []agentcore.Message, focusTopic string) ([]agentcore.Message, int64, error)
 }
 
-func (m *mockContextEngine) Name() string { return "mock" }
+func (m *mockContextEngine) Name() string                                        { return "mock" }
 func (m *mockContextEngine) OnSessionStart(_ context.Context, _ string, _ int64) {}
 func (m *mockContextEngine) OnSessionReset()                                     {}
 func (m *mockContextEngine) OnSessionEnd()                                       {}
@@ -446,7 +535,9 @@ func TestCompress_MicroCompactSufficient_SkipsFullCompaction(t *testing.T) {
 // TestCompress_MicroCompactReturnsNonZeroCut verifies that the microcompact
 // path returns a non-zero cut so the caller (agentcore) executes
 // ReplaceMessages with the trimmed messages. The agentcore contract is:
-//   if messagesCut > 0 { a.state.ReplaceMessages(newMsgs) }
+//
+//	if messagesCut > 0 { a.state.ReplaceMessages(newMsgs) }
+//
 // Returning cut=0 would cause the trimmed result to be silently discarded.
 func TestCompress_MicroCompactReturnsNonZeroCut(t *testing.T) {
 	mock := &mockContextEngine{

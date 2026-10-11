@@ -1,6 +1,14 @@
 package tools
 
-import "github.com/covoyage/covonaut/agentcore"
+import (
+	"context"
+	"encoding/json"
+	"path/filepath"
+
+	"github.com/covoyage/covo-agent/internal/tools/capability"
+	"github.com/covoyage/covo-agent/internal/tools/fileops"
+	"github.com/covoyage/covonaut/agentcore"
+)
 
 // SideEffectScope is the declared blast radius of a tool. Permission,
 // sandbox, and plan-mode gates should read this instead of guessing from
@@ -95,13 +103,61 @@ func ApplyToolContracts(agent *agentcore.Agent) {
 		return
 	}
 	for _, name := range agent.ToolNames() {
-		c, ok := toolContracts[name]
-		if !ok || !c.ConcurrentSafe {
+		c, hasContract := toolContracts[name]
+		if tool, ok := agent.GetTool(name); ok {
+			if _, declared := capability.Lookup(tool); !declared {
+				capability.DeclareBuiltin(tool)
+				if c.ReadOnly && name != "exit_plan_mode" {
+					if _, declared := capability.Lookup(tool); !declared {
+						capability.Declare(tool, capability.Metadata{Kind: capability.Read})
+					}
+				}
+				if c.SideEffectScope == ScopeSystem {
+					if _, declared := capability.Lookup(tool); !declared {
+						capability.Declare(tool, capability.Metadata{Kind: capability.Execute})
+					}
+				}
+			}
+			metadata, declared := capability.Lookup(tool)
+			if declared && metadata.Kind != capability.Read {
+				safe := false
+				tool.ConcurrencySafe = &safe
+			}
+			if hasContract && c.ConcurrentSafe && (!declared || metadata.Kind == capability.Read) {
+				safe := true
+				tool.ConcurrencySafe = &safe
+			}
+		}
+	}
+}
+
+func ApplyMutationLocks(agent *agentcore.Agent, workDir string) {
+	for _, name := range []string{"move", "delete", "write", "edit"} {
+		tool, ok := agent.GetTool(name)
+		if !ok || tool.Func == nil {
 			continue
 		}
-		if tool, ok := agent.GetTool(name); ok {
-			safe := true
-			tool.ConcurrencySafe = &safe
+		metadata, declared := capability.Lookup(tool)
+		if !declared || len(metadata.WriteParams) == 0 {
+			continue
+		}
+		if !markToolWrapper(tool, "covo-mutation-lock") {
+			continue
+		}
+		original := tool.Func
+		tool.Func = func(ctx context.Context, args json.RawMessage) (any, error) {
+			paths, err := metadata.Paths(args)
+			if err != nil {
+				return nil, err
+			}
+			for index, path := range paths {
+				if !filepath.IsAbs(path) {
+					paths[index] = filepath.Join(workDir, path)
+				}
+			}
+			var result any
+			err = fileops.WithFileMutationLocks(paths, func() error { var err error; result, err = original(ctx, args); return err })
+			return result, err
 		}
 	}
 }

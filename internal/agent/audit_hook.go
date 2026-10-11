@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	agenttools "github.com/covoyage/covo-agent/internal/tools"
+
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -75,9 +77,10 @@ func (h *auditHook) after(ctx context.Context, hc *agentcore.HookContext, result
 	if ext := h.ca.agentTools; ext != nil {
 		if store := ext.AuditStore(); store != nil {
 			data := auditToolData{
-				Status:     status,
-				ResultSize: len(result),
-				Error:      RedactSensitiveTextForce(errMsg),
+				Status:        status,
+				ResultSize:    len(result),
+				Error:         RedactSensitiveTextForce(errMsg),
+				SourceSummary: agenttools.ReadSummaryFromResult(result),
 			}
 			preview := result
 			if len(result) > 256 {
@@ -91,13 +94,14 @@ func (h *auditHook) after(ctx context.Context, hc *agentcore.HookContext, result
 
 // auditToolData is the JSON payload stored alongside audit log entries.
 type auditToolData struct {
-	ArgsSize      int    `json:"args_size,omitempty"`
-	ArgsPreview   string `json:"args_preview,omitempty"`
-	Status        string `json:"status,omitempty"`
-	ResultSize    int    `json:"result_size,omitempty"`
-	ResultPreview string `json:"result_preview,omitempty"`
-	Error         string `json:"error,omitempty"`
-	DurationMs    int64  `json:"duration_ms,omitempty"`
+	ArgsSize      int                     `json:"args_size,omitempty"`
+	ArgsPreview   string                  `json:"args_preview,omitempty"`
+	Status        string                  `json:"status,omitempty"`
+	ResultSize    int                     `json:"result_size,omitempty"`
+	ResultPreview string                  `json:"result_preview,omitempty"`
+	Error         string                  `json:"error,omitempty"`
+	DurationMs    int64                   `json:"duration_ms,omitempty"`
+	SourceSummary *agenttools.ReadSummary `json:"source_summary,omitempty"`
 }
 
 // agentID returns a stable identifier for the current agent instance.

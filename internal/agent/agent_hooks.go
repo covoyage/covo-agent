@@ -17,6 +17,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/doomloop"
 	"github.com/covoyage/covo-agent/internal/lsp"
 	"github.com/covoyage/covo-agent/internal/sandbox"
+	"github.com/covoyage/covo-agent/internal/tools/capability"
 	"github.com/covoyage/covo-agent/internal/tools/fileops"
 	toolssubagent "github.com/covoyage/covo-agent/internal/tools/subagent"
 	"github.com/covoyage/covonaut/agentcore"
@@ -303,8 +304,15 @@ func generateSimpleDiff(oldText, newText, filename string) string {
 
 func (ca *CovoAgent) fileSafetyBeforeHook() agentcore.BeforeHook {
 	return func(ctx context.Context, hc *agentcore.HookContext) error {
+		var metadata capability.Metadata
+		var declared bool
+		if ca.core != nil {
+			if tool, ok := ca.core.GetTool(hc.ToolName); ok {
+				metadata, declared = capability.Lookup(tool)
+			}
+		}
 		paramKey, ok := fileWriteToolNames[hc.ToolName]
-		if !ok && hc.ToolName != "apply_patch" && hc.ToolName != "delete_file" {
+		if !ok && hc.ToolName != "apply_patch" && hc.ToolName != "delete_file" && !(declared && metadata.Kind == capability.Write) {
 			return nil
 		}
 
@@ -314,7 +322,7 @@ func (ca *CovoAgent) fileSafetyBeforeHook() agentcore.BeforeHook {
 		}
 
 		var paths []string
-		if hc.ToolName == "apply_patch" {
+		if hc.ToolName == "apply_patch" || metadata.Patch {
 			patch, _ := args["patch"].(string)
 			workspace, _ := args["workspace_dir"].(string)
 			if workspace == "" {
@@ -322,6 +330,12 @@ func (ca *CovoAgent) fileSafetyBeforeHook() agentcore.BeforeHook {
 			}
 			var err error
 			paths, err = fileops.PatchPaths(patch, workspace)
+			if err != nil {
+				return err
+			}
+		} else if declared && len(metadata.WriteParams) > 0 {
+			var err error
+			paths, err = metadata.Paths(hc.Arguments)
 			if err != nil {
 				return err
 			}
@@ -413,13 +427,20 @@ func (ca *CovoAgent) trajectoryBeforeHook() agentcore.BeforeHook {
 
 func (ca *CovoAgent) permissionGateBeforeHook() agentcore.BeforeHook {
 	return func(ctx context.Context, hc *agentcore.HookContext) error {
+		if ca.core != nil {
+			if tool, ok := ca.core.GetTool(hc.ToolName); ok {
+				if metadata, declared := capability.Lookup(tool); declared {
+					ctx = capability.WithMetadata(ctx, metadata)
+				}
+			}
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if scope, scoped := toolssubagent.IntakeScopeFromContext(ctx); scoped && !intakeToolAllowed(scope, hc) {
 			return fmt.Errorf("automatic verifier tool %q exceeds the recorded intake endpoint", hc.ToolName)
 		}
-		requiresApproval := approval.RequiresToolApproval(hc.ToolName, hc.Arguments)
+		requiresApproval := approval.RequiresApproval(ctx, hc.ToolName, hc.Arguments)
 		policyAsk := false
 		// Step 1: Approval system pattern check (for bash/process commands)
 		if hc.ToolName == "bash" || hc.ToolName == "process" {
