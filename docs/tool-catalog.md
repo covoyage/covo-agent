@@ -21,7 +21,7 @@ The API chat-completions endpoint correlates replies using per-request IDs, inde
 
 Hub installation requires a valid live or cached registry index containing the skill. Declared SHA-256 pins must match; an index entry without a pin remains supported but does not provide pinned integrity. Index and manifest reads are bounded to 2 MiB and 1 MiB respectively. The binary installer requires a SHA-256 tool and exactly one valid checksum entry from the release checksum file; missing verification never silently proceeds. Same-origin checksums detect content mismatch, not compromise of the release publisher.
 
-Release builds use the published `covonaut v1.1.4` dependency without absolute local replacements. Local sibling development can use an ignored `go.work`; use `GOWORK=off` for release/CI verification.
+Release builds use the published `covonaut v1.1.5` dependency without absolute local replacements. Local sibling development can use an ignored `go.work`; use `GOWORK=off` for release/CI verification.
 
 Native tool capability declarations carry read/write/execute classification and mutation parameter names alongside the tool, so renamed declared tools retain approval and workspace checks. Write/execute/conditional declarations remain serial barriers; undeclared tools retain legacy classifications. Unknown conditional declarations require approval. These are trusted local registration declarations, not a certification of remote implementation behavior.
 
