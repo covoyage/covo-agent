@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,6 +33,9 @@ func BuildFindingUpsertTool(catalog *cyber.Catalog) *agentcore.Tool {
 		Name: "finding_upsert",
 		Description: strings.Join([]string{
 			"Record or update a security finding. Use after recon or verification produces evidence.",
+			"Use open_proof_gap for incomplete reproduction; narrative evidence alone is not enough for confirmed or ruled_out.",
+			"A proof_required result with saved=false means nothing was written. Do not repeat unchanged arguments: explicitly retry suggested_retry to record a proof gap, or supply verified poc/exchange_id to request confirmation.",
+			"Before citing an exchange_id, inspect exchange_get and verify its exact host, endpoint, method, and relevance to the finding. Bare domains and www/subdomains are distinct targets. Do not invent exchange ids or relabel a finding just to pass validation.",
 			"Related findings remain separate until finding_triage approves them or links a duplicate.",
 			"Omit title/target to list current findings.",
 		}, "\n"),
@@ -41,14 +45,14 @@ func BuildFindingUpsertTool(catalog *cyber.Catalog) *agentcore.Tool {
 				"id":          map[string]any{"type": "string", "description": "Stable id; omit to generate."},
 				"title":       map[string]any{"type": "string"},
 				"severity":    map[string]any{"type": "string", "enum": []string{"critical", "high", "medium", "low", "info"}},
-				"target":      map[string]any{"type": "string"},
-				"evidence":    map[string]any{"type": "string"},
+				"target":      map[string]any{"type": "string", "description": "Exact affected host or URL, not a parent domain grouping. When exchange_id is set, its canonical host must match; www/subdomains are not aliases."},
+				"evidence":    map[string]any{"type": "string", "description": "Observation summary. Does not replace poc or exchange_id for confirmed or ruled_out."},
 				"status":      map[string]any{"type": "string", "description": "open, open_proof_gap, confirmed, ruled_out, or false-positive. confirmed and ruled_out require poc or exchange_id. verified aliases confirmed."},
 				"poc":         map[string]any{"type": "string", "description": "Reproduction command, request, or script."},
-				"exchange_id": map[string]any{"type": "string", "description": "Recorded HTTP exchange id (ex-N). Counts as proof."},
+				"exchange_id": map[string]any{"type": "string", "description": "Existing recorded HTTP exchange id (ex-N). Inspect exchange_get first: host, endpoint, and method must match this finding. A redacted exchange alone cannot confirm or rule out; provide independent poc. A matching exchange is evidence, not an automatic vulnerability verdict."},
 				"root_cause":  map[string]any{"type": "string", "description": "Technical root cause used for semantic deduplication."},
-				"endpoint":    map[string]any{"type": "string"},
-				"method":      map[string]any{"type": "string"},
+				"endpoint":    map[string]any{"type": "string", "description": "Affected request path, e.g. /api/orders, optionally prefixed with method, e.g. GET /api/orders. Must match the cited exchange."},
+				"method":      map[string]any{"type": "string", "description": "Affected HTTP method, e.g. GET. Must match the cited exchange."},
 				"parameter":   map[string]any{"type": "string"},
 				"cwe":         map[string]any{"type": "string"},
 				"cve":         map[string]any{"type": "string"},
@@ -59,7 +63,6 @@ func BuildFindingUpsertTool(catalog *cyber.Catalog) *agentcore.Tool {
 			},
 		},
 		Func: func(ctx context.Context, args json.RawMessage) (any, error) {
-			_ = ctx
 			if findingArgsEmpty(args) {
 				items, err := catalog.ListFindings()
 				if err != nil {
@@ -67,12 +70,31 @@ func BuildFindingUpsertTool(catalog *cyber.Catalog) *agentcore.Tool {
 				}
 				return map[string]any{"findings": items, "count": len(items)}, nil
 			}
+			if cyber.IsRetest(ctx) {
+				return nil, fmt.Errorf("retest findings are read-only; return observations for separate review")
+			}
 			var f cyber.Finding
 			if err := json.Unmarshal(args, &f); err != nil {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
 			}
 			saved, err := catalog.UpsertFinding(f)
 			if err != nil {
+				var proofRequired *cyber.FindingProofRequiredError
+				if errors.As(err, &proofRequired) {
+					var retry map[string]any
+					if err := json.Unmarshal(args, &retry); err != nil {
+						return nil, err
+					}
+					retry["status"] = cyber.StatusProofGap
+					return map[string]any{
+						"status":           "proof_required",
+						"saved":            false,
+						"requested_status": proofRequired.Status,
+						"error":            err.Error(),
+						"next_action":      "Do not repeat unchanged arguments. Explicitly retry suggested_retry to record an unconfirmed proof gap, or inspect exchange_get and supply relevant proof for this exact host, endpoint, and method. Nothing has been saved; do not report this as confirmed or ruled out.",
+						"suggested_retry":  retry,
+					}, nil
+				}
 				return nil, err
 			}
 			return saved, nil
@@ -89,7 +111,10 @@ func BuildFindingTriageTool(catalog *cyber.Catalog) *agentcore.Tool {
 			"decision":     map[string]any{"type": "string", "enum": []string{"approve", "duplicate"}},
 			"duplicate_of": map[string]any{"type": "string", "description": "Required when decision is duplicate."},
 		}, "required": []string{"id", "decision"}},
-		Func: func(_ context.Context, args json.RawMessage) (any, error) {
+		Func: func(ctx context.Context, args json.RawMessage) (any, error) {
+			if cyber.IsRetest(ctx) {
+				return nil, fmt.Errorf("retest findings are read-only")
+			}
 			if catalog == nil {
 				return nil, fmt.Errorf("finding catalog unavailable")
 			}

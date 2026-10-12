@@ -2,20 +2,25 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
 	"sync"
 
 	"github.com/covoyage/covo-agent/internal/circuitbreaker"
+	"github.com/covoyage/covo-agent/internal/cyber"
 )
 
 // SafeRoundTripper wraps an http.RoundTripper and validates URLs before
 // making requests, blocking access to internal / private / unsafe endpoints.
 type SafeRoundTripper struct {
-	transport http.RoundTripper
+	transport    http.RoundTripper
+	protocols    map[string]*http.Transport
+	certificates map[string]*http.Transport
 }
 
 // RoundTrip implements http.RoundTripper. It validates the request URL before
@@ -27,10 +32,66 @@ type SafeRoundTripper struct {
 // connection to the exact IP addresses that were validated — see its doc
 // comment for why this matters.
 func (s *SafeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if err := ValidateURL(req.URL.String()); err != nil {
+	if err := ValidateURLContext(req.Context(), req.URL.String()); err != nil {
 		return nil, fmt.Errorf("safe HTTP: %w", err)
 	}
+	options := cyber.HTTPOptionsFromContext(req.Context())
+	protocol := options.Protocol
+	if protocol == "" {
+		protocol = "auto"
+	}
+	if protocol != "auto" && protocol != "http1" && protocol != "http2" {
+		return nil, fmt.Errorf("unsupported HTTP protocol")
+	}
+	if protocol == "http2" && req.URL.Scheme != "https" {
+		return nil, fmt.Errorf("HTTP/2 requires HTTPS")
+	}
+	if options.ClientCertificate {
+		transport := s.certificates[protocol]
+		if transport == nil {
+			return nil, fmt.Errorf("operator client certificate is not configured")
+		}
+		return transport.RoundTrip(req)
+	}
+	if transport := s.protocols[protocol]; transport != nil {
+		return transport.RoundTrip(req)
+	}
+	if protocol != "auto" {
+		return nil, fmt.Errorf("transport does not support protocol selection")
+	}
 	return s.transport.RoundTrip(req)
+}
+
+func cyberHTTPTransports(certificate *tls.Certificate) map[string]*http.Transport {
+	transports := map[string]*http.Transport{}
+	for _, protocol := range []string{"auto", "http1", "http2"} {
+		protocols := new(http.Protocols)
+		protocols.SetHTTP1(protocol != "http2")
+		protocols.SetHTTP2(protocol != "http1")
+		transport := &http.Transport{DialContext: safeDialContext, Protocols: protocols}
+		if certificate != nil {
+			transport.TLSClientConfig = &tls.Config{Certificates: []tls.Certificate{*certificate}, MinVersion: tls.VersionTLS12}
+		}
+		transports[protocol] = transport
+	}
+	return transports
+}
+
+func NewCyberHTTPTransport() (http.RoundTripper, error) {
+	protocols := cyberHTTPTransports(nil)
+	safe := &SafeRoundTripper{transport: protocols["auto"], protocols: protocols}
+	certPath, keyPath := os.Getenv("COVO_CYBER_CLIENT_CERT"), os.Getenv("COVO_CYBER_CLIENT_KEY")
+	if certPath != "" || keyPath != "" {
+		if certPath == "" || keyPath == "" {
+			return nil, fmt.Errorf("both COVO_CYBER_CLIENT_CERT and COVO_CYBER_CLIENT_KEY are required")
+		}
+		certificate, err := tls.LoadX509KeyPair(certPath, keyPath)
+		if err != nil {
+			return nil, fmt.Errorf("load Cyber client certificate: %w", err)
+		}
+		safe.certificates = cyberHTTPTransports(&certificate)
+	}
+	return circuitbreaker.NewRoundTripper(safe, defaultBreakerRegistry, nil), nil
 }
 
 // defaultBreakerRegistry is a package-level circuit breaker registry shared

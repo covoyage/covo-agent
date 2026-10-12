@@ -139,6 +139,9 @@ type CustomModeTools struct {
 }
 
 type Config struct {
+	savePath        string
+	saveHash        string
+	saveBase        []byte
 	Provider        string                     `yaml:"provider"`
 	Model           string                     `yaml:"model"`
 	Mode            string                     `yaml:"mode"`
@@ -324,6 +327,7 @@ func loadConfigFile(cfgPath string) (*Config, error) {
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		if os.IsNotExist(err) {
+			cfg.captureSaveBase(cfgPath, nil)
 			return cfg, nil
 		}
 		return nil, fmt.Errorf("read config: %w", err)
@@ -333,6 +337,7 @@ func loadConfigFile(cfgPath string) (*Config, error) {
 	if err := yaml.Unmarshal([]byte(expanded), cfg); err != nil {
 		return nil, friendlyYAMLError(err, string(data), cfgPath)
 	}
+	cfg.captureSaveBase(cfgPath, data)
 
 	return cfg, nil
 }
@@ -785,24 +790,12 @@ func SaveConfig(cfg *Config) error {
 		return err
 	}
 
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-
-	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
-		return fmt.Errorf("write config: %w", err)
-	}
-	return nil
+	return saveConfigFile(cfg, cfgPath)
 }
 
 func SaveConfigToDir(cfg *Config, dir string) error {
 	cfgPath := filepath.Join(dir, "config.yaml")
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-	return os.WriteFile(cfgPath, data, 0644)
+	return saveConfigFile(cfg, cfgPath)
 }
 
 func SaveEnvValue(key, value string) error {

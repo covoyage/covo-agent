@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/covoyage/covo-agent/internal/fslock"
 	"io"
 	"net/http"
 	"net/url"
@@ -41,6 +42,13 @@ type releaseAsset struct {
 // digest (may be empty if GitHub did not report one for this asset) if an
 // update is available.
 func CheckForUpdates(currentVersion string) (latestVersion, downloadURL, expectedDigest string, err error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", "", "", err
+	}
+	if err := RecoverPendingUpdate(exe); err != nil {
+		return "", "", "", fmt.Errorf("recover update: %w", err)
+	}
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", owner, repo)
 
 	client := &http.Client{Timeout: 15 * time.Second}
@@ -82,6 +90,22 @@ func CheckForUpdates(currentVersion string) (latestVersion, downloadURL, expecte
 // extracted and used to replace the running binary; a mismatch aborts the
 // update instead of silently installing tampered/corrupted content.
 func PerformUpdate(downloadURL, expectedDigest string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	exe, err = filepath.Abs(exe)
+	if err != nil {
+		return err
+	}
+	release, err := fslock.Acquire(exe + ".update.lock")
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := recoverUpdateLocked(exe); err != nil {
+		return err
+	}
 	extension := archiveExtension(downloadURL)
 	if extension == "" {
 		return fmt.Errorf("unsupported update archive: %s", downloadURL)
@@ -98,12 +122,6 @@ func PerformUpdate(downloadURL, expectedDigest string) error {
 		return err
 	}
 
-	// Find current executable
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("get executable: %w", err)
-	}
-
 	extractedName := "covo-agent"
 	if runtime.GOOS == "windows" {
 		extractedName += ".exe"
@@ -116,8 +134,10 @@ func PerformUpdate(downloadURL, expectedDigest string) error {
 	if err != nil {
 		return fmt.Errorf("stage executable: %w", err)
 	}
-	defer os.Remove(stagedPath)
-	if err := installExecutable(stagedPath, exe); err != nil {
+	if err := installJournaled(stagedPath, exe); err != nil {
+		if _, stateErr := os.Lstat(exe + ".update.json"); os.IsNotExist(stateErr) {
+			os.Remove(stagedPath)
+		}
 		return fmt.Errorf("install executable: %w", err)
 	}
 

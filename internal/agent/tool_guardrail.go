@@ -57,7 +57,12 @@ var MutatingToolNames = map[string]bool{
 	"exchange_replay":  true,
 	"exchange_compare": true,
 	"csrf_retest":      true,
+	"web_workflow":     true,
+	"web_test_execute": true,
 	"finding_upsert":   true,
+	"finding_retest":   true,
+	"cyber_storage":    true,
+	"oast":             true,
 	"asset_upsert":     true,
 }
 

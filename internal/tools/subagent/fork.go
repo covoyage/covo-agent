@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/covoyage/covo-agent/internal/cyber"
 	"io"
 	"strings"
 	"sync/atomic"
@@ -184,17 +185,22 @@ func BuildSessionsForkTool(runner SpawnRunner, registry *SubagentRegistry, guard
 				if registry != nil && subID != "" {
 					registry.Complete(subID, true)
 				}
-				return nil, fmt.Errorf("fork failed: %w", err)
+				return map[string]any{"subagent_id": subID, "output": truncateMax(output, 20000)}, fmt.Errorf("fork failed: %w", err)
 			}
 
 			if registry != nil && subID != "" {
 				registry.Complete(subID, false)
 			}
+			outputLimit := 2000
+			if cyber.IsRetest(ctx) {
+				outputLimit = 20000
+			}
 			return map[string]any{
-				"forked": true,
-				"depth":  depth + 1,
-				"output": truncateMax(output, 2000),
-				"active": guard.Active(),
+				"forked":      true,
+				"subagent_id": subID,
+				"depth":       depth + 1,
+				"output":      truncateMax(output, outputLimit),
+				"active":      guard.Active(),
 			}, nil
 		},
 	}

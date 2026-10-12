@@ -2,12 +2,90 @@ package circuitbreaker
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+type failingCallbackTransport struct{}
+
+func (failingCallbackTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("connection refused")
+}
+
+func TestRoundTripperTripCallbackDoesNotDeadlock(t *testing.T) {
+	registry := NewRegistry(ClientPreset())
+	observed := make(chan Stats, 1)
+	registry.SetOnTrip(func(key string, stats Stats) {
+		all := registry.All()
+		if all[key].State != StateOpen {
+			t.Errorf("callback registry state: %+v", all)
+		}
+		registry.SetOnTrip(nil)
+		observed <- stats
+	})
+	transport := NewRoundTripper(failingCallbackTransport{}, registry, nil)
+	done := make(chan error, 1)
+	go func() {
+		request, _ := http.NewRequest(http.MethodGet, "https://failure.invalid/", nil)
+		for attempt := 0; attempt < 10; attempt++ {
+			if _, err := transport.RoundTrip(request); err == nil || errors.Is(err, ErrCircuitOpen) {
+				done <- errors.New("request unexpectedly succeeded or tripped too early")
+				return
+			}
+		}
+		_, err := transport.RoundTrip(request)
+		if !errors.Is(err, ErrCircuitOpen) {
+			done <- errors.New("request after trip did not fail fast")
+			return
+		}
+		done <- nil
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("10th failure deadlocked in circuit breaker callback")
+	}
+	select {
+	case stats := <-observed:
+		if stats.State != StateOpen || stats.Count != 10 || stats.Failures != 10 || stats.ErrorRate != 1 {
+			t.Fatalf("trip snapshot: %+v", stats)
+		}
+	default:
+		t.Fatal("trip callback not invoked")
+	}
+}
+
+func TestBreakerSuccessCallbackCanReadStats(t *testing.T) {
+	breaker := New(ServerPreset())
+	breaker.state = StateHalfOpen
+	observed := make(chan Stats, 1)
+	breaker.onTransition = func(stats Stats) {
+		observed <- breaker.Stats()
+		if stats.State != StateClosed {
+			t.Errorf("success snapshot: %+v", stats)
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		breaker.RecordSuccess()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("success callback cannot read breaker stats")
+	}
+	if stats := <-observed; stats.State != StateClosed || stats.Count != 0 {
+		t.Fatalf("closed stats: %+v", stats)
+	}
+}
 
 func TestBreaker_StartsClosed(t *testing.T) {
 	b := New(ServerPreset())
@@ -179,7 +257,8 @@ func TestBreaker_MixedResults(t *testing.T) {
 	}
 
 	// 1 more failure: 3 success, 5 failures out of 8 = 0.625 >= 0.6
-	b.Allow(); b.RecordFailure()
+	b.Allow()
+	b.RecordFailure()
 	if b.State() != StateOpen {
 		t.Fatalf("expected open at 0.625 error rate, got %s", b.State())
 	}
@@ -357,7 +436,8 @@ func TestBreaker_HalfOpenRejectsConcurrentTrials(t *testing.T) {
 		Cooldown:          50 * time.Millisecond,
 	}
 	b := New(cfg)
-	b.Allow(); b.RecordFailure()
+	b.Allow()
+	b.RecordFailure()
 
 	time.Sleep(60 * time.Millisecond)
 	// First Allow transitions to half-open and starts trial
@@ -405,11 +485,11 @@ func TestBreaker_FailureCodesNil(t *testing.T) {
 	defer srv.Close()
 
 	cfg := Config{
-		MinSamples:        1,
+		MinSamples:         1,
 		ErrorRateThreshold: 0.5,
-		WindowSize:        5,
-		Cooldown:          5 * time.Second,
-		FailureCodes:      nil, // nil means any non-2xx is failure
+		WindowSize:         5,
+		Cooldown:           5 * time.Second,
+		FailureCodes:       nil, // nil means any non-2xx is failure
 	}
 	registry := NewRegistry(cfg)
 	client := &http.Client{Transport: NewRoundTripper(http.DefaultTransport, registry, nil)}

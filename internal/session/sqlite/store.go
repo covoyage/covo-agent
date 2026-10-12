@@ -75,8 +75,7 @@ func (s *Store) DB() *sql.DB { return s.db }
 // Schema & migration
 // ---------------------------------------------------------------------------
 
-func (s *Store) migrate() error {
-	_, err := s.db.Exec(`
+const sessionSchema = `
 		CREATE TABLE IF NOT EXISTS schema_version (
 			version INTEGER PRIMARY KEY
 		);
@@ -150,15 +149,23 @@ func (s *Store) migrate() error {
 			PRIMARY KEY (session_id, seq)
 		);
 		CREATE INDEX IF NOT EXISTS idx_prompt_queue_session ON prompt_queue(session_id);
-	`)
+	`
+
+func (s *Store) migrate() error {
+	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-
-	// Schema v1 → v2: add parent_id, label, summary columns
-	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN parent_id TEXT DEFAULT ''`)
-	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN label TEXT DEFAULT ''`)
-	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN summary TEXT DEFAULT ''`)
+	defer tx.Rollback()
+	if err := repairSessionColumns(tx); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(sessionSchema); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
 
 	if err := s.migrateFTSTrigram(); err != nil {
 		return fmt.Errorf("migrate fts to trigram: %w", err)

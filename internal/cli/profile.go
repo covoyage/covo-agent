@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -139,12 +137,7 @@ func UseProfile(name string) error {
 }
 
 func SaveConfigTo(cfg *Config, dir string) error {
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-	cfgPath := filepath.Join(dir, "config.yaml")
-	return os.WriteFile(cfgPath, data, 0644)
+	return SaveConfigToDir(cfg, dir)
 }
 
 func EnsureProfileHomeDir(name string) (string, error) {

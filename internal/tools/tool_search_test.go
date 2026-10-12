@@ -3,10 +3,12 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/covoyage/covo-agent/internal/cyber"
+	"github.com/covoyage/covo-agent/internal/evolution"
 	toolssubagent "github.com/covoyage/covo-agent/internal/tools/subagent"
 	"github.com/covoyage/covonaut/agentcore"
 )
@@ -26,6 +28,68 @@ func TestHideCyberOnlyTools(t *testing.T) {
 	shown := hideCyberOnlyTools(defs, true)
 	if len(shown) != 3 {
 		t.Fatalf("cyber mode should keep all tools, got %d", len(shown))
+	}
+}
+
+func TestCyberDelegationRequiresExplicitRole(t *testing.T) {
+	for _, test := range []struct {
+		cyberMode         bool
+		role, contextRole string
+	}{
+		{false, "", ""},
+		{true, "parent", "recon"},
+		{true, "recon", "parent"},
+	} {
+		cyberMode := test.cyberMode
+		home := t.TempDir()
+		extension := NewExtension(ExtensionConfig{
+			HomeDir: home, SessionsDir: filepath.Join(home, "sessions"), WorkDir: home, CyberMode: cyberMode, SubagentRole: test.role,
+		})
+		t.Cleanup(func() { _ = extension.Dispose() })
+		workshop := evolution.NewWorkshopStore(home)
+		if err := workshop.Init(); err != nil {
+			t.Fatal(err)
+		}
+		extension.SetWorkshopStore(workshop)
+		core := agentcore.New(agentcore.Config{})
+		t.Cleanup(core.Close)
+		if err := extension.Init(context.Background(), core); err != nil {
+			t.Fatal(err)
+		}
+		seen := 0
+		for _, tool := range extension.tools {
+			if cyberMode && tool.Name == "scan" {
+				ctx := toolssubagent.WithSubagentRole(context.Background(), test.contextRole)
+				result, err := tool.Func(ctx, json.RawMessage(`{"recipe":"list"}`))
+				if test.role == "parent" && err == nil {
+					t.Fatalf("parent inherited recon context and ran scan: %+v", result)
+				}
+				if test.role == "recon" && err != nil {
+					t.Fatalf("fixed recon role could not run scan with stale context: %v", err)
+				}
+			}
+			if tool.Name != "sessions_spawn" && tool.Name != "sessions_spawn_batch" {
+				continue
+			}
+			seen++
+			schema := tool.Parameters
+			if tool.Name == "sessions_spawn_batch" {
+				schema = schema["properties"].(map[string]any)["tasks"].(map[string]any)["items"].(map[string]any)
+			}
+			requiredRole := false
+			for _, field := range schema["required"].([]string) {
+				requiredRole = requiredRole || field == "role"
+			}
+			if requiredRole != cyberMode {
+				t.Fatalf("%s cyber=%v required role=%v", tool.Name, cyberMode, requiredRole)
+			}
+			if cyberMode && !strings.Contains(tool.Description, "leaf has no hands-on tools") {
+				t.Fatalf("missing Cyber delegation guidance: %s", tool.Description)
+			}
+		}
+		if seen != 2 {
+			t.Fatalf("expected both delegation tools, got %d", seen)
+		}
 	}
 }
 

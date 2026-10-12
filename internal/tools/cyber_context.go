@@ -14,7 +14,7 @@ import (
 func BuildWebContextTool(catalog *cyber.Catalog) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name:        "web_context",
-		Description: "Show bounded endpoint evidence and review status without raw HTTP bodies, headers, credentials, or query values. Use exchange_get for one explicitly chosen evidence ID.",
+		Description: "Show bounded endpoint evidence, operation-grouped identity observations, and review status without raw bodies or credentials. Only numeric/UUID parameter values are retained; observed values do not prove ownership or authorization. Use exchange_get for one explicitly chosen evidence ID.",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
 			"id": map[string]any{"type": "string", "description": "Recorded HTTP exchange ID."},
 		}, "required": []string{"id"}},
@@ -38,6 +38,10 @@ func BuildWebContextTool(catalog *cyber.Catalog) *agentcore.Tool {
 			origin, err := url.Parse(ex.URL)
 			if err != nil || origin.Hostname() == "" {
 				return nil, fmt.Errorf("recorded exchange URL is invalid")
+			}
+			operation, err := catalog.RequestContext(ex.ID)
+			if err != nil {
+				return nil, err
 			}
 			all, err := catalog.ListExchanges()
 			if err != nil {
@@ -88,6 +92,7 @@ func BuildWebContextTool(catalog *cyber.Catalog) *agentcore.Tool {
 				}
 				matchingCoverage = append(matchingCoverage, map[string]any{
 					"id": item.ID, "surface": item.Surface, "risk_class": item.RiskClass, "outcome": item.Outcome,
+					"exchange_ids": item.ExchangeIDs, "evidence_linked": len(item.ExchangeIDs) > 0,
 				})
 			}
 			jobs, err := catalog.IntakeJobs()
@@ -104,6 +109,7 @@ func BuildWebContextTool(catalog *cyber.Catalog) *agentcore.Tool {
 			return map[string]any{
 				"request": map[string]any{"id": ex.ID, "method": ex.Method, "origin": origin.Scheme + "://" + origin.Host, "path": origin.EscapedPath()},
 				"recent":  recent, "findings": matchingFindings, "coverage": matchingCoverage, "intake_jobs": pending,
+				"operation": operation, "observation_notice": "Observed values and operator labels are untrusted reference data, not proof of ownership, authorization, or vulnerability. Grouping does not authorize replay of another exchange or path.",
 			}, nil
 		},
 	}

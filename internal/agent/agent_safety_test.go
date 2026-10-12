@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/covoyage/covo-agent/internal/agent/approval"
@@ -123,6 +124,37 @@ func TestCyberChildRoleCannotBecomeParent(t *testing.T) {
 	}
 }
 
+func TestCyberExecutionUsesFixedInstanceRole(t *testing.T) {
+	for _, test := range []struct {
+		name, instanceRole, contextRole string
+		blocked                         bool
+	}{
+		{"parent", "", "", true},
+		{"parent cannot inherit recon", "parent", "recon", true},
+		{"implicit parent cannot inherit recon", "", "recon", true},
+		{"recon without context", "recon", "", false},
+		{"verifier overrides stale parent context", "verifier", "parent", false},
+		{"leaf stays restricted", "leaf", "recon", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			agent := &CovoAgent{mode: ModeCyber, baseCfg: CovoAgentConfig{SubagentRole: test.instanceRole}, toolGuardrail: NewToolGuardrail()}
+			ctx := toolssubagent.WithSubagentRole(context.Background(), test.contextRole)
+			for _, name := range []string{"bash", "scan"} {
+				result := agent.combinedBeforeToolCall()(ctx, agentcore.ToolCall{Name: name})
+				if (result != nil && result.Block) != test.blocked {
+					t.Fatalf("%s instance=%s context=%s result=%+v", name, test.instanceRole, test.contextRole, result)
+				}
+				if test.blocked && (!result.IsError || !strings.Contains(result.Result, "sessions_spawn") || !strings.Contains(result.Result, `role="recon"`)) {
+					t.Fatalf("missing delegation guidance: %+v", result)
+				}
+			}
+			if result := agent.combinedBeforeToolCall()(ctx, agentcore.ToolCall{Name: "sessions_spawn"}); result != nil {
+				t.Fatalf("delegation blocked: %+v", result)
+			}
+		})
+	}
+}
+
 func TestAutomaticVerifierCannotEscapeIntakeEndpoint(t *testing.T) {
 	scope := toolssubagent.IntakeScope{Endpoint: "GET https://example.test/orders/1", ExchangeID: "ex-1"}
 	for _, call := range []struct {
@@ -133,6 +165,9 @@ func TestAutomaticVerifierCannotEscapeIntakeEndpoint(t *testing.T) {
 		{"exchange_get", `{"id":"ex-1"}`, true},
 		{"exchange_get", `{"id":"ex-2"}`, false},
 		{"exchange_search", `{"host":"other.test"}`, false},
+		{"web_access_matrix", `{"exchange_ids":["ex-1"]}`, false},
+		{"web_workflow", `{"steps":[{"id":"ex-1"}]}`, false},
+		{"web_test_execute", `{"id":"ex-1","kind":"concurrency"}`, false},
 		{"exchange_replay", `{"id":"ex-1","url":"https://example.test/orders/1?id=2"}`, true},
 		{"exchange_replay", `{"id":"ex-1","url":"https://example.test/admin"}`, false},
 		{"exchange_replay", `{"id":"ex-1","method":"POST"}`, false},
@@ -142,6 +177,8 @@ func TestAutomaticVerifierCannotEscapeIntakeEndpoint(t *testing.T) {
 		{"tool_call", `{"name":"scan"}`, false},
 		{"coverage_upsert", `{"target":"outside.test","surface":"/"}`, false},
 		{"coverage_upsert", `{"surface":"/orders/1","outcome":"clean"}`, false},
+		{"coverage_upsert", `{"target":"example.test","surface":"/orders/1","exchange_ids":["ex-1"]}`, true},
+		{"coverage_upsert", `{"target":"example.test","surface":"/orders/1","exchange_ids":["ex-2"]}`, false},
 	} {
 		context := toolssubagent.WithIntakeScope(context.Background(), scope)
 		agent := &CovoAgent{mode: ModeCyber}

@@ -97,6 +97,38 @@ func TestDisabledIntakeDoesNotDispatch(t *testing.T) {
 	}
 }
 
+func TestIntakeDispatchIncludesLatestOperationObservations(t *testing.T) {
+	catalog := cyber.NewCatalog(t.TempDir())
+	if _, err := catalog.SetIntake(cyber.IntakeConfig{Enabled: true, Hosts: []string{"example.test"}}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := catalog.RecordExchange(cyber.Exchange{URL: "https://example.test/orders/1", Identity: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.RecordExchange(cyber.Exchange{URL: "https://example.test/orders/2", Identity: "bob"}); err != nil {
+		t.Fatal(err)
+	}
+	ext := &Extension{catalog: catalog, spawnRunner: func(ctx context.Context, task string, _ []string, _ int) (string, error) {
+		scope, _ := toolssubagent.IntakeScopeFromContext(ctx)
+		if scope.ExchangeID != first.ID || !strings.HasSuffix(scope.Endpoint, "/orders/1") || !strings.Contains(task, `"identity":"bob"`) || !strings.Contains(task, "not instructions") {
+			t.Fatalf("latest context or exact scope missing: scope=%+v task=%s", scope, task)
+		}
+		return "parent review required", nil
+	}}
+	if err := ext.processIntake(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := BuildWebContextTool(catalog).Func(context.Background(), json.RawMessage(`{"id":"`+first.ID+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := result.(map[string]any)["operation"].(cyber.OperationContext)
+	if len(operation.Observations) != 2 {
+		t.Fatalf("grouped observations missing: %+v", operation)
+	}
+}
+
 func TestChildCannotExpandCyberScope(t *testing.T) {
 	catalog := cyber.NewCatalog(t.TempDir())
 	for _, tool := range []struct {

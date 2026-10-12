@@ -6,11 +6,16 @@ import (
 )
 
 type CoverageCell struct {
-	Target    string   `json:"target"`
-	RiskClass string   `json:"risk_class"`
-	Outcome   string   `json:"outcome"`
-	Surfaces  []string `json:"surfaces,omitempty"`
-	Notes     []string `json:"notes,omitempty"`
+	Target           string   `json:"target"`
+	RiskClass        string   `json:"risk_class"`
+	Outcome          string   `json:"outcome"`
+	Surfaces         []string `json:"surfaces,omitempty"`
+	Notes            []string `json:"notes,omitempty"`
+	TestedSurfaces   int      `json:"tested_surfaces"`
+	UntestedSurfaces int      `json:"untested_surfaces"`
+	BlockedSurfaces  int      `json:"blocked_surfaces"`
+	FullyTested      bool     `json:"fully_tested"`
+	LinkedSurfaces   int      `json:"linked_surfaces"`
 }
 
 type ChainCandidate struct {
@@ -67,13 +72,34 @@ func (c *Catalog) CoverageMatrix() ([]CoverageCell, error) {
 		if item.Notes != "" {
 			cell.Notes = append(cell.Notes, item.Notes)
 		}
-		if item.Outcome == "finding" || (cell.Outcome != "finding" && item.Outcome == "blocked") ||
-			(cell.Outcome != "finding" && cell.Outcome != "blocked" && item.Outcome == "clean") {
-			cell.Outcome = item.Outcome
+		if len(item.ExchangeIDs) > 0 {
+			cell.LinkedSurfaces++
+		}
+		switch item.Outcome {
+		case "clean", "finding":
+			cell.TestedSurfaces++
+		case "blocked":
+			cell.BlockedSurfaces++
+		default:
+			cell.UntestedSurfaces++
+		}
+		if item.Outcome == "finding" {
+			cell.Outcome = "finding"
 		}
 	}
 	result := make([]CoverageCell, 0, len(cells))
 	for _, cell := range cells {
+		cell.FullyTested = cell.TestedSurfaces > 0 && cell.BlockedSurfaces == 0 && cell.UntestedSurfaces == 0
+		if cell.Outcome != "finding" {
+			switch {
+			case cell.BlockedSurfaces > 0:
+				cell.Outcome = "blocked"
+			case cell.FullyTested:
+				cell.Outcome = "clean"
+			default:
+				cell.Outcome = "untested"
+			}
+		}
 		result = append(result, *cell)
 	}
 	sort.Slice(result, func(i, j int) bool {

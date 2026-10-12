@@ -103,8 +103,8 @@ type Breaker struct {
 	// half-open trial tracking
 	trialInFlight bool
 	// onTransition is called when the breaker changes state (e.g. closed→open).
-	// The callback receives the new state and is called with the mutex held.
-	onTransition func(newState State)
+	// The callback receives a snapshot and is called after releasing the mutex.
+	onTransition func(stats Stats)
 }
 
 // New creates a Breaker with the given Config.
@@ -162,7 +162,6 @@ func (b *Breaker) Allow() error {
 // RecordSuccess records a successful request.
 func (b *Breaker) RecordSuccess() {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 
 	prevState := b.state
 	switch b.state {
@@ -174,15 +173,18 @@ func (b *Breaker) RecordSuccess() {
 	case StateClosed:
 		b.record(true)
 	}
-	if b.state != prevState && b.onTransition != nil {
-		b.onTransition(b.state)
+	changed := b.state != prevState
+	callback := b.onTransition
+	stats := b.statsLocked()
+	b.mu.Unlock()
+	if changed && callback != nil {
+		callback(stats)
 	}
 }
 
 // RecordFailure records a failed request.
 func (b *Breaker) RecordFailure() {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 
 	prevState := b.state
 	switch b.state {
@@ -198,8 +200,12 @@ func (b *Breaker) RecordFailure() {
 			b.openedAt = time.Now()
 		}
 	}
-	if b.state != prevState && b.onTransition != nil {
-		b.onTransition(b.state)
+	changed := b.state != prevState
+	callback := b.onTransition
+	stats := b.statsLocked()
+	b.mu.Unlock()
+	if changed && callback != nil {
+		callback(stats)
 	}
 }
 
@@ -262,7 +268,10 @@ func (b *Breaker) Stats() Stats {
 	defer b.mu.Unlock()
 
 	b.maybeHalfOpen()
+	return b.statsLocked()
+}
 
+func (b *Breaker) statsLocked() Stats {
 	s := Stats{State: b.state, Count: b.count, Failures: b.failure}
 	if b.count > 0 {
 		s.ErrorRate = float64(b.failure) / float64(b.count)
@@ -314,13 +323,13 @@ func (r *Registry) GetOrCreate(key string) *Breaker {
 		b = New(r.defaults)
 		// Wire the onTransition callback to fire onTrip on state change to open
 		capturedKey := key
-		b.onTransition = func(newState State) {
-			if newState == StateOpen {
+		b.onTransition = func(stats Stats) {
+			if stats.State == StateOpen {
 				r.mu.Lock()
 				onTrip := r.onTrip
 				r.mu.Unlock()
 				if onTrip != nil {
-					onTrip(capturedKey, b.Stats())
+					onTrip(capturedKey, stats)
 				}
 			}
 		}

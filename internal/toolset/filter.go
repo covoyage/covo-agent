@@ -110,8 +110,8 @@ func (tf *ToolsetFilter) BeforeModelCall(ctx context.Context, _ *agentcore.Agent
 
 	result, err := tf.filter.Filter(toolsetNames, tf.availability, tf.toolNames())
 	if err != nil {
-		tf.logger.Warn("toolset filter error, using all tools", "error", err)
-		return nil // don't block the call, just use all tools
+		tf.logger.Warn("toolset filter error, retaining policy filters", "error", err)
+		result = &FilterResult{Tools: tf.toolNames()}
 	}
 
 	// Build filtered tool definitions
@@ -211,9 +211,7 @@ func (tf *ToolsetFilter) Preview(allToolNames []string) ToolPreview {
 
 	result, err := tf.filter.Filter(out.Toolsets, tf.availability, allToolNames)
 	if err != nil {
-		out.Kept = append([]string(nil), allToolNames...)
-		sort.Strings(out.Kept)
-		return out
+		result = &FilterResult{Tools: allToolNames}
 	}
 	for name, reason := range result.Excluded {
 		out.Excluded[name] = reason
@@ -236,6 +234,10 @@ func (tf *ToolsetFilter) Preview(allToolNames []string) ToolPreview {
 		}
 		if tf.nameFilter != nil && !tf.nameFilter(name) {
 			out.Excluded[name] = "name filter"
+			continue
+		}
+		if tf.contextFilter != nil && !tf.contextFilter(context.Background(), name) {
+			out.Excluded[name] = "role policy"
 			continue
 		}
 		if tf.leanMode && !tf.leanVisible(name) {
@@ -387,28 +389,34 @@ var LeanDirectTools = map[string]bool{
 
 // CyberOnlyTools are never shown or callable outside ModeCyber.
 var CyberOnlyTools = map[string]bool{
-	"scan":             true,
-	"finding_upsert":   true,
-	"finding_triage":   true,
-	"asset_upsert":     true,
-	"coverage_upsert":  true,
-	"exchange_list":    true,
-	"exchange_get":     true,
-	"web_context":      true,
-	"csrf_retest":      true,
-	"exchange_label":   true,
-	"exchange_search":  true,
-	"exchange_replay":  true,
-	"exchange_compare": true,
-	"web_param_probe":  true,
-	"request_intake":   true,
-	"assessment":       true,
-	"remote_nodes":     true,
-	"remote_node_exec": true,
-	"threat_model":     true,
-	"diff_scope":       true,
-	"scan_profile":     true,
-	"finish_scan":      true,
+	"scan":              true,
+	"finding_upsert":    true,
+	"finding_retest":    true,
+	"cyber_storage":     true,
+	"oast":              true,
+	"finding_triage":    true,
+	"asset_upsert":      true,
+	"coverage_upsert":   true,
+	"exchange_list":     true,
+	"exchange_get":      true,
+	"web_context":       true,
+	"web_access_matrix": true,
+	"web_workflow":      true,
+	"web_test_execute":  true,
+	"csrf_retest":       true,
+	"exchange_label":    true,
+	"exchange_search":   true,
+	"exchange_replay":   true,
+	"exchange_compare":  true,
+	"web_param_probe":   true,
+	"request_intake":    true,
+	"assessment":        true,
+	"remote_nodes":      true,
+	"remote_node_exec":  true,
+	"threat_model":      true,
+	"diff_scope":        true,
+	"scan_profile":      true,
+	"finish_scan":       true,
 }
 
 // LeanCyberTools stay visible in lean mode so cyber recon does not have to
@@ -416,10 +424,15 @@ var CyberOnlyTools = map[string]bool{
 var LeanCyberTools = map[string]bool{
 	"web_fetch": true, "web_search": true, "open_url": true,
 	"scan": true, "finding_upsert": true, "finding_triage": true, "asset_upsert": true,
+	"finding_retest":  true,
+	"oast":            true,
 	"coverage_upsert": true, "exchange_list": true, "exchange_get": true,
-	"web_context":    true,
-	"csrf_retest":    true,
-	"exchange_label": true, "exchange_search": true, "exchange_replay": true,
+	"web_context":       true,
+	"web_access_matrix": true,
+	"web_workflow":      true,
+	"web_test_execute":  true,
+	"csrf_retest":       true,
+	"exchange_label":    true, "exchange_search": true, "exchange_replay": true,
 	"exchange_compare": true,
 	"web_param_probe":  true,
 	"request_intake":   true, "assessment": true, "remote_nodes": true,

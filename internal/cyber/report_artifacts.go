@@ -38,6 +38,27 @@ func renderMarkdownReport(report ScanReport) string {
 		}
 		b.WriteString("\n")
 	}
+	if len(report.CoverageMatrix) > 0 {
+		b.WriteString("## Reported Check Status\n\n")
+		for _, cell := range report.CoverageMatrix {
+			fmt.Fprintf(&b, "- %s / %s: %s; tested=%d, untested=%d, blocked=%d, evidence-linked=%d, fully tested=%t\n", cell.Target, cell.RiskClass, cell.Outcome, cell.TestedSurfaces, cell.UntestedSurfaces, cell.BlockedSurfaces, cell.LinkedSurfaces, cell.FullyTested)
+		}
+		b.WriteString("\n")
+	}
+	if len(report.Coverage) > 0 {
+		b.WriteString("## Check Evidence\n\n")
+		for _, item := range report.Coverage {
+			evidence := "not linked"
+			if len(item.ExchangeIDs) > 0 {
+				evidence = strings.Join(item.ExchangeIDs, ", ")
+			}
+			fmt.Fprintf(&b, "- %s on %s (%s): %s; evidence: %s\n", item.Surface, item.Target, item.RiskClass, item.Outcome, evidence)
+			if item.Notes != "" {
+				fmt.Fprintf(&b, "  Notes: %s\n", item.Notes)
+			}
+		}
+		b.WriteString("\nEvidence links identify recorded exchanges, not proof that a check or finding is valid.\n\n")
+	}
 	if len(report.ChainCandidates) > 0 {
 		b.WriteString("## Chain Candidates (unverified)\n\n")
 		for _, candidate := range report.ChainCandidates {
@@ -141,14 +162,17 @@ func (c *Catalog) buildSARIF(report ScanReport) map[string]any {
 		results = append(results, result)
 	}
 	for _, coverage := range report.Coverage {
-		kind := "pass"
-		if coverage.Outcome == "untested" || coverage.Outcome == "blocked" {
-			kind = "open"
+		kind := "open"
+		switch coverage.Outcome {
+		case "clean":
+			kind = "pass"
+		case "finding":
+			kind = "fail"
 		}
 		results = append(results, map[string]any{
 			"ruleId": "coverage", "kind": kind, "level": "none",
 			"message":    map[string]any{"text": coverage.Surface + ": " + coverage.Outcome + " " + coverage.Notes},
-			"properties": map[string]any{"coverage": true, "target": coverage.Target},
+			"properties": map[string]any{"coverage": true, "target": coverage.Target, "risk_class": coverage.RiskClass, "outcome": coverage.Outcome, "exchange_ids": coverage.ExchangeIDs, "evidence_linked": len(coverage.ExchangeIDs) > 0},
 		})
 	}
 	run := map[string]any{

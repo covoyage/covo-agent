@@ -121,16 +121,16 @@ func (n *NotificationService) sendOSCNotification(title, body string) {
 	title = sanitizeNotificationText(title)
 	body = sanitizeNotificationText(body)
 
-	fmt.Fprintf(os.Stderr, "\x1b]9;4;0;%s\x07", title)
+	fmt.Fprintf(os.Stdout, "\x1b]9;4;0;%s\x07", title)
 	if body != "" {
-		fmt.Fprintf(os.Stderr, "\x1b]9;4;1;%s\x07", body)
+		fmt.Fprintf(os.Stdout, "\x1b]9;4;1;%s\x07", body)
 	}
 }
 
 // setTitle 设置终端标题。
 func (n *NotificationService) setTitle(title string) {
 	title = sanitizeNotificationText(title)
-	fmt.Fprintf(os.Stderr, "\x1b]2;%s\x07", title)
+	fmt.Fprintf(os.Stdout, "\x1b]2;%s\x07", title)
 }
 
 // resetTitle 恢复基础标题。

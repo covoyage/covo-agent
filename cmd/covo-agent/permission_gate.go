@@ -53,11 +53,13 @@ var dangerousTools = map[string]bool{
 	"exchange_replay":  true,
 	"exchange_compare": true,
 	"csrf_retest":      true,
+	"web_workflow":     true,
+	"web_test_execute": true,
 }
 
 func legacyCyberApprovalKey(name string, args []byte) string {
 	switch name {
-	case "scan", "scan_profile", "request_intake", "web_param_probe", "exchange_replay", "exchange_compare", "csrf_retest", "remote_node_exec":
+	case "scan", "scan_profile", "request_intake", "web_param_probe", "exchange_replay", "exchange_compare", "csrf_retest", "web_workflow", "web_test_execute", "remote_node_exec":
 		sum := sha256.Sum256(args)
 		return fmt.Sprintf("tool:%s:%x", name, sum[:12])
 	}

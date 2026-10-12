@@ -330,6 +330,16 @@ func (s *interactiveSession) run() {
 		ed.SetPlaceholder(i18n.T("system.starting"))
 	}
 	typeahead := agentui.CaptureTypeahead(os.Stdin)
+	restoreStderr, redirectErr := logutil.RedirectStderr(logWriter)
+	if redirectErr != nil {
+		s.logger.Warn("redirect native stderr", "error", redirectErr)
+	} else {
+		defer func() {
+			if err := restoreStderr(); err != nil {
+				s.logger.Warn("restore native stderr", "error", err)
+			}
+		}()
+	}
 	if err := s.app.Start(); err != nil {
 		log.Fatalf("start tui: %v", err)
 	}

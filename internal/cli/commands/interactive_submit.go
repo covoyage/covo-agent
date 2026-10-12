@@ -246,7 +246,7 @@ func (s *interactiveSession) cancelSideRun() {
 }
 
 func (s *interactiveSession) interruptCurrentRun() bool {
-	cf := s.cancelRun.Load()
+	cf := s.cancelRun.Swap(nil)
 	if cf == nil || *cf == nil {
 		return false
 	}
@@ -254,6 +254,9 @@ func (s *interactiveSession) interruptCurrentRun() bool {
 		if ag := s.agentRuntime.Core(); ag != nil {
 			ag.ClearSteering()
 		}
+	}
+	if s.app != nil {
+		s.app.Interrupt()
 	}
 	(*cf)()
 	return true

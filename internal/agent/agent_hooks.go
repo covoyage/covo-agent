@@ -961,7 +961,10 @@ func (ca *CovoAgent) combinedBeforeToolCall() func(
 	doomloopCheck := ca.doomloopBudgetBeforeHook()
 	claudeHookCheck := ca.claudeHooksPreToolUse()
 	return func(ctx context.Context, tc agentcore.ToolCall) *agentcore.ToolCallOverride {
-		role := toolssubagent.SubagentRoleFromContext(ctx)
+		role := strings.ToLower(strings.TrimSpace(ca.baseCfg.SubagentRole))
+		if role == "" {
+			role = "parent"
+		}
 		if ca.mode.IsCyberFamily() && role != "" {
 			if catalog := ca.FindingCatalog(); catalog != nil {
 				_ = catalog.RecordAgentTool(toolssubagent.SubagentViewRefFromContext(ctx), role, tc.Name)
@@ -971,7 +974,7 @@ func (ca *CovoAgent) combinedBeforeToolCall() func(
 			return &agentcore.ToolCallOverride{Block: true, IsError: true, Result: "host shell is disabled for this engagement; use the sandbox tool"}
 		}
 		if ca.mode.IsCyberFamily() && !cyber.AllowOrchestratorTool(role, tc.Name) {
-			return &agentcore.ToolCallOverride{Block: true, IsError: true, Result: fmt.Sprintf("%s is reserved for spawned hands-on roles; the parent orchestrates", tc.Name)}
+			return &agentcore.ToolCallOverride{Block: true, IsError: true, Result: fmt.Sprintf("%s is reserved for spawned hands-on roles; the parent orchestrates. Do not retry it in this agent. Use sessions_spawn with explicit role=\"recon\" for reconnaissance or role=\"verifier\" for verification, include the operator-authorized target and objective in task, then sessions_wait and summarize the evidence. Delegation does not expand scope or waive approval.", tc.Name)}
 		}
 		if ov := guardrailCheck(ctx, tc); ov != nil {
 			return ov

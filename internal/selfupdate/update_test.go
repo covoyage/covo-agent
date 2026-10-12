@@ -4,7 +4,9 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"encoding/json"
 	"errors"
+	"github.com/covoyage/covo-agent/internal/fslock"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +15,110 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestUpdateRecoveryVerifiesArtifactsBeforeMutation(t *testing.T) {
+	for _, phase := range []string{"prepared", "backed_up", "installed", "cleanup_done", "tampered", "operator_replaced", "unclean_path"} {
+		t.Run(phase, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "agent")
+			staged := filepath.Join(dir, ".agent.update-test")
+			backup := target + ".rollback-test"
+			if err := os.WriteFile(target, []byte("old"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(staged, []byte("new"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			oldHash, _ := updateHash(target)
+			newHash, _ := updateHash(staged)
+			state := updateJournal{Version: 1, Target: target, Staged: staged, Backup: backup, OldHash: oldHash, NewHash: newHash}
+			if phase == "unclean_path" {
+				state.Staged = dir + string(os.PathSeparator) + "sub" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + filepath.Base(staged)
+			}
+			if err := writeUpdateJournal(target+".update.json", state); err != nil {
+				t.Fatal(err)
+			}
+			if phase == "backed_up" || phase == "installed" || phase == "cleanup_done" {
+				if err := os.Rename(target, backup); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if phase == "installed" || phase == "cleanup_done" {
+				if err := os.Rename(staged, target); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if phase == "tampered" {
+				if err := os.WriteFile(staged, []byte("other"), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if phase == "cleanup_done" {
+				if err := os.Remove(backup); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if phase == "operator_replaced" {
+				if err := os.WriteFile(target, []byte("operator"), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := RecoverPendingUpdate(target)
+			if phase == "tampered" || phase == "operator_replaced" || phase == "unclean_path" {
+				if err == nil {
+					t.Fatal("tampered stage accepted")
+				}
+				data, _ := os.ReadFile(target)
+				expected := "old"
+				if phase == "operator_replaced" {
+					expected = "operator"
+				}
+				if string(data) != expected {
+					t.Fatal("live binary changed")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, _ := os.ReadFile(target)
+			if string(data) != "new" {
+				t.Fatal("update not recovered")
+			}
+			if err := RecoverPendingUpdate(target); err != nil {
+				t.Fatal("recovery not idempotent", err)
+			}
+		})
+	}
+}
+
+func TestUpdateJournalRejectsAmbiguityAndLocks(t *testing.T) {
+	var state updateJournal
+	for _, data := range []string{`{"version":1,"version":1}`, `{"version":null}`, `{"Version":1}`, `{} {}`} {
+		if err := decodeUpdateJournal([]byte(data), &state); err == nil {
+			t.Fatal("ambiguous journal accepted", data)
+		}
+	}
+	data, _ := json.Marshal(updateJournal{Version: 1})
+	if err := decodeUpdateJournal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "lock")
+	release, err := fslock.Acquire(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unlock, err := fslock.Acquire(path); err == nil {
+		unlock()
+		t.Fatal("concurrent lock acquired")
+	}
+	release()
+	unlock, err := fslock.Acquire(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+}
 
 func TestSelectReleaseAssetSupportsGoReleaserArchitectureNames(t *testing.T) {
 	assets := []releaseAsset{

@@ -14,24 +14,29 @@ import (
 // Exchange is one recorded HTTP request/response. Findings cite Exchange.ID
 // instead of pasting a truncated body into the conversation.
 type Exchange struct {
-	ID                string    `json:"id"`
-	Redacted          bool      `json:"redacted,omitempty"`
-	HeadersTruncated  bool      `json:"headers_truncated,omitempty"`
-	RequestTruncated  bool      `json:"request_truncated,omitempty"`
-	ResponseTruncated bool      `json:"response_truncated,omitempty"`
-	Method            string    `json:"method"`
-	URL               string    `json:"url"`
-	StatusCode        int       `json:"status_code,omitempty"`
-	ReqHeaders        string    `json:"req_headers,omitempty"`
-	Request           string    `json:"request,omitempty"`
-	Response          string    `json:"response,omitempty"`
-	Identity          string    `json:"identity,omitempty"`
-	Role              string    `json:"role,omitempty"`
-	Tenant            string    `json:"tenant,omitempty"`
-	Resource          string    `json:"resource,omitempty"`
-	Owner             string    `json:"owner,omitempty"`
-	BaselineID        string    `json:"baseline_id,omitempty"`
-	At                time.Time `json:"at"`
+	ID                string           `json:"id"`
+	Source            string           `json:"source,omitempty"`
+	BrowserSessionID  string           `json:"browser_session_id,omitempty"`
+	BrowserRequestID  string           `json:"browser_request_id,omitempty"`
+	Redacted          bool             `json:"redacted,omitempty"`
+	HeadersTruncated  bool             `json:"headers_truncated,omitempty"`
+	RequestTruncated  bool             `json:"request_truncated,omitempty"`
+	ResponseTruncated bool             `json:"response_truncated,omitempty"`
+	Method            string           `json:"method"`
+	URL               string           `json:"url"`
+	StatusCode        int              `json:"status_code,omitempty"`
+	HTTPProtocol      string           `json:"http_protocol,omitempty"`
+	Diagnostics       *HTTPDiagnostics `json:"diagnostics,omitempty"`
+	ReqHeaders        string           `json:"req_headers,omitempty"`
+	Request           string           `json:"request,omitempty"`
+	Response          string           `json:"response,omitempty"`
+	Identity          string           `json:"identity,omitempty"`
+	Role              string           `json:"role,omitempty"`
+	Tenant            string           `json:"tenant,omitempty"`
+	Resource          string           `json:"resource,omitempty"`
+	Owner             string           `json:"owner,omitempty"`
+	BaselineID        string           `json:"baseline_id,omitempty"`
+	At                time.Time        `json:"at"`
 }
 
 // ExchangeFilter selects recorded requests by protocol metadata or content.
@@ -205,10 +210,33 @@ func (c *Catalog) retainExchangesLocked(items []Exchange, newestID string) ([]Ex
 	for _, finding := range findings {
 		protect(finding.ExchangeID)
 	}
+	coverage, err := c.loadCoverageLocked()
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range coverage {
+		for _, id := range item.ExchangeIDs {
+			protect(id)
+		}
+	}
 	for _, job := range jobs {
 		if job.Status == "pending" || job.Status == "running" {
 			protect(job.ExchangeID)
 		}
+	}
+	var observations []RequestObservation
+	if err := c.readJSON(c.requestObservationsPath(), &observations); err != nil {
+		return nil, err
+	}
+	for _, observation := range observations {
+		protect(observation.ExchangeID)
+	}
+	var oastSessions []oastState
+	if err := c.readJSON(c.oastPath(), &oastSessions); err != nil {
+		return nil, err
+	}
+	for _, session := range oastSessions {
+		protect(session.ExchangeID)
 	}
 	if len(retained) > 500 {
 		return nil, fmt.Errorf("exchange storage is full (500 records); referenced evidence cannot be evicted")

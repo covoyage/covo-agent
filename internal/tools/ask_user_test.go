@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/covoyage/covo-agent/internal/evolution"
+	"github.com/covoyage/covonaut/agentcore"
 )
 
 func askUserCall(t *testing.T, cb AskUserFunc, args string) (map[string]any, error) {
@@ -125,4 +131,110 @@ func TestAskUserCallbackErrorWithoutDefaultFails(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no user") {
 		t.Fatalf("err = %v, want wrapped callback error", err)
 	}
+}
+
+func TestAskUserExtensionLateBinding(t *testing.T) {
+	home := t.TempDir()
+	extension := NewExtension(ExtensionConfig{
+		HomeDir: home, SessionsDir: filepath.Join(home, "sessions"), WorkDir: home,
+	})
+	t.Cleanup(func() { _ = extension.Dispose() })
+	workshop := evolution.NewWorkshopStore(home)
+	if err := workshop.Init(); err != nil {
+		t.Fatal(err)
+	}
+	extension.SetWorkshopStore(workshop)
+	core := agentcore.New(agentcore.Config{})
+	t.Cleanup(core.Close)
+	if err := extension.Init(context.Background(), core); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"clarify", "ask_user"} {
+		t.Run(name, func(t *testing.T) {
+			tool, ok := core.GetTool(name)
+			if !ok {
+				t.Fatalf("%s not registered", name)
+			}
+			extension.SetAskUserCallback(nil)
+			question := json.RawMessage(`{"question":"pick one","choices":["A","B"]}`)
+			if name == "ask_user" {
+				question = json.RawMessage(`{"question":"pick one","options":["A","B"]}`)
+			}
+			if _, err := tool.Func(context.Background(), question); err == nil || !strings.Contains(err.Error(), "no interactive user available") {
+				t.Fatalf("unbound callback: %v", err)
+			}
+			calls := 0
+			extension.SetAskUserCallback(func(ctx context.Context, q string, options []string, defaultValue string) (string, error) {
+				calls++
+				if q != "pick one" || len(options) != 2 || options[1] != "B" || defaultValue != "" {
+					t.Errorf("callback arguments: q=%q options=%v default=%q", q, options, defaultValue)
+				}
+				extension.SetAskUserCallback(nil)
+				return "B", nil
+			})
+			done := make(chan struct{})
+			var out any
+			var callErr error
+			go func() {
+				out, callErr = tool.Func(context.Background(), question)
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("callback replacement blocked while awaiting user")
+			}
+			if callErr != nil {
+				t.Fatal(callErr)
+			}
+			result := out.(map[string]any)
+			if calls != 1 || result["response"] != "B" || result["used_default"] != false {
+				t.Fatalf("late-bound result: %#v calls=%d", result, calls)
+			}
+			fallback := json.RawMessage(`{"question":"q","default":"skip","default_choice":"skip"}`)
+			out, err := tool.Func(context.Background(), fallback)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result = out.(map[string]any)
+			if result["response"] != "skip" || result["used_default"] != true {
+				t.Fatalf("disabled callback fallback: %#v", result)
+			}
+			extension.SetAskUserCallback(func(context.Context, string, []string, string) (string, error) {
+				return "updated", nil
+			})
+			out, err = tool.Func(context.Background(), question)
+			if err != nil || out.(map[string]any)["response"] != "updated" {
+				t.Fatalf("replaced callback: %#v err=%v", out, err)
+			}
+		})
+	}
+}
+
+func TestAskUserCallbackConcurrentReplacement(t *testing.T) {
+	extension := &Extension{}
+	callback := func(context.Context, string, []string, string) (string, error) { return "answer", nil }
+	var workers sync.WaitGroup
+	workers.Add(2)
+	go func() {
+		defer workers.Done()
+		for iteration := 0; iteration < 1000; iteration++ {
+			extension.SetAskUserCallback(callback)
+			extension.SetAskUserCallback(nil)
+		}
+	}()
+	go func() {
+		defer workers.Done()
+		for iteration := 0; iteration < 1000; iteration++ {
+			answer, err := extension.askUser(context.Background(), "q", nil, "")
+			if err != nil {
+				if !strings.Contains(err.Error(), "no interactive user available") {
+					t.Errorf("unexpected callback error: %v", err)
+				}
+			} else if answer != "answer" {
+				t.Errorf("unexpected answer: %q", answer)
+			}
+		}
+	}()
+	workers.Wait()
 }

@@ -52,10 +52,16 @@ func intakeToolAllowed(scope toolssubagent.IntakeScope, call *agentcore.HookCont
 		return json.Unmarshal(call.Arguments, &args) == nil && args.ID == scope.ExchangeID
 	case "coverage_upsert":
 		var args struct {
-			Target string `json:"target"`
+			Target      string   `json:"target"`
+			ExchangeIDs []string `json:"exchange_ids"`
 		}
 		if json.Unmarshal(call.Arguments, &args) != nil {
 			return false
+		}
+		for _, id := range args.ExchangeIDs {
+			if id != scope.ExchangeID {
+				return false
+			}
 		}
 		_, endpoint, ok := strings.Cut(scope.Endpoint, " ")
 		if !ok {

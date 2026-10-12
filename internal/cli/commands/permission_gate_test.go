@@ -42,9 +42,18 @@ func TestApprovalPatternKeyIsPerCall(t *testing.T) {
 }
 
 func TestActiveCyberApprovalModes(t *testing.T) {
-	for _, name := range []string{"scan", "scan_profile", "request_intake", "web_param_probe", "exchange_replay", "exchange_compare", "csrf_retest", "remote_node_exec"} {
+	for _, name := range []string{"scan", "scan_profile", "request_intake", "web_param_probe", "exchange_replay", "exchange_compare", "csrf_retest", "web_workflow", "web_test_execute", "remote_node_exec"} {
 		if !dangerousTools[name] {
 			t.Errorf("%s bypasses approval", name)
+		}
+	}
+	for _, name := range []string{"web_workflow", "web_test_execute"} {
+		first, second := []byte(`{"id":"ex-1","concurrency":2}`), []byte(`{"id":"ex-2","concurrency":4}`)
+		if approvalPatternKey(name, first) == approvalPatternKey(name, second) || approvalPatternKey(name, first) == "tool:"+name {
+			t.Fatal("approval reused across validation plans", name)
+		}
+		if readOnlyCyberToolCall(name, first) {
+			t.Fatal("active validation classified read-only", name)
 		}
 	}
 	for _, call := range []struct {

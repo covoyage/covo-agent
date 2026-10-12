@@ -80,6 +80,40 @@ func TestToolsetFilter_ContextFilter(t *testing.T) {
 	}
 }
 
+func TestToolsetFilterRolePolicySurvivesResolutionError(t *testing.T) {
+	const broken = "missing-role-test-toolset"
+	Toolsets[broken] = ToolsetDef{Name: broken, Includes: []string{broken}}
+	t.Cleanup(func() { delete(Toolsets, broken) })
+	platform := NewPlatformToolsets("cli")
+	platform.SetOverride("cli", []string{broken})
+	names := []string{"sessions_spawn", "scan", "bash", "web_fetch"}
+	filter := NewToolsetFilter(ToolsetFilterConfig{
+		Platform: platform, CyberMode: true,
+		ToolNames: func() []string { return names },
+		ContextFilter: func(_ context.Context, name string) bool {
+			return name != "scan" && name != "bash"
+		},
+	})
+	request := &agentcore.ModelCallContext{Request: &agentcore.ProviderRequest{}}
+	for _, name := range names {
+		request.Request.Tools = append(request.Request.Tools, agentcore.ToolDefinition{Name: name})
+	}
+	if err := filter.BeforeModelCall(context.Background(), nil, request); err != nil {
+		t.Fatal(err)
+	}
+	kept := []string{}
+	for _, definition := range request.Request.Tools {
+		kept = append(kept, definition.Name)
+	}
+	if len(kept) != 2 || !containsAll(kept, "sessions_spawn", "web_fetch") {
+		t.Fatalf("policy bypassed on resolution failure: %v", kept)
+	}
+	preview := filter.Preview(names)
+	if len(preview.Kept) != 2 || !containsAll(preview.Kept, "sessions_spawn", "web_fetch") || preview.Excluded["scan"] != "role policy" || preview.Excluded["bash"] != "role policy" {
+		t.Fatalf("preview bypassed role policy: %+v", preview)
+	}
+}
+
 func TestToolsetFilter_PreviewMatchesBeforeModelCall(t *testing.T) {
 	platform := NewPlatformToolsets("cli")
 	platform.SetOverride("cli", []string{"read", "mcp", "tool_search", "computer_use"})
@@ -174,7 +208,7 @@ func TestCyberOnlyToolsHiddenOutsideCyberMode(t *testing.T) {
 	tf := NewToolsetFilter(ToolsetFilterConfig{
 		Platform: platform,
 		ToolNames: func() []string {
-			return []string{"read", "scan", "finding_upsert"}
+			return []string{"read", "scan", "finding_upsert", "finding_retest", "cyber_storage", "oast", "web_access_matrix", "web_workflow", "web_test_execute"}
 		},
 		PlatformName: func() string { return "cli" },
 	})
@@ -184,6 +218,12 @@ func TestCyberOnlyToolsHiddenOutsideCyberMode(t *testing.T) {
 				{Name: "read"},
 				{Name: "scan"},
 				{Name: "finding_upsert"},
+				{Name: "finding_retest"},
+				{Name: "cyber_storage"},
+				{Name: "oast"},
+				{Name: "web_access_matrix"},
+				{Name: "web_workflow"},
+				{Name: "web_test_execute"},
 			},
 		},
 	}
@@ -194,11 +234,16 @@ func TestCyberOnlyToolsHiddenOutsideCyberMode(t *testing.T) {
 	for _, def := range mcc.Request.Tools {
 		kept[def.Name] = true
 	}
-	if kept["scan"] || kept["finding_upsert"] {
+	if kept["scan"] || kept["finding_upsert"] || kept["finding_retest"] || kept["cyber_storage"] || kept["oast"] {
 		t.Fatal("cyber-only tools should be hidden outside cyber mode")
 	}
 	if !kept["read"] {
 		t.Fatal("read should remain visible")
+	}
+	for _, name := range []string{"web_access_matrix", "web_workflow", "web_test_execute"} {
+		if kept[name] {
+			t.Fatal("validation tool visible outside cyber mode", name)
+		}
 	}
 
 	tf.cyberMode = true
@@ -206,6 +251,12 @@ func TestCyberOnlyToolsHiddenOutsideCyberMode(t *testing.T) {
 		{Name: "read"},
 		{Name: "scan"},
 		{Name: "finding_upsert"},
+		{Name: "finding_retest"},
+		{Name: "cyber_storage"},
+		{Name: "oast"},
+		{Name: "web_access_matrix"},
+		{Name: "web_workflow"},
+		{Name: "web_test_execute"},
 	}
 	if err := tf.BeforeModelCall(context.Background(), &agentcore.AgentRunContext{}, mcc); err != nil {
 		t.Fatalf("BeforeModelCall cyber: %v", err)
@@ -214,8 +265,13 @@ func TestCyberOnlyToolsHiddenOutsideCyberMode(t *testing.T) {
 	for _, def := range mcc.Request.Tools {
 		kept[def.Name] = true
 	}
-	if !kept["scan"] || !kept["finding_upsert"] {
+	if !kept["scan"] || !kept["finding_upsert"] || !kept["finding_retest"] || !kept["cyber_storage"] || !kept["oast"] {
 		t.Fatal("cyber-only tools should be visible in cyber mode")
+	}
+	for _, name := range []string{"web_access_matrix", "web_workflow", "web_test_execute"} {
+		if !kept[name] {
+			t.Fatal("validation tool missing in cyber mode", name)
+		}
 	}
 }
 
@@ -225,7 +281,7 @@ func TestLeanCyberToolsVisibleOnlyWhenEnabled(t *testing.T) {
 		t.Fatal("scan should stay hidden in lean code/general")
 	}
 	tf.leanCyber = true
-	if !tf.leanVisible("scan") || !tf.leanVisible("web_fetch") || !tf.leanVisible("open_url") {
+	if !tf.leanVisible("scan") || !tf.leanVisible("web_fetch") || !tf.leanVisible("open_url") || !tf.leanVisible("oast") {
 		t.Fatal("lean cyber should keep scan/web schemas")
 	}
 }

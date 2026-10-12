@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -145,6 +146,13 @@ func init() {
 // Returns nil when the URL is allowed; otherwise an error describing the
 // reason (the error message does NOT contain the full URL).
 func ValidateURL(rawURL string) error {
+	return ValidateURLContext(context.Background(), rawURL)
+}
+
+func ValidateURLContext(ctx context.Context, rawURL string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if rawURL == "" {
 		return errors.New("empty URL")
 	}
@@ -195,12 +203,12 @@ func ValidateURL(rawURL string) error {
 	}
 
 	// Resolve the hostname and check every returned IP.
-	ips, resolveErr := net.LookupIP(host)
+	ips, resolveErr := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if resolveErr != nil {
 		return fmt.Errorf("cannot resolve host: %w", resolveErr)
 	}
 	for _, raw := range ips {
-		addr, ok := netip.AddrFromSlice(raw)
+		addr, ok := netip.AddrFromSlice(raw.IP)
 		if !ok {
 			continue
 		}

@@ -105,7 +105,7 @@ func scanRecipeName(argsJSON []byte) string {
 // approvalPatternKey binds active network approvals to the exact call arguments.
 func approvalPatternKey(toolName string, argsJSON []byte) string {
 	switch toolName {
-	case "scan", "scan_profile", "request_intake", "web_param_probe", "exchange_replay", "exchange_compare", "csrf_retest", "remote_node_exec":
+	case "scan", "scan_profile", "request_intake", "web_param_probe", "exchange_replay", "exchange_compare", "csrf_retest", "web_workflow", "web_test_execute", "remote_node_exec":
 		sum := sha256.Sum256(argsJSON)
 		return fmt.Sprintf("tool:%s:%x", toolName, sum[:12])
 	}

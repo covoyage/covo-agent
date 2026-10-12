@@ -52,7 +52,7 @@ var Toolsets = map[string]ToolsetDef{
 	"cyber": {
 		Name:        "cyber",
 		Description: "Scan recipes and finding/asset tracking",
-		Tools:       []string{"scan", "finding_upsert", "asset_upsert"},
+		Tools:       []string{"scan", "finding_upsert", "asset_upsert", "finding_retest", "cyber_storage", "oast", "web_access_matrix", "web_workflow", "web_test_execute"},
 	},
 	"vision": {
 		Name:        "vision",

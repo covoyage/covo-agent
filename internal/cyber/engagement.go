@@ -1,8 +1,11 @@
 package cyber
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
+	"github.com/covoyage/covo-agent/internal/fslock"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -61,13 +64,14 @@ var WhiteboxFloorGroups = [][]string{
 }
 
 type Coverage struct {
-	ID        string    `json:"id"`
-	Surface   string    `json:"surface"`
-	Target    string    `json:"target"`
-	RiskClass string    `json:"risk_class,omitempty"`
-	Outcome   string    `json:"outcome"`
-	Notes     string    `json:"notes,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	ID          string    `json:"id"`
+	Surface     string    `json:"surface"`
+	Target      string    `json:"target"`
+	RiskClass   string    `json:"risk_class,omitempty"`
+	Outcome     string    `json:"outcome"`
+	Notes       string    `json:"notes,omitempty"`
+	ExchangeIDs []string  `json:"exchange_ids,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at,omitempty"`
 }
 
 type ScanRun struct {
@@ -78,6 +82,7 @@ type ScanRun struct {
 }
 
 type Engagement struct {
+	Revision       string                 `json:"revision,omitempty"`
 	Depth          string                 `json:"depth,omitempty"`
 	Whitebox       bool                   `json:"whitebox,omitempty"`
 	WhiteboxTarget string                 `json:"whitebox_target,omitempty"`
@@ -115,6 +120,11 @@ func (c *Catalog) reportPath() string     { return filepath.Join(c.dir, "scan_re
 func (c *Catalog) SetEngagement(depth string, whitebox bool) (Engagement, error) {
 	catalogMu.Lock()
 	defer catalogMu.Unlock()
+	release, err := c.lockProfile()
+	if err != nil {
+		return Engagement{}, err
+	}
+	defer release()
 	var e Engagement
 	if err := c.readJSON(c.engagementPath(), &e); err != nil && !os.IsNotExist(err) {
 		return Engagement{}, err
@@ -144,6 +154,81 @@ func (c *Catalog) GetEngagement() (Engagement, error) {
 	return e, nil
 }
 
+func (c *Catalog) lockProfile() (func(), error) {
+	root, err := c.openStorage(true)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	return fslock.Acquire(filepath.Join(c.dir, ".profile.lock"))
+}
+
+func ProfileRevision(engagement Engagement) string {
+	data, _ := json.Marshal(engagement)
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
+func (c *Catalog) UpdateProfile(expected, depth string, whitebox *bool, target string, hosts *[]string) (Engagement, error) {
+	catalogMu.Lock()
+	defer catalogMu.Unlock()
+	release, err := c.lockProfile()
+	if err != nil {
+		return Engagement{}, err
+	}
+	defer release()
+	var current Engagement
+	if err := c.readJSON(c.engagementPath(), &current); err != nil {
+		return current, err
+	}
+	if current.Depth == "" {
+		current.Depth = DepthDeep
+	}
+	if expected == "" || expected != ProfileRevision(current) {
+		return current, fmt.Errorf("scan profile changed; read its revision before saving")
+	}
+	next := current
+	if depth != "" {
+		if depth != DepthQuick && depth != DepthStandard && depth != DepthDeep {
+			return current, fmt.Errorf("invalid scan depth")
+		}
+		next.Depth = depth
+	}
+	if whitebox != nil {
+		next.Whitebox = *whitebox
+	}
+	if hosts != nil {
+		next.AllowedHosts = nil
+		seen := map[string]bool{}
+		for _, raw := range *hosts {
+			host := normalizeIntakeHost(raw)
+			if host == "" {
+				return current, fmt.Errorf("invalid allowed host %q", raw)
+			}
+			if !seen[host] {
+				next.AllowedHosts = append(next.AllowedHosts, host)
+				seen[host] = true
+			}
+		}
+		sort.Strings(next.AllowedHosts)
+	}
+	if LooksLikeRepo(target) && next.Depth != DepthQuick {
+		next.Whitebox = true
+	}
+	if next.Whitebox && LooksLikeRepo(target) {
+		absolute, err := filepath.Abs(target)
+		if err != nil {
+			return current, err
+		}
+		resolved, err := filepath.EvalSymlinks(absolute)
+		if err != nil {
+			return current, err
+		}
+		next.WhiteboxTarget = resolved
+	}
+	next.Revision, next.UpdatedAt = rand.Text(), time.Now().UTC()
+	return next, c.writeJSON(c.engagementPath(), next)
+}
+
 func (c *Catalog) SetWhiteboxTarget(target string) error {
 	absolute, err := filepath.Abs(target)
 	if err != nil {
@@ -155,6 +240,11 @@ func (c *Catalog) SetWhiteboxTarget(target string) error {
 	catalogMu.Lock()
 	defer catalogMu.Unlock()
 	var engagement Engagement
+	release, err := c.lockProfile()
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := c.readJSON(c.engagementPath(), &engagement); err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -180,6 +270,11 @@ func (c *Catalog) SetAllowedHosts(hosts []string) (Engagement, error) {
 	catalogMu.Lock()
 	defer catalogMu.Unlock()
 	var eng Engagement
+	release, err := c.lockProfile()
+	if err != nil {
+		return eng, err
+	}
+	defer release()
 	if err := c.readJSON(c.engagementPath(), &eng); err != nil && !os.IsNotExist(err) {
 		return Engagement{}, err
 	}
@@ -294,6 +389,33 @@ func (c *Catalog) UpsertCoverage(item Coverage) (Coverage, error) {
 
 	catalogMu.Lock()
 	defer catalogMu.Unlock()
+	if len(item.ExchangeIDs) > 20 {
+		return Coverage{}, fmt.Errorf("coverage accepts at most 20 exchange references")
+	}
+	if len(item.ExchangeIDs) > 0 {
+		exchanges, err := c.loadExchangesLocked()
+		if err != nil {
+			return Coverage{}, err
+		}
+		available := map[string]bool{}
+		for _, ex := range exchanges {
+			available[ex.ID] = true
+		}
+		seen := map[string]bool{}
+		ids := make([]string, 0, len(item.ExchangeIDs))
+		for _, id := range item.ExchangeIDs {
+			id = strings.TrimSpace(id)
+			if !available[id] {
+				return Coverage{}, fmt.Errorf("coverage exchange %q not found", id)
+			}
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+		sort.Strings(ids)
+		item.ExchangeIDs = ids
+	}
 	items, err := c.loadCoverageLocked()
 	if err != nil {
 		return Coverage{}, err
@@ -450,6 +572,9 @@ func (c *Catalog) FinishScan() (ScanReport, error) {
 		if item.Outcome == "untested" || item.Outcome == "" {
 			report.UntestedSurfaces++
 		}
+		if item.Outcome == "blocked" {
+			report.CoverageGaps = append(report.CoverageGaps, item.Target+": "+item.Surface+" blocked")
+		}
 	}
 	for _, cell := range matrix {
 		if cell.Outcome == "untested" && len(cell.Surfaces) == 0 {
@@ -497,6 +622,14 @@ func NeedsPoC(status string) bool {
 	}
 }
 
+type FindingProofRequiredError struct {
+	Status string
+}
+
+func (e *FindingProofRequiredError) Error() string {
+	return fmt.Sprintf("status %q requires poc or exchange_id; use open_proof_gap when reproduction is incomplete", e.Status)
+}
+
 func ValidateFindingProof(f Finding) error {
 	if !NeedsPoC(f.Status) {
 		return nil
@@ -504,7 +637,7 @@ func ValidateFindingProof(f Finding) error {
 	if strings.TrimSpace(f.PoC) != "" || strings.TrimSpace(f.ExchangeID) != "" {
 		return nil
 	}
-	return fmt.Errorf("status %q requires poc or exchange_id; use open_proof_gap when reproduction is incomplete", normalizeStatus(f.Status))
+	return &FindingProofRequiredError{Status: normalizeStatus(f.Status)}
 }
 
 func RoleSkillNames(role string) []string {
@@ -518,7 +651,7 @@ func RoleSkillNames(role string) []string {
 // OrchestratorToolBlocked is the hands-on tool set the parent must not call.
 func OrchestratorToolBlocked(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "scan", "bash", "execute_code", "sandbox", "exchange_replay", "exchange_compare", "web_param_probe", "csrf_retest", "remote_node_exec":
+	case "scan", "bash", "execute_code", "sandbox", "exchange_replay", "exchange_compare", "web_param_probe", "csrf_retest", "web_workflow", "web_test_execute", "remote_node_exec", "oast":
 		return true
 	default:
 		return false

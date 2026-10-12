@@ -17,7 +17,7 @@ func BuildRequestIntakeTool(catalog *cyber.Catalog) *agentcore.Tool {
 func BuildRequestIntakeToolForRole(catalog *cyber.Catalog, instanceRole string) *agentcore.Tool {
 	return &agentcore.Tool{
 		Name:        "request_intake",
-		Description: "Opt in to dispatching new in-scope HTTP request shapes to a verifier, or inspect the durable queue. No target is contacted by this tool.",
+		Description: "Opt in to scoped HTTP operation review and context-triggered follow-ups, or inspect the durable queue. Each job has at most three automatic attempts. Grouping and identity observations do not expand replay permissions. No target is contacted by this tool.",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
 			"action": map[string]any{"type": "string", "enum": []string{"status", "enable", "disable"}},
 			"hosts":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact allowed hosts; required to enable."},

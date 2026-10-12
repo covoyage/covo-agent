@@ -752,6 +752,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 				return "", fmt.Errorf("spawn: create child agent: %w", err)
 			}
 			defer child.Close()
+			cyber.RecordRetestSession(ctx, child.SessionManager().CurrentID())
 			child.SetExecutionPhase(ca.ExecutionPhase())
 
 			// Record the subagent lifecycle into the parent's rollout so the
@@ -842,6 +843,13 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 		}
 	}
 
+	cyberTransport := NewSafeClient().Transport
+	if cfg.Mode.IsCyberFamily() {
+		cyberTransport, err = NewCyberHTTPTransport()
+		if err != nil {
+			return nil, err
+		}
+	}
 	toolsExt := agenttools.NewExtension(agenttools.ExtensionConfig{
 		SessionsDir:       filepath.Join(cfg.HomeDir, "sessions"),
 		HomeDir:           cfg.HomeDir,
@@ -854,7 +862,7 @@ func NewCovoAgent(cfg CovoAgentConfig) (*CovoAgent, error) {
 		SubagentRole:      cfg.SubagentRole,
 		WorkDir:           cfg.WorkingDir,
 		ProviderName:      cfg.ProviderName,
-		WebFetchTransport: NewSafeClient().Transport,
+		WebFetchTransport: cyberTransport,
 	})
 
 	// Wire the standing orders store into the extension (same instance used
@@ -1349,13 +1357,17 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 	if cfg.Remote.Enabled() {
 		editCfg = &tools.EditToolConfig{Operations: &workspace.RemoteFS{Spec: cfg.Remote}}
 	}
+	browserCfg := browserToolConfigFromEnv()
+	if cfg.Mode.IsCyberFamily() {
+		browserCfg.NetworkObservation = cyberBrowserNetworkConfig(ca.FindingCatalog(), logger)
+	}
 	toolExt := tools.NewExtension(tools.ExtensionConfig{
 		WorkingDir: cfg.WorkingDir,
 		Read:       readCfg,
 		Edit:       editCfg,
 		WriteFile:  &tools.WriteFileToolConfig{Operations: ca.fsOps},
 		Bash:       bashCfg,
-		Browser:    browserToolConfigFromEnv(),
+		Browser:    browserCfg,
 		WebSearch:  webSearchToolConfigFromAgent(cfg.ProviderName),
 		// Persistent terminal sessions: PTY-backed shells whose working
 		// directory, environment, and background jobs survive across calls,

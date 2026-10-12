@@ -20,7 +20,7 @@ func ApprovalRequired(ctx context.Context) bool {
 }
 
 func DangerousTools() map[string]bool {
-	names := []string{"bash", "process", "sandbox", "mcp", "remote_exec", "external_agent", "skill_script", "preview", "write_file", "edit_block", "write", "edit", "apply_patch", "append_file", "patch", "move", "git_commit", "git_push", "delete", "delete_file", "execute_code", "computer_use", "exit_plan_mode", "scan", "scan_profile", "request_intake", "web_param_probe", "remote_node_exec", "exchange_replay", "exchange_compare", "csrf_retest", "deploy", "cronjob"}
+	names := []string{"bash", "process", "sandbox", "mcp", "remote_exec", "external_agent", "skill_script", "preview", "write_file", "edit_block", "write", "edit", "apply_patch", "append_file", "patch", "move", "git_commit", "git_push", "delete", "delete_file", "execute_code", "computer_use", "exit_plan_mode", "scan", "scan_profile", "request_intake", "web_param_probe", "remote_node_exec", "exchange_replay", "exchange_compare", "csrf_retest", "web_workflow", "web_test_execute", "deploy", "cronjob", "finding_retest", "cyber_storage", "oast"}
 	tools := make(map[string]bool, len(names))
 	for _, name := range names {
 		tools[name] = true

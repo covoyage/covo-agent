@@ -241,7 +241,7 @@ func (c *Catalog) UpsertFinding(f Finding) (Finding, error) {
 		if !found {
 			return Finding{}, fmt.Errorf("finding exchange %q not found", f.ExchangeID)
 		} else if CanonicalTarget(ex.URL) != f.Target {
-			return Finding{}, fmt.Errorf("finding exchange %q has a different target", f.ExchangeID)
+			return Finding{}, fmt.Errorf("finding exchange %q has a different target: finding target=%q, exchange host=%q; inspect exchange_get and cite evidence for the exact finding host. Bare domains and www/subdomains are not interchangeable; correct target only if the finding applies to that host", f.ExchangeID, f.Target, CanonicalTarget(ex.URL))
 		} else if f.Method != "" && !strings.EqualFold(f.Method, ex.Method) {
 			return Finding{}, fmt.Errorf("finding exchange %q has a different method", f.ExchangeID)
 		} else if NeedsPoC(f.Status) && ex.Redacted && f.PoC == "" {

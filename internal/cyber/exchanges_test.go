@@ -50,6 +50,49 @@ func TestExchangeRetentionReleasesFinishedJobs(t *testing.T) {
 	}
 }
 
+func TestExchangeRetentionPreservesRequestObservation(t *testing.T) {
+	catalog := NewCatalog(t.TempDir())
+	items := make([]Exchange, 500)
+	for index := range items {
+		items[index] = Exchange{ID: fmt.Sprintf("ex-%d", index+1), URL: "https://example.test/"}
+	}
+	if err := catalog.writeJSON(catalog.exchangesPath(), items); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.writeJSON(catalog.requestObservationsPath(), []RequestObservation{{ExchangeID: "ex-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.RecordExchange(Exchange{URL: items[0].URL}); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := catalog.GetExchange("ex-1"); err != nil || !found {
+		t.Fatalf("observation evidence was evicted: found=%v err=%v", found, err)
+	}
+}
+
+func TestExchangeRetentionPreservesCoverageEvidence(t *testing.T) {
+	catalog := NewCatalog(t.TempDir())
+	items := make([]Exchange, 500)
+	for index := range items {
+		items[index] = Exchange{ID: fmt.Sprintf("ex-%d", index+1), URL: "https://example.test/"}
+	}
+	items[1].BaselineID = "ex-1"
+	if err := catalog.writeJSON(catalog.exchangesPath(), items); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.UpsertCoverage(Coverage{Surface: "/", Outcome: "clean", ExchangeIDs: []string{"ex-2"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.RecordExchange(Exchange{URL: items[0].URL}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"ex-1", "ex-2"} {
+		if _, found, err := catalog.GetExchange(id); err != nil || !found {
+			t.Fatalf("coverage evidence evicted: %s found=%v err=%v", id, found, err)
+		}
+	}
+}
+
 func TestExchangeRetentionConcurrentFindingWrites(t *testing.T) {
 	workDir := t.TempDir()
 	catalog := NewCatalog(workDir)

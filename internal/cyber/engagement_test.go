@@ -1,6 +1,43 @@
 package cyber
 
-import "testing"
+import (
+	"strings"
+	"sync"
+	"testing"
+)
+
+func TestProfileConcurrentRevisionHasOneWinner(t *testing.T) {
+	catalog := NewCatalog(t.TempDir())
+	current, err := catalog.GetEngagement()
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := ProfileRevision(current)
+	var wait sync.WaitGroup
+	errors := make(chan error, 8)
+	for index := 0; index < 8; index++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			_, err := catalog.UpdateProfile(revision, DepthQuick, nil, "", nil)
+			errors <- err
+		}()
+	}
+	wait.Wait()
+	close(errors)
+	wins := 0
+	for err := range errors {
+		if err == nil {
+			wins++
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("successful saves=%d", wins)
+	}
+	if _, err := catalog.UpdateProfile(revision, DepthDeep, nil, "", nil); err == nil {
+		t.Fatal("stale revision accepted")
+	}
+}
 
 func TestFindingRequiresPoCWhenConfirmed(t *testing.T) {
 	c := NewCatalog(t.TempDir())
@@ -59,6 +96,37 @@ func TestFindingRejectsUnrelatedOrRedactedProof(t *testing.T) {
 	}
 	if _, err := catalog.UpsertFinding(Finding{Title: "unproven", Target: "app.test", Endpoint: "/orders/1", Status: StatusConfirmed, ExchangeID: redacted.ID}); err == nil {
 		t.Fatal("redacted exchange alone was accepted as proof")
+	}
+}
+
+func TestFindingExchangeTargetDiagnostics(t *testing.T) {
+	catalog := NewCatalog(t.TempDir())
+	exchange, err := catalog.RecordExchange(Exchange{URL: "https://www.app.test:443/api/?token=private-query", Method: "GET"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	finding := Finding{Title: "header observation", Target: "app.test", Status: StatusConfirmed, Endpoint: "/api/", Method: "GET", ExchangeID: exchange.ID}
+	if _, err := catalog.UpsertFinding(finding); err == nil {
+		t.Fatal("bare domain accepted evidence for www host")
+	} else {
+		for _, text := range []string{`finding target="app.test"`, `exchange host="www.app.test"`, "exchange_get", "not interchangeable"} {
+			if !strings.Contains(err.Error(), text) {
+				t.Fatalf("missing %q in diagnostic: %v", text, err)
+			}
+		}
+		if strings.Contains(err.Error(), "private-query") {
+			t.Fatalf("diagnostic leaked exchange query: %v", err)
+		}
+	}
+	items, err := catalog.ListFindings()
+	if err != nil || len(items) != 0 {
+		t.Fatalf("rejected finding changed ledger: %+v, %v", items, err)
+	}
+	for _, target := range []string{"www.app.test", "HTTPS://WWW.APP.TEST:443/other-path"} {
+		finding.Target = target
+		if _, err := catalog.UpsertFinding(finding); err != nil {
+			t.Fatalf("same canonical host rejected for %q: %v", target, err)
+		}
 	}
 }
 

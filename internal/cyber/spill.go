@@ -41,6 +41,8 @@ func BoundWithSpill(workDir, label, full string, maxBytes int) string {
 }
 
 func writeSpill(workDir, label, full string) (string, error) {
+	catalogMu.Lock()
+	defer catalogMu.Unlock()
 	root, err := NewCatalog(workDir).openStorage(true)
 	if err != nil {
 		return "", err

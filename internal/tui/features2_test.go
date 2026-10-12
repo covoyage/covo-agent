@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"bytes"
+	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/covoyage/covonaut/tui/theme"
@@ -374,6 +377,26 @@ func TestFormatNotificationBody(t *testing.T) {
 	body = FormatNotificationBody(NotifyError, "something failed")
 	if body == "" {
 		t.Error("expected non-empty body")
+	}
+}
+
+func TestNotificationTerminalOutput(t *testing.T) {
+	if os.Getenv("COVO_TEST_NOTIFICATION_OUTPUT") == "1" {
+		service := NewNotificationService("test-app")
+		service.sendOSCNotification("hello\n", "done\x07")
+		service.setTitle("test-app\x1b")
+		return
+	}
+	command := exec.Command(os.Args[0], "-test.run=^TestNotificationTerminalOutput$")
+	command.Env = append(os.Environ(), "COVO_TEST_NOTIFICATION_OUTPUT=1")
+	var stdout, stderr bytes.Buffer
+	command.Stdout, command.Stderr = &stdout, &stderr
+	if err := command.Run(); err != nil {
+		t.Fatalf("notification helper: %v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+	}
+	want := "\x1b]9;4;0;hello \x07\x1b]9;4;1;done\x07\x1b]2;test-app\x07"
+	if !bytes.Contains(stdout.Bytes(), []byte(want)) || stderr.Len() != 0 {
+		t.Fatalf("notification output: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 

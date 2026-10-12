@@ -49,16 +49,18 @@ func BuildCoverageUpsertTool(catalog *cyber.Catalog) *agentcore.Tool {
 		Description: strings.Join([]string{
 			"Record which surface was tested and why it stopped.",
 			"outcome is clean, finding, blocked, or untested. untested is not clean.",
+			"Link up to 20 existing exchange_ids for traceability; references do not prove the outcome. Automatic intake may link only its source exchange.",
 			"Omit surface to list the ledger.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"surface":    map[string]any{"type": "string", "description": "Endpoint, host, path, or check name."},
-				"target":     map[string]any{"type": "string", "description": "Host, URL, or path. Empty means *."},
-				"outcome":    map[string]any{"type": "string", "enum": []string{"clean", "finding", "blocked", "untested"}},
-				"notes":      map[string]any{"type": "string", "description": "Why it stopped, or what remains untested."},
-				"risk_class": map[string]any{"type": "string", "description": "Vulnerability class tested on this surface, e.g. idor or ssrf."},
+				"surface":      map[string]any{"type": "string", "description": "Endpoint, host, path, or check name."},
+				"target":       map[string]any{"type": "string", "description": "Host, URL, or path. Empty means *."},
+				"outcome":      map[string]any{"type": "string", "enum": []string{"clean", "finding", "blocked", "untested"}},
+				"notes":        map[string]any{"type": "string", "description": "Why it stopped, or what remains untested."},
+				"risk_class":   map[string]any{"type": "string", "description": "Vulnerability class tested on this surface, e.g. idor or ssrf."},
+				"exchange_ids": map[string]any{"type": "array", "maxItems": 20, "items": map[string]any{"type": "string"}, "description": "Existing recorded exchange IDs supporting this check."},
 			},
 		},
 		Func: func(ctx context.Context, args json.RawMessage) (any, error) {
@@ -76,6 +78,13 @@ func BuildCoverageUpsertTool(catalog *cyber.Catalog) *agentcore.Tool {
 			var item cyber.Coverage
 			if err := json.Unmarshal(args, &item); err != nil {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
+			}
+			if scope, automatic := toolssubagent.IntakeScopeFromContext(ctx); automatic {
+				for _, id := range item.ExchangeIDs {
+					if id != scope.ExchangeID {
+						return nil, fmt.Errorf("automatic intake may link only its source exchange")
+					}
+				}
 			}
 			saved, err := catalog.UpsertCoverage(item)
 			if err != nil {
@@ -247,19 +256,21 @@ func BuildExchangeReplayTool(catalog *cyber.Catalog, transport http.RoundTripper
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"id":              map[string]any{"type": "string", "description": "Recorded exchange id (ex-N)."},
-				"method":          map[string]any{"type": "string", "description": "Optional method override."},
-				"url":             map[string]any{"type": "string", "description": "Optional URL override."},
-				"headers":         map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
-				"body":            map[string]any{"type": "string", "description": "Optional request-body override."},
-				"identity":        map[string]any{"type": "string", "description": "Optional test identity label (not a credential)."},
-				"role":            map[string]any{"type": "string"},
-				"tenant":          map[string]any{"type": "string"},
-				"resource":        map[string]any{"type": "string"},
-				"owner":           map[string]any{"type": "string"},
-				"unauthenticated": map[string]any{"type": "boolean", "description": "Remove recorded authentication headers before replay."},
-				"replace_auth":    map[string]any{"type": "boolean", "description": "Remove recorded authentication headers before applying replacement headers."},
-				"replace_headers": map[string]any{"type": "boolean", "description": "Use only explicitly supplied headers, replacing all recorded headers."},
+				"id":                 map[string]any{"type": "string", "description": "Recorded exchange id (ex-N)."},
+				"protocol":           map[string]any{"type": "string", "enum": []string{"auto", "http1", "http2"}, "description": "Default negotiation, HTTP/1.1 only, or HTTPS HTTP/2 only."},
+				"client_certificate": map[string]any{"type": "boolean", "description": "Use the operator-configured client certificate; does not disable server certificate validation."},
+				"method":             map[string]any{"type": "string", "description": "Optional method override."},
+				"url":                map[string]any{"type": "string", "description": "Optional URL override."},
+				"headers":            map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+				"body":               map[string]any{"type": "string", "description": "Optional request-body override."},
+				"identity":           map[string]any{"type": "string", "description": "Optional test identity label (not a credential)."},
+				"role":               map[string]any{"type": "string"},
+				"tenant":             map[string]any{"type": "string"},
+				"resource":           map[string]any{"type": "string"},
+				"owner":              map[string]any{"type": "string"},
+				"unauthenticated":    map[string]any{"type": "boolean", "description": "Remove recorded authentication headers before replay."},
+				"replace_auth":       map[string]any{"type": "boolean", "description": "Remove recorded authentication headers before applying replacement headers."},
+				"replace_headers":    map[string]any{"type": "boolean", "description": "Use only explicitly supplied headers, replacing all recorded headers."},
 			},
 			"required": []any{"id"},
 		},
@@ -271,22 +282,35 @@ func BuildExchangeReplayTool(catalog *cyber.Catalog, transport http.RoundTripper
 				return nil, fmt.Errorf("exchange_replay is reserved for spawned hands-on roles; the parent orchestrates")
 			}
 			var params struct {
-				ID              string            `json:"id"`
-				Method          string            `json:"method"`
-				URL             string            `json:"url"`
-				Headers         map[string]string `json:"headers"`
-				Body            *string           `json:"body"`
-				Identity        string            `json:"identity"`
-				Role            string            `json:"role"`
-				Tenant          string            `json:"tenant"`
-				Resource        string            `json:"resource"`
-				Owner           string            `json:"owner"`
-				Unauthenticated bool              `json:"unauthenticated"`
-				ReplaceAuth     bool              `json:"replace_auth"`
-				ReplaceHeaders  bool              `json:"replace_headers"`
+				ID                string            `json:"id"`
+				Protocol          string            `json:"protocol"`
+				ClientCertificate bool              `json:"client_certificate"`
+				Method            string            `json:"method"`
+				URL               string            `json:"url"`
+				Headers           map[string]string `json:"headers"`
+				Body              *string           `json:"body"`
+				Identity          string            `json:"identity"`
+				Role              string            `json:"role"`
+				Tenant            string            `json:"tenant"`
+				Resource          string            `json:"resource"`
+				Owner             string            `json:"owner"`
+				Unauthenticated   bool              `json:"unauthenticated"`
+				ReplaceAuth       bool              `json:"replace_auth"`
+				ReplaceHeaders    bool              `json:"replace_headers"`
 			}
-			if err := json.Unmarshal(args, &params); err != nil {
+			decoder := json.NewDecoder(bytes.NewReader(args))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&params); err != nil {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
+			}
+			if err := decoder.Decode(new(any)); err != io.EOF {
+				return nil, fmt.Errorf("replay expects one JSON object")
+			}
+			if params.Protocol != "" && params.Protocol != "auto" && params.Protocol != "http1" && params.Protocol != "http2" {
+				return nil, fmt.Errorf("invalid HTTP protocol")
+			}
+			if params.Unauthenticated && params.ClientCertificate {
+				return nil, fmt.Errorf("anonymous replay cannot use a client certificate identity")
 			}
 			source, ok, err := catalog.GetExchange(params.ID)
 			if err != nil {
@@ -332,12 +356,17 @@ func BuildExchangeReplayTool(catalog *cyber.Catalog, transport http.RoundTripper
 			if ctx == nil {
 				ctx = context.Background()
 			}
+			ctx = cyber.WithHTTPOptions(ctx, cyber.HTTPOptions{Protocol: params.Protocol, ClientCertificate: params.ClientCertificate})
+			ctx, diagnostics := cyber.TraceHTTP(ctx)
 			req, err := http.NewRequestWithContext(ctx, method, targetURL, bytes.NewBufferString(body))
 			if err != nil {
 				return nil, fmt.Errorf("create replay request: %w", err)
 			}
 			if !sameHTTPOrigin(origin, req.URL) {
 				return nil, fmt.Errorf("replay target must stay on the recorded HTTP origin")
+			}
+			if params.Protocol == "http2" && req.URL.Scheme != "https" {
+				return nil, fmt.Errorf("HTTP/2 replay requires HTTPS; cleartext upgrade is unsupported")
 			}
 			if err := catalog.CheckReplayTarget(req.URL.String()); err != nil {
 				return nil, err
@@ -371,6 +400,9 @@ func BuildExchangeReplayTool(catalog *cyber.Catalog, transport http.RoundTripper
 				return nil, fmt.Errorf("replay exchange: %w", err)
 			}
 			defer resp.Body.Close()
+			if params.Protocol == "http2" && resp.ProtoMajor != 2 || params.Protocol == "http1" && resp.ProtoMajor != 1 {
+				return nil, fmt.Errorf("server did not negotiate requested HTTP protocol")
+			}
 			responseBody, err := io.ReadAll(io.LimitReader(resp.Body, (2<<20)+1))
 			if err != nil {
 				return nil, fmt.Errorf("read replay response: %w", err)
@@ -380,8 +412,10 @@ func BuildExchangeReplayTool(catalog *cyber.Catalog, transport http.RoundTripper
 				responseBody = responseBody[:2<<20]
 			}
 			bodyHash := sha256.Sum256(responseBody)
+			metrics := diagnostics()
 			saved, err := catalog.RecordExchange(cyber.Exchange{
 				Method: method, URL: targetURL, StatusCode: resp.StatusCode,
+				HTTPProtocol: resp.Proto, Diagnostics: &metrics, ResponseTruncated: bodyTruncated,
 				ReqHeaders: formatHeaders(req.Header), Request: body, Response: string(responseBody),
 				Identity: chooseLabel(params.Identity, source.Identity), Role: chooseLabel(params.Role, source.Role),
 				Tenant: chooseLabel(params.Tenant, source.Tenant), Resource: chooseLabel(params.Resource, source.Resource),
@@ -395,7 +429,8 @@ func BuildExchangeReplayTool(catalog *cyber.Catalog, transport http.RoundTripper
 				"url": targetURL, "status": resp.StatusCode, "response": saved.Response,
 				"response_length": len(responseBody), "body_sha256": fmt.Sprintf("%x", bodyHash),
 				"body_truncated": bodyTruncated, "evidence_clipped": len(responseBody) > 8000,
-				"duration_ms": time.Since(started).Milliseconds(),
+				"duration_ms":   time.Since(started).Milliseconds(),
+				"http_protocol": resp.Proto, "diagnostics": metrics,
 			}, nil
 		},
 	}
@@ -659,11 +694,13 @@ func BuildScanProfileToolForRole(catalog *cyber.Catalog, instanceRole string) *a
 			"Only the parent may set allowed_hosts to operator-authorized exact hostnames before network scans.",
 			"Default depth is deep. A local directory or git repo enables the whitebox floor unless depth is quick.",
 			"Omit arguments to read the current profile.",
+			"Changes require the revision returned by the current profile; stale revisions are rejected.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"depth":         map[string]any{"type": "string", "enum": []string{"quick", "standard", "deep"}},
+				"revision":      map[string]any{"type": "string", "description": "Required for changes; read scan_profile first."},
 				"whitebox":      map[string]any{"type": "boolean", "description": "Force the local-repository floor on or off."},
 				"allowed_hosts": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact hosts for active network scans; required before network recipes run."},
 				"target":        map[string]any{"type": "string", "description": "If this path is a local repo, whitebox is enabled unless depth is quick."},
@@ -683,6 +720,7 @@ func BuildScanProfileToolForRole(catalog *cyber.Catalog, instanceRole string) *a
 				runtime, _ := catalog.LoadRuntime()
 				return map[string]any{
 					"depth": eng.Depth, "whitebox": eng.Whitebox, "whitebox_target": eng.WhiteboxTarget, "whitebox_gaps": gaps,
+					"revision":   cyber.ProfileRevision(eng),
 					"scope_mode": eng.ScopeMode, "allowed_hosts": eng.AllowedHosts, "base_ref": eng.BaseRef, "head_ref": eng.HeadRef, "runtime": runtime,
 				}, nil
 			}
@@ -690,6 +728,7 @@ func BuildScanProfileToolForRole(catalog *cyber.Catalog, instanceRole string) *a
 				return nil, fmt.Errorf("only the parent may change scan profile or authorized hosts")
 			}
 			var params struct {
+				Revision     string    `json:"revision"`
 				Depth        string    `json:"depth"`
 				Whitebox     *bool     `json:"whitebox"`
 				Target       string    `json:"target"`
@@ -698,43 +737,15 @@ func BuildScanProfileToolForRole(catalog *cyber.Catalog, instanceRole string) *a
 			if err := json.Unmarshal(args, &params); err != nil {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
 			}
-			eng, err := catalog.GetEngagement()
+			saved, err := catalog.UpdateProfile(params.Revision, params.Depth, params.Whitebox, params.Target, params.AllowedHosts)
 			if err != nil {
 				return nil, err
-			}
-			depth := params.Depth
-			if depth == "" {
-				depth = eng.Depth
-			}
-			whitebox := eng.Whitebox
-			if params.Whitebox != nil {
-				whitebox = *params.Whitebox
-			}
-			if cyber.LooksLikeRepo(params.Target) && !strings.EqualFold(strings.TrimSpace(depth), cyber.DepthQuick) {
-				whitebox = true
-			}
-			if params.AllowedHosts != nil {
-				if _, err := catalog.SetAllowedHosts(*params.AllowedHosts); err != nil {
-					return nil, err
-				}
-			}
-			saved, err := catalog.SetEngagement(depth, whitebox)
-			if err != nil {
-				return nil, err
-			}
-			if whitebox && cyber.LooksLikeRepo(params.Target) {
-				if err := catalog.SetWhiteboxTarget(params.Target); err != nil {
-					return nil, err
-				}
-				saved, err = catalog.GetEngagement()
-				if err != nil {
-					return nil, err
-				}
 			}
 			gaps, _ := catalog.WhiteboxGaps()
 			runtime, _ := catalog.LoadRuntime()
 			return map[string]any{
 				"depth": saved.Depth, "whitebox": saved.Whitebox, "whitebox_target": saved.WhiteboxTarget, "whitebox_gaps": gaps,
+				"revision":   cyber.ProfileRevision(saved),
 				"scope_mode": saved.ScopeMode, "allowed_hosts": saved.AllowedHosts, "base_ref": saved.BaseRef, "head_ref": saved.HeadRef, "runtime": runtime,
 			}, nil
 		},
