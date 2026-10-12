@@ -8,6 +8,8 @@
 
 `covo-agent` is a general-purpose AI agent for the terminal, with general, code, and cyber modes. It supports everyday knowledge work, software development, recon/verification, automation, persistent context, and external-system collaboration through an interactive TUI, tools, memory, skills, safety controls, and extensible integrations.
 
+![covo-agent terminal interface](screenshots/index_en.png)
+
 ## Highlights
 
 - **Interactive terminal workflow**: streaming responses, tool activity, mouse selection, session history, model picker, themes, and shell completion.
