@@ -3,12 +3,14 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/covoyage/covo-agent/internal/cyber"
 	toolssubagent "github.com/covoyage/covo-agent/internal/tools/subagent"
@@ -290,6 +292,30 @@ func TestCoverageUpsertEvidenceScope(t *testing.T) {
 	coverage := result.(map[string]any)["coverage"].([]map[string]any)
 	if len(coverage) != 1 || coverage[0]["evidence_linked"] != true || coverage[0]["exchange_ids"].([]string)[0] != source.ID {
 		t.Fatalf("context lost evidence: %+v", coverage)
+	}
+}
+
+func TestSubagentInboxPreservesSafeFailure(t *testing.T) {
+	home := t.TempDir()
+	extension := NewExtension(ExtensionConfig{HomeDir: home, SessionsDir: filepath.Join(home, "sessions"), WorkDir: home})
+	t.Cleanup(func() { _ = extension.Dispose() })
+	extension.sessionIDFn = func() string { return "parent" }
+	if extension.InboxStore() == nil {
+		t.Fatal("inbox initialization failed")
+	}
+	extension.onSpawnComplete("sub-1", "check token=private-task", "", fmt.Errorf("spawn failed password=private-password https://user:private-userinfo@app.test/?token=private-query %s", strings.Repeat("\u754c", 5000)))
+	messages, err := extension.InboxStore().Drain("parent")
+	if err != nil || len(messages) != 1 {
+		t.Fatalf("missing persisted completion: %+v, %v", messages, err)
+	}
+	message := messages[0].Message
+	if !utf8.ValidString(message) || !strings.Contains(message, "subagent sub-1 failed") || !strings.Contains(message, "spawn failed") {
+		t.Fatalf("invalid or missing error details: %q", message)
+	}
+	for _, secret := range []string{"private-task", "private-password", "private-userinfo", "private-query"} {
+		if strings.Contains(message, secret) {
+			t.Fatalf("persisted completion leaked %s", secret)
+		}
 	}
 }
 

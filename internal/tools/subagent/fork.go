@@ -183,7 +183,7 @@ func BuildSessionsForkTool(runner SpawnRunner, registry *SubagentRegistry, guard
 			output, err := runner(ctx, fullTask, toolsets, 0)
 			if err != nil {
 				if registry != nil && subID != "" {
-					registry.Complete(subID, true)
+					registry.CompleteWithError(subID, err)
 				}
 				return map[string]any{"subagent_id": subID, "output": truncateMax(output, 20000)}, fmt.Errorf("fork failed: %w", err)
 			}

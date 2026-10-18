@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sort"
+	"strings"
 
 	"github.com/covoyage/covonaut/agentcore"
 )
@@ -101,63 +102,30 @@ func (tf *ToolsetFilter) BeforeModelCall(ctx context.Context, _ *agentcore.Agent
 		return nil
 	}
 
-	platform := "cli"
-	if tf.platforms != nil {
-		platform = tf.platforms()
-	}
-
-	toolsetNames := tf.platform.ToolsetNames(platform)
-
-	result, err := tf.filter.Filter(toolsetNames, tf.availability, tf.toolNames())
-	if err != nil {
-		tf.logger.Warn("toolset filter error, retaining policy filters", "error", err)
-		result = &FilterResult{Tools: tf.toolNames()}
-	}
-
-	// Build filtered tool definitions
+	preview := tf.preview(ctx, tf.toolNames(), true)
 	allowedSet := make(map[string]bool)
-	for _, name := range result.Tools {
+	for _, name := range preview.Kept {
 		allowedSet[name] = true
 	}
 
-	// In Plan mode, additionally filter out mutating tools.
-	// Only tools in the planModeAllowed set pass through.
-	inPlanMode := tf.planModeChecker != nil && tf.planModeChecker()
-
 	var filtered []agentcore.ToolDefinition
 	for _, def := range mcc.Request.Tools {
-		if !allowedSet[def.Name] {
-			continue
+		if allowedSet[def.Name] {
+			filtered = append(filtered, def)
 		}
-		if inPlanMode && !tf.planModeAllowed[def.Name] {
-			continue
-		}
-		if tf.nameFilter != nil && !tf.nameFilter(def.Name) {
-			continue
-		}
-		if tf.contextFilter != nil && !tf.contextFilter(ctx, def.Name) {
-			continue
-		}
-		if tf.leanMode && !tf.leanVisible(def.Name) {
-			continue
-		}
-		if CyberOnlyTools[def.Name] && !tf.cyberMode {
-			continue
-		}
-		filtered = append(filtered, def)
 	}
 
 	// Log exclusion summary
-	if len(result.Excluded) > 0 {
+	if len(preview.Excluded) > 0 {
 		reasons := make(map[string]int)
-		for _, reason := range result.Excluded {
+		for _, reason := range preview.Excluded {
 			reasons[reason]++
 		}
 		tf.logger.Debug("tools filtered",
-			"platform", platform,
-			"toolsets", toolsetNames,
+			"platform", preview.Platform,
+			"toolsets", preview.Toolsets,
 			"kept", len(filtered),
-			"excluded", len(result.Excluded),
+			"excluded", len(preview.Excluded),
 			"reasons", reasons,
 		)
 	}
@@ -188,6 +156,14 @@ type ToolPreview struct {
 
 // Preview applies the same filters as BeforeModelCall without mutating a request.
 func (tf *ToolsetFilter) Preview(allToolNames []string) ToolPreview {
+	return tf.preview(context.Background(), allToolNames, true)
+}
+
+func (tf *ToolsetFilter) DiscoveryPreview(ctx context.Context, allToolNames []string) ToolPreview {
+	return tf.preview(ctx, allToolNames, false)
+}
+
+func (tf *ToolsetFilter) preview(ctx context.Context, allToolNames []string, applyLean bool) ToolPreview {
 	out := ToolPreview{
 		Excluded: make(map[string]string),
 		LeanMode: tf.leanMode,
@@ -211,6 +187,7 @@ func (tf *ToolsetFilter) Preview(allToolNames []string) ToolPreview {
 
 	result, err := tf.filter.Filter(out.Toolsets, tf.availability, allToolNames)
 	if err != nil {
+		tf.logger.Warn("toolset filter error, retaining policy filters", "error", err)
 		result = &FilterResult{Tools: allToolNames}
 	}
 	for name, reason := range result.Excluded {
@@ -222,25 +199,30 @@ func (tf *ToolsetFilter) Preview(allToolNames []string) ToolPreview {
 		allowed[name] = true
 	}
 	for _, name := range allToolNames {
-		if !allowed[name] {
+		policyName := name
+		remoteMCP := !applyLean && strings.HasPrefix(name, "mcp__")
+		if remoteMCP {
+			policyName = "mcp"
+		}
+		if !allowed[policyName] {
 			if _, ok := out.Excluded[name]; !ok {
 				out.Excluded[name] = "not in active toolsets"
 			}
 			continue
 		}
-		if out.PlanMode && !tf.planModeAllowed[name] {
+		if out.PlanMode && !tf.planModeAllowed[policyName] {
 			out.Excluded[name] = "plan mode"
 			continue
 		}
-		if tf.nameFilter != nil && !tf.nameFilter(name) {
+		if tf.nameFilter != nil && (!tf.nameFilter(policyName) || (remoteMCP && !tf.nameFilter(name))) {
 			out.Excluded[name] = "name filter"
 			continue
 		}
-		if tf.contextFilter != nil && !tf.contextFilter(context.Background(), name) {
+		if tf.contextFilter != nil && (!tf.contextFilter(ctx, policyName) || (remoteMCP && !tf.contextFilter(ctx, name))) {
 			out.Excluded[name] = "role policy"
 			continue
 		}
-		if tf.leanMode && !tf.leanVisible(name) {
+		if applyLean && tf.leanMode && !tf.leanVisible(name) {
 			out.Excluded[name] = "lean"
 			continue
 		}
@@ -248,6 +230,13 @@ func (tf *ToolsetFilter) Preview(allToolNames []string) ToolPreview {
 			out.Excluded[name] = "cyber mode"
 			continue
 		}
+		if remoteMCP && tf.availability != nil {
+			if reason, available := tf.availability.IsAvailable(name); !available {
+				out.Excluded[name] = reason
+				continue
+			}
+		}
+		delete(out.Excluded, name)
 		out.Kept = append(out.Kept, name)
 	}
 	sort.Strings(out.Kept)
@@ -385,6 +374,7 @@ var LeanDirectTools = map[string]bool{
 	"exit_plan_mode": true, "diffs": true, "apply_patch": true, "edit_block": true,
 	"sessions_spawn": true, "sessions_wait": true,
 	"tool_search": true, "tool_describe": true, "tool_call": true,
+	"browser": true,
 }
 
 // CyberOnlyTools are never shown or callable outside ModeCyber.

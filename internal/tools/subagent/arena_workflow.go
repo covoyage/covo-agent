@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/security"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -184,10 +185,10 @@ func BuildWorkflowTool(runner SpawnRunner, registry *SubagentRegistry) *agentcor
 				output, err := runner(phaseCtx, task, toolsets, 0)
 				if err != nil {
 					result.Status = "failed"
-					result.Error = err.Error()
+					result.Error = security.ErrorSummary(err)
 					results = append(results, result)
 					if registry != nil && subID != "" {
-						registry.Complete(subID, true)
+						registry.CompleteWithError(subID, err)
 					}
 					// Skip remaining
 					for i := len(results); i < len(params.Phases); i++ {

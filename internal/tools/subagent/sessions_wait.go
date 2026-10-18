@@ -116,8 +116,15 @@ func BuildSessionsWaitTool(registry *SubagentRegistry) *agentcore.Tool {
 						}
 						if allDone {
 							seen.mark(params.AgentIDs)
+							allSucceeded := true
+							for _, id := range params.AgentIDs {
+								run, _ := registry.Get(id)
+								allSucceeded = allSucceeded && run != nil && run.Status == "completed"
+							}
 							return map[string]any{
-								"all_completed": true,
+								"all_finished":  true,
+								"all_completed": allSucceeded,
+								"all_succeeded": allSucceeded,
 								"agents":        summarizeRuns(registry, params.AgentIDs),
 								"guidance":      waitGuidance,
 							}, nil
@@ -160,7 +167,7 @@ func BuildSessionsWaitTool(registry *SubagentRegistry) *agentcore.Tool {
 	}
 }
 
-const waitGuidance = "Full results are delivered to your inbox when each agent completes (auto-injected on your next run). Use the subagents tool for a full status listing."
+const waitGuidance = "A successful wait only means the wait completed, not that child tasks succeeded. Inspect each child's status and error; all_finished includes failures and interruptions, while all_succeeded/all_completed require every child to have succeeded. Full results are delivered to your inbox; use subagents for details. Do not bypass role, scope, or approval restrictions after a child fails."
 
 // splitUnseen partitions the registry into terminal runs not yet reported
 // (updated) and still-running runs.
@@ -199,6 +206,12 @@ func runSummary(r *SubagentRun) map[string]any {
 	}
 	if r.EndedAt != nil {
 		entry["ended_at"] = r.EndedAt.Format(time.RFC3339)
+	}
+	if isTerminalStatus(r.Status) {
+		entry["succeeded"] = r.Status == "completed"
+	}
+	if r.Error != "" {
+		entry["error"] = r.Error
 	}
 	return entry
 }

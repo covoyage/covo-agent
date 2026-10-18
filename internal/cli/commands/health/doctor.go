@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/covoyage/covo-agent/internal/agent"
@@ -34,6 +35,7 @@ func NewDoctorCommand() *cobra.Command {
 func runDoctor(w io.Writer, fix bool) {
 	ok := true
 	fixed := false
+	fmt.Fprintf(w, "  Platform:  %s/%s\n", runtime.GOOS, runtime.GOARCH)
 
 	profile := cli.ActiveProfileName()
 	if profile != "" {
@@ -240,12 +242,14 @@ func runDoctor(w io.Writer, fix bool) {
 	}
 	fmt.Fprintf(w, "  cyber scan recipes: %d catalog, %d binaries on PATH\n", len(cyber.Recipes()), found)
 	for _, bin := range []string{"nmap", "nuclei", "curl", "subfinder", "rustscan", "ffuf", "katana"} {
-		if _, err := exec.LookPath(bin); err == nil {
-			fmt.Fprintf(w, "  ✓ %s: found in PATH\n", bin)
+		if path, err := exec.LookPath(bin); err == nil {
+			diagnostic := cyber.InspectBinary(path)
+			fmt.Fprintf(w, "  %s: %s (format=%s architectures=%v compatibility=%s)\n", bin, path, diagnostic.Format, diagnostic.Architectures, diagnostic.Compatibility)
 			continue
 		}
 		fmt.Fprintf(w, "  - %s: not found (cyber scan recipe unavailable)\n", bin)
 	}
+	fmt.Fprintln(w, "  Binary diagnostics inspect headers only; interpreters, shared libraries, and emulation are not executed or validated.")
 
 	// 10. Terminal diagnostics (color, clipboard, tmux, keyboard)
 	fmt.Fprintln(w)

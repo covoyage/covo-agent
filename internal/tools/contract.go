@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 
 	"github.com/covoyage/covo-agent/internal/tools/capability"
 	"github.com/covoyage/covo-agent/internal/tools/fileops"
@@ -32,21 +33,22 @@ type ToolContract struct {
 	RiskLevel       string // low, medium, high
 	MaxOutputBytes  int    // 0 = use the global persist threshold
 	TimeoutMs       int
+	RetrievalTerms  []string
 }
 
 var toolContracts = map[string]ToolContract{
-	"read":               {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
-	"ls":                 {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
+	"read":               {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low", RetrievalTerms: []string{"show display inspect view file contents", "source code document image photo screenshot png jpeg line excerpt"}},
+	"ls":                 {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low", RetrievalTerms: []string{"list directory folder entries children files sizes flat listing"}},
 	"glob":               {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
 	"grep":               {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
 	"find":               {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
-	"view":               {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
+	"view":               {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low", RetrievalTerms: []string{"explore nested directories folders project hierarchy tree structure"}},
 	"glob_files":         {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
-	"search_files":       {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
-	"git_status":         {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeGit, RiskLevel: "low"},
-	"git_diff":           {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeGit, RiskLevel: "low"},
-	"git_log":            {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeGit, RiskLevel: "low"},
-	"web_search":         {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNetwork, RiskLevel: "low", MaxOutputBytes: 32_000},
+	"search_files":       {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low", RetrievalTerms: []string{"locate source code text matches", "find content occurrences regular expression"}},
+	"git_status":         {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeGit, RiskLevel: "low", RetrievalTerms: []string{"repository working tree status changes uncommitted modified tracked staged unstaged untracked conflicted paths clean"}},
+	"git_diff":           {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeGit, RiskLevel: "low", RetrievalTerms: []string{"compare revisions commits staged unstaged patch added removed lines changes"}},
+	"git_log":            {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeGit, RiskLevel: "low", RetrievalTerms: []string{"repository commit history revisions recent authors subjects messages hashes"}},
+	"web_search":         {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNetwork, RiskLevel: "low", MaxOutputBytes: 32_000, RetrievalTerms: []string{"online internet information lookup research external websites sources pages"}},
 	"web_fetch":          {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNetwork, RiskLevel: "low", MaxOutputBytes: 20_000},
 	"vision_analyze":     {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
 	"terminal_list":      {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
@@ -66,27 +68,34 @@ var toolContracts = map[string]ToolContract{
 	"memory_recall":      {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
 	"memory_context":     {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
 	"memory_dream_stats": {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
-	"diffs":              {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
+	"diffs":              {ReadOnly: true, ConcurrentSafe: true, SideEffectScope: ScopeNone, RiskLevel: "low", RetrievalTerms: []string{"compare before after text strings side by side memory unified diff patch"}},
 	"todo":               {ReadOnly: false, SideEffectScope: ScopeNone, RiskLevel: "low"},
 	"update_plan":        {ReadOnly: false, SideEffectScope: ScopeNone, RiskLevel: "low"},
-	"clarify":            {ReadOnly: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
+	"clarify":            {ReadOnly: true, SideEffectScope: ScopeNone, RiskLevel: "low", RetrievalTerms: []string{"ask question clarification missing value preference choices user answer"}},
 	"ask_user":           {ReadOnly: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
 	"exit_plan_mode":     {ReadOnly: true, SideEffectScope: ScopeNone, RiskLevel: "low"},
-	"edit":               {Destructive: true, SideEffectScope: ScopeWorkspace, RiskLevel: "medium"},
+	"edit":               {Destructive: true, SideEffectScope: ScopeWorkspace, RiskLevel: "medium", RetrievalTerms: []string{"modify revise replace text", "targeted source code changes"}},
 	"edit_block":         {Destructive: true, SideEffectScope: ScopeWorkspace, RiskLevel: "medium"},
-	"write_file":         {Destructive: true, SideEffectScope: ScopeWorkspace, RiskLevel: "medium"},
-	"append_file":        {Destructive: true, SideEffectScope: ScopeWorkspace, RiskLevel: "medium"},
+	"write_file":         {Destructive: true, SideEffectScope: ScopeWorkspace, RiskLevel: "medium", RetrievalTerms: []string{"save create overwrite file contents"}},
+	"append_file":        {Destructive: true, SideEffectScope: ScopeWorkspace, RiskLevel: "medium", RetrievalTerms: []string{"append add extend attach text lines end tail existing preserve content"}},
 	"apply_patch":        {Destructive: true, SideEffectScope: ScopeWorkspace, RiskLevel: "medium"},
-	"delete":             {Destructive: true, SideEffectScope: ScopeWorkspace, RiskLevel: "high"},
-	"bash":               {SideEffectScope: ScopeSystem, RiskLevel: "high", MaxOutputBytes: 32_000, TimeoutMs: 120_000},
+	"delete":             {Destructive: true, SideEffectScope: ScopeWorkspace, RiskLevel: "high", RetrievalTerms: []string{"remove trash discard erase files directories obsolete backup"}},
+	"bash":               {SideEffectScope: ScopeSystem, RiskLevel: "high", MaxOutputBytes: 32_000, TimeoutMs: 120_000, RetrievalTerms: []string{"run execute shell terminal command pipeline stdout stderr exit code timeout environment"}},
 	"execute_code":       {SideEffectScope: ScopeSystem, RiskLevel: "high", MaxOutputBytes: 32_000},
 	"tool_call":          {SideEffectScope: ScopeSystem, RiskLevel: "high"},
 	"script_workflow":    {SideEffectScope: ScopeWorkspace, RiskLevel: "medium"},
 }
 
+var additionalToolRetrievalTerms = map[string][]string{
+	"memory":        {"persist remember recall forget durable user project facts preferences notes"},
+	"move":          {"relocate rename change file directory path preserve unchanged contents"},
+	"human_handoff": {"pause block wait person operator human manual action completion confirmation"},
+}
+
 // LookupContract returns the declared contract for name.
 func LookupContract(name string) (ToolContract, bool) {
 	c, ok := toolContracts[name]
+	c.RetrievalTerms = slices.Clone(c.RetrievalTerms)
 	return c, ok
 }
 
@@ -105,6 +114,13 @@ func ApplyToolContracts(agent *agentcore.Agent) {
 	for _, name := range agent.ToolNames() {
 		c, hasContract := toolContracts[name]
 		if tool, ok := agent.GetTool(name); ok {
+			for _, terms := range [][]string{c.RetrievalTerms, additionalToolRetrievalTerms[name]} {
+				for _, term := range terms {
+					if !slices.Contains(tool.Tags, term) {
+						tool.Tags = append(tool.Tags, term)
+					}
+				}
+			}
 			if _, declared := capability.Lookup(tool); !declared {
 				capability.DeclareBuiltin(tool)
 				if c.ReadOnly && name != "exit_plan_mode" {

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,13 @@ import (
 type MCPStore struct {
 	mu      sync.Mutex
 	servers map[string]*mcpServer
+}
+
+type mcpDiscoveryGuardKey struct{}
+
+type mcpDiscoveryGuard struct {
+	source      toolSearchSource
+	fingerprint [32]byte
 }
 
 func NewMCPStore() *MCPStore {
@@ -108,6 +116,94 @@ type mcpServer struct {
 	tools            []mcpToolDef
 	auditFingerprint string
 	connected        bool
+	discoveryID      string
+	discoveryCache   []toolSearchDefinition
+}
+
+func (s *MCPStore) discoveryNames() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var names []string
+	for name, server := range s.servers {
+		if !server.connected || server.client == nil {
+			continue
+		}
+		server.toolsMu.RLock()
+		for _, tool := range server.tools {
+			if tool.Name != "" && tool.InputSchema != nil {
+				names = append(names, MCPToolName(name, tool.Name))
+			}
+		}
+		server.toolsMu.RUnlock()
+	}
+	return names
+}
+
+func (s *MCPStore) discoveryCatalog() ([]toolSearchDefinition, error) {
+	entries, err := s.discoverySnapshot()
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(entries)
+	if err != nil {
+		return nil, fmt.Errorf("encode MCP discovery catalog: %w", err)
+	}
+	var snapshot []toolSearchDefinition
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	if err := decoder.Decode(&snapshot); err != nil {
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+func (s *MCPStore) discoverySnapshot() ([]toolSearchDefinition, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []toolSearchDefinition
+	for name, server := range s.servers {
+		if !server.connected || server.client == nil {
+			continue
+		}
+		if server.discoveryID == "" {
+			server.discoveryID = rand.Text()
+		}
+		server.toolsMu.RLock()
+		if server.discoveryCache != nil {
+			entries = append(entries, server.discoveryCache...)
+			server.toolsMu.RUnlock()
+			continue
+		}
+		server.toolsMu.RUnlock()
+		server.toolsMu.Lock()
+		definitions := make([]toolSearchDefinition, 0, len(server.tools))
+		for _, tool := range server.tools {
+			if tool.Name == "" || tool.InputSchema == nil {
+				continue
+			}
+			definitions = append(definitions, toolSearchDefinition{
+				ToolDefinition: agentcore.ToolDefinition{Name: MCPToolName(name, tool.Name), Description: tool.Description, Parameters: tool.InputSchema},
+				RetrievalTerms: []string{name, tool.Name},
+				Source:         &toolSearchSource{Server: name, Tool: tool.Name, Connection: server.discoveryID},
+			})
+		}
+		encoded, err := json.Marshal(definitions)
+		if err != nil {
+			server.toolsMu.Unlock()
+			return nil, fmt.Errorf("encode MCP discovery catalog: %w", err)
+		}
+		decoder := json.NewDecoder(bytes.NewReader(encoded))
+		decoder.UseNumber()
+		var snapshot []toolSearchDefinition
+		if err := decoder.Decode(&snapshot); err != nil {
+			server.toolsMu.Unlock()
+			return nil, err
+		}
+		server.discoveryCache = snapshot
+		entries = append(entries, snapshot...)
+		server.toolsMu.Unlock()
+	}
+	return entries, nil
 }
 
 type mcpServerConfig struct {
@@ -122,6 +218,25 @@ type mcpToolDef struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"input_schema"`
+}
+
+func (definition *mcpToolDef) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Name         string         `json:"name"`
+		Description  string         `json:"description"`
+		InputSchema  map[string]any `json:"inputSchema"`
+		LegacySchema map[string]any `json:"input_schema"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&wire); err != nil {
+		return err
+	}
+	if wire.InputSchema == nil {
+		wire.InputSchema = wire.LegacySchema
+	}
+	*definition = mcpToolDef{Name: wire.Name, Description: wire.Description, InputSchema: wire.InputSchema}
+	return nil
 }
 
 // mcpClient is the interface for MCP transport clients.
@@ -728,7 +843,9 @@ func buildMCPTool(store *MCPStore) *agentcore.Tool {
 				Tool      string            `json:"tool"`
 				Arguments map[string]any    `json:"arguments"`
 			}
-			if err := json.Unmarshal(args, &params); err != nil {
+			decoder := json.NewDecoder(bytes.NewReader(args))
+			decoder.UseNumber()
+			if err := decoder.Decode(&params); err != nil {
 				return nil, fmt.Errorf("invalid arguments: %w", err)
 			}
 
@@ -976,9 +1093,12 @@ func handleCall(ctx context.Context, store *MCPStore, params struct {
 	Tool      string            `json:"tool"`
 	Arguments map[string]any    `json:"arguments"`
 }) (any, error) {
-	if server, tool, ok := SplitMCPToolName(params.Tool); ok {
-		params.Server = server
-		params.Tool = tool
+	guard, guarded := ctx.Value(mcpDiscoveryGuardKey{}).(mcpDiscoveryGuard)
+	if !guarded {
+		if server, tool, ok := SplitMCPToolName(params.Tool); ok && (params.Server == "" || strings.HasPrefix(params.Tool, "mcp__")) {
+			params.Server = server
+			params.Tool = tool
+		}
 	}
 	if params.Server == "" {
 		return nil, fmt.Errorf("server is required for call")
@@ -989,6 +1109,45 @@ func handleCall(ctx context.Context, store *MCPStore, params struct {
 
 	store.mu.Lock()
 	server, ok := store.servers[params.Server]
+	if guarded {
+		if !ok || guard.source.Server != params.Server || guard.source.Tool != params.Tool || guard.source.Connection != server.discoveryID {
+			store.mu.Unlock()
+			return nil, fmt.Errorf("schema_changed: MCP connection was removed or replaced; discover the tool again")
+		}
+		server.toolsMu.RLock()
+		defer server.toolsMu.RUnlock()
+		matched := false
+		for _, definition := range server.tools {
+			if definition.Name != params.Tool {
+				continue
+			}
+			encoded, err := json.Marshal(definition.InputSchema)
+			if err != nil {
+				store.mu.Unlock()
+				return nil, err
+			}
+			fingerprint, err := toolSchemaFingerprint(MCPToolName(params.Server, params.Tool), encoded, &guard.source)
+			if err != nil || fingerprint != guard.fingerprint {
+				store.mu.Unlock()
+				return nil, fmt.Errorf("schema_changed: MCP parameter contract changed; discover the tool again")
+			}
+			arguments, err := json.Marshal(params.Arguments)
+			if err != nil {
+				store.mu.Unlock()
+				return nil, err
+			}
+			if err := agentcore.ValidateToolArguments(&agentcore.Tool{Parameters: definition.InputSchema}, string(arguments)); err != nil {
+				store.mu.Unlock()
+				return nil, err
+			}
+			matched = true
+			break
+		}
+		if !matched {
+			store.mu.Unlock()
+			return nil, fmt.Errorf("schema_changed: MCP tool was removed; discover available tools again")
+		}
+	}
 	store.mu.Unlock()
 
 	if !ok {
@@ -1092,6 +1251,7 @@ func handleRefresh(ctx context.Context, store *MCPStore, params struct {
 		server.auditFingerprint = fingerprint
 	}
 	server.tools = tools
+	server.discoveryCache = nil
 	server.toolsMu.Unlock()
 
 	var toolNames []string

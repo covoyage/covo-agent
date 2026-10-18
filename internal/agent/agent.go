@@ -1361,7 +1361,7 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 	if cfg.Mode.IsCyberFamily() {
 		browserCfg.NetworkObservation = cyberBrowserNetworkConfig(ca.FindingCatalog(), logger)
 	}
-	toolExt := tools.NewExtension(tools.ExtensionConfig{
+	toolExt := agenttools.NewBrowserToolsExtension(tools.ExtensionConfig{
 		WorkingDir: cfg.WorkingDir,
 		Read:       readCfg,
 		Edit:       editCfg,
@@ -1395,7 +1395,12 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 			},
 		},
 		ComputerUse: computerUse,
-	})
+	}, func(ctx context.Context, prompt, mediaType, dataURL string) (string, error) {
+		if ca.auxClient == nil {
+			return "", fmt.Errorf("vision model is not configured")
+		}
+		return ca.auxClient.DescribeImage(ctx, prompt, mediaType, dataURL)
+	}, agenttools.BrowserOptions{ProfileDir: os.Getenv("BROWSER_PROFILE_DIR")})
 
 	pluginRoots := plugin.DiscoverHome(cfg.HomeDir).SkillRoots()
 	skillExtra := append(append([]string{}, cfg.SkillExtraDirs...), pluginRoots...)
@@ -1490,10 +1495,12 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		Logger:          logger,
 	})
 	ca.toolsetFilter = toolsetFilter
+	ca.agentTools.SetToolDiscoveryPolicy(func(ctx context.Context, names []string) []string {
+		return toolsetFilter.DiscoveryPreview(ctx, names).Kept
+	})
 
 	lifecycleHooks := []agentcore.LifecycleHook{
 		newLifecycleContributorBridge(ca, lifecycle.Global()),
-		toolsetFilter,
 		newGuardrailLifecycleHook(ca),
 	}
 	// Auto-persist session state after each turn
@@ -1557,6 +1564,8 @@ func (ca *CovoAgent) buildAgentConfig(cfg CovoAgentConfig) agentcore.Config {
 		extMgr := extension.NewManager(extDir)
 		extensions = append(extensions, extension.NewAgentExtension(extMgr))
 	}
+
+	lifecycleHooks = append(lifecycleHooks, toolsetFilter)
 
 	return agentcore.Config{
 		ModelConfig: agentcore.ModelConfig{

@@ -24,6 +24,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/safego"
 	"github.com/covoyage/covo-agent/internal/sandbox"
+	"github.com/covoyage/covo-agent/internal/security"
 	toolscanvas "github.com/covoyage/covo-agent/internal/tools/canvas"
 	"github.com/covoyage/covo-agent/internal/tools/capability"
 	toolscodegraph "github.com/covoyage/covo-agent/internal/tools/codegraph"
@@ -78,33 +79,35 @@ type Extension struct {
 	subagentStore *toolssubagent.SubagentStore
 
 	// Expose for embedding into agent loop
-	swarmBoard        *toolswarm.SwarmBoard
-	swarmOrch         *toolswarm.SwarmOrchestrator
-	secretsStore      *SecretsStore
-	kanbanManager     *kanban.KanbanManager
-	commitmentStore   *toolscommitments.CommitmentStore
-	standingOrders    *toolsstandingorders.StandingOrdersStore
-	workshopStore     *evolution.WorkshopStore
-	skillMgr          *evolution.SkillManager
-	spawnRunner       toolssubagent.SpawnRunner
-	spawnNotify       toolssubagent.SpawnCompleteFunc
-	subagentRunner    *toolssubagent.SubagentRunner
-	handoffCallback   HandoffCallback
-	askUserMu         sync.RWMutex
-	askUserCallback   AskUserFunc
-	sandbox           sandbox.Sandbox
-	logger            *slog.Logger
-	webFetchTransport http.RoundTripper
-	tools             []*agentcore.Tool
-	toolProfile       string
-	workDir           string
-	parentMessages    func() []agentcore.Message
-	phaseTransition   toolsplanning.PhaseTransitioner
-	externalAgents    *externalagent.Registry
-	catalog           *cyber.Catalog
-	cyberMode         bool
-	subagentRole      string
-	intakeCancel      context.CancelFunc
+	swarmBoard          *toolswarm.SwarmBoard
+	swarmOrch           *toolswarm.SwarmOrchestrator
+	secretsStore        *SecretsStore
+	kanbanManager       *kanban.KanbanManager
+	commitmentStore     *toolscommitments.CommitmentStore
+	standingOrders      *toolsstandingorders.StandingOrdersStore
+	workshopStore       *evolution.WorkshopStore
+	skillMgr            *evolution.SkillManager
+	spawnRunner         toolssubagent.SpawnRunner
+	spawnNotify         toolssubagent.SpawnCompleteFunc
+	subagentRunner      *toolssubagent.SubagentRunner
+	handoffCallback     HandoffCallback
+	askUserMu           sync.RWMutex
+	askUserCallback     AskUserFunc
+	sandbox             sandbox.Sandbox
+	logger              *slog.Logger
+	webFetchTransport   http.RoundTripper
+	tools               []*agentcore.Tool
+	toolReview          *toolSchemaReview
+	toolDiscoveryPolicy func(context.Context, []string) []string
+	toolProfile         string
+	workDir             string
+	parentMessages      func() []agentcore.Message
+	phaseTransition     toolsplanning.PhaseTransitioner
+	externalAgents      *externalagent.Registry
+	catalog             *cyber.Catalog
+	cyberMode           bool
+	subagentRole        string
+	intakeCancel        context.CancelFunc
 }
 
 // ExtensionConfig configures the agent tools extension.
@@ -410,12 +413,12 @@ func (e *Extension) onSpawnComplete(childID, task, output string, err error) {
 		} else {
 			status = "failed"
 		}
-		body = err.Error()
+		body = security.ErrorSummary(err)
 	}
-	if len(body) > 4000 {
-		body = body[:4000] + "…"
+	if runes := []rune(body); len(runes) > 4000 {
+		body = string(runes[:4000]) + "..."
 	}
-	msg := fmt.Sprintf("subagent %s %s: %s\n%s", childID, status, task, body)
+	msg := fmt.Sprintf("subagent %s %s: %s\n%s", childID, status, security.RedactDiagnostic(task), body)
 	_, _ = e.inboxStore.Send(parent, childID, msg)
 }
 
@@ -478,12 +481,23 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 	}
 
 	cyberVisibility := func(ctx context.Context, name string) bool {
+		if strings.HasPrefix(name, "mcp__") {
+			name = "mcp"
+		}
 		if !e.cyberMode {
 			return !toolset.CyberOnlyTools[name]
 		}
 		return cyber.AllowAgentTool(e.subagentRole, subagentRole(ctx), name)
 	}
+	discoveryVisibility := func(ctx context.Context, name string) bool {
+		if e.toolDiscoveryPolicy == nil {
+			return true
+		}
+		allowed, _ := ctx.Value(toolDiscoveryPolicyKey{}).(map[string]bool)
+		return allowed[name]
+	}
 
+	e.toolReview = &toolSchemaReview{}
 	e.tools = []*agentcore.Tool{
 		// Batch 1: session_search, todo, clarify, send_message, moa
 		toolssessions.BuildSessionSearchTool(e.sessionsDir, e.ftsSearcher),
@@ -538,36 +552,15 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 		toolswarm.BuildSwarmOrchestrateTool(e.swarmOrch),
 		buildSecretsTool(e.secretsStore),
 		// Batch 7: tool_search, tool_describe, tool_call
-		buildToolSearchTool(func() []agentcore.ToolDefinition {
-			// Rebuild definitions from current registry state
-			names := agent.ToolNames()
-			defs := make([]agentcore.ToolDefinition, 0, len(names))
-			for _, name := range names {
-				if tool, ok := agent.GetTool(name); ok {
-					defs = append(defs, agentcore.ToolDefinition{
-						Name:        tool.Name,
-						Description: tool.Description,
-						Parameters:  tool.Parameters,
-					})
-				}
-			}
-			return hideCyberOnlyTools(defs, e.cyberMode)
-		}, cyberVisibility),
-		buildToolDescribeTool(func() []agentcore.ToolDefinition {
-			names := agent.ToolNames()
-			defs := make([]agentcore.ToolDefinition, 0, len(names))
-			for _, name := range names {
-				if tool, ok := agent.GetTool(name); ok {
-					defs = append(defs, agentcore.ToolDefinition{
-						Name:        tool.Name,
-						Description: tool.Description,
-						Parameters:  tool.Parameters,
-					})
-				}
-			}
-			return hideCyberOnlyTools(defs, e.cyberMode)
-		}, cyberVisibility),
-		buildToolCallTool(agent, cyberVisibility),
+		buildToolSearchToolWithCatalog(func() ([]toolSearchDefinition, error) {
+			return e.toolDiscoveryCatalog(agent)
+		}, cyberVisibility, discoveryVisibility),
+		buildToolDescribeToolWithCatalog(func() ([]toolSearchDefinition, error) {
+			return e.toolDiscoveryCatalog(agent)
+		}, cyberVisibility, discoveryVisibility),
+		buildToolCallToolWithCatalog(agent, e.toolReview.check, func() ([]toolSearchDefinition, error) {
+			return e.toolDiscoveryCatalog(agent)
+		}, e.toolReview, cyberVisibility, discoveryVisibility),
 		// Batch 8: apply_patch
 		fileops.BuildApplyPatchTool(e.workDir),
 		// Batch 9: human_handoff
@@ -787,6 +780,26 @@ func (e *Extension) Init(_ context.Context, agent *agentcore.Agent) error {
 	}
 
 	for _, tool := range e.tools {
+		if isDiscoveryTool(tool.Name) && tool.Func != nil {
+			run := tool.Func
+			tool.Func = func(ctx context.Context, args json.RawMessage) (any, error) {
+				if e.toolDiscoveryPolicy != nil {
+					remoteNames := e.mcpStore.discoveryNames()
+					names := append(agent.ToolNames(), remoteNames...)
+					allowed := make(map[string]bool)
+					for _, name := range e.toolDiscoveryPolicy(ctx, names) {
+						allowed[name] = true
+					}
+					if !allowed["mcp"] {
+						for _, name := range remoteNames {
+							delete(allowed, name)
+						}
+					}
+					ctx = context.WithValue(ctx, toolDiscoveryPolicyKey{}, allowed)
+				}
+				return run(ctx, args)
+			}
+		}
 		if e.cyberMode && cyber.OrchestratorToolBlocked(tool.Name) && tool.Func != nil {
 			run := tool.Func
 			role := strings.ToLower(strings.TrimSpace(e.subagentRole))

@@ -31,17 +31,33 @@ type ThreatAmendment struct {
 
 func (c *Catalog) threatModelsPath() string { return filepath.Join(c.dir, "threat_models.json") }
 
+type ThreatModelValidationError struct {
+	MissingFields []string
+}
+
+func (e *ThreatModelValidationError) Error() string {
+	return "threat model requires non-empty fields: " + strings.Join(e.MissingFields, ", ")
+}
+
 func (c *Catalog) SaveThreatModel(model ThreatModel) (ThreatModel, error) {
 	model.Target = strings.TrimSpace(model.Target)
-	if model.Target == "" {
-		return ThreatModel{}, fmt.Errorf("threat model target is required")
+	var missing []string
+	for _, field := range []struct{ name, value string }{
+		{"target", model.Target},
+		{"overview", model.Overview},
+		{"attacker", model.Attacker},
+		{"trust_boundaries", strings.Join(model.TrustBoundaries, "")},
+		{"attack_surface", strings.Join(model.AttackSurface, "")},
+		{"severity_calibration", model.SeverityCalibration},
+	} {
+		if strings.TrimSpace(field.value) == "" {
+			missing = append(missing, field.name)
+		}
+	}
+	if len(missing) > 0 {
+		return ThreatModel{}, &ThreatModelValidationError{MissingFields: missing}
 	}
 	model.Identity = threatTargetIdentity(model.Target)
-	if strings.TrimSpace(model.Overview) == "" || strings.TrimSpace(model.Attacker) == "" ||
-		len(model.TrustBoundaries) == 0 || len(model.AttackSurface) == 0 ||
-		strings.TrimSpace(model.SeverityCalibration) == "" {
-		return ThreatModel{}, fmt.Errorf("threat model requires overview, attacker, trust boundaries, attack surface, and severity calibration")
-	}
 	model.UpdatedAt = time.Now().UTC()
 
 	catalogMu.Lock()

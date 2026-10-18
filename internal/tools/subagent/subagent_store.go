@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/security"
 	_ "modernc.org/sqlite"
 )
 
@@ -108,7 +109,7 @@ func (s *SubagentStore) Create(r *SubagentRecord) error {
 		`INSERT INTO subagents(id, parent_session_id, task, status, depth, started_at, ended_at, error, agent_type, last_heartbeat_at, pid)
 		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.ParentSessionID, r.Task, r.Status, r.Depth,
-		r.StartedAt.Unix(), endTimeUnix(r.EndedAt), r.Error, r.AgentType,
+		r.StartedAt.Unix(), endTimeUnix(r.EndedAt), security.RedactDiagnostic(r.Error), r.AgentType,
 		r.LastHeartbeatAt.Unix(), r.PID,
 	)
 	if err != nil {
@@ -123,7 +124,7 @@ func (s *SubagentStore) MarkCompleted(id, status, errMsg string) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
 		`UPDATE subagents SET status = ?, ended_at = ?, error = ? WHERE id = ?`,
-		status, time.Now().Unix(), errMsg, id,
+		status, time.Now().Unix(), security.RedactDiagnostic(errMsg), id,
 	)
 	if err != nil {
 		return fmt.Errorf("subagent store: mark completed: %w", err)

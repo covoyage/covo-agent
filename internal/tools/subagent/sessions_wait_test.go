@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -220,6 +221,22 @@ func TestWaitTargetedMode(t *testing.T) {
 
 	if _, err := tool.Func(context.Background(), json.RawMessage(`{"agent_ids": ["nope"]}`)); err == nil {
 		t.Fatal("expected unknown agent id to error")
+	}
+}
+
+func TestWaitFinishedDoesNotMeanSucceeded(t *testing.T) {
+	tool, registry := waitToolForTest()
+	failed := registry.Start("failure", 1)
+	registry.CompleteWithError(failed, fmt.Errorf("provider: password=private-value request failed"))
+	completed := registry.Start("success", 1)
+	registry.Complete(completed, false)
+	result := callWait(t, tool, `{"agent_ids":["`+failed+`","`+completed+`"]}`, time.Second)
+	if result["all_finished"] != true || result["all_succeeded"] != false || result["all_completed"] != false {
+		t.Fatalf("failure represented as task success: %+v", result)
+	}
+	agents := result["agents"].([]map[string]any)
+	if agents[0]["succeeded"] != false || !strings.Contains(agents[0]["error"].(string), "provider:") || strings.Contains(agents[0]["error"].(string), "private-value") {
+		t.Fatalf("missing safe child failure: %+v", agents)
 	}
 }
 

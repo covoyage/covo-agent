@@ -22,6 +22,7 @@ func ApprovalRequired(ctx context.Context) bool {
 func DangerousTools() map[string]bool {
 	names := []string{"bash", "process", "sandbox", "mcp", "remote_exec", "external_agent", "skill_script", "preview", "write_file", "edit_block", "write", "edit", "apply_patch", "append_file", "patch", "move", "git_commit", "git_push", "delete", "delete_file", "execute_code", "computer_use", "exit_plan_mode", "scan", "scan_profile", "request_intake", "web_param_probe", "remote_node_exec", "exchange_replay", "exchange_compare", "csrf_retest", "web_workflow", "web_test_execute", "deploy", "cronjob", "finding_retest", "cyber_storage", "oast"}
 	tools := make(map[string]bool, len(names))
+	tools["browser"] = true
 	for _, name := range names {
 		tools[name] = true
 	}
@@ -45,6 +46,8 @@ func RequiresToolApproval(name string, args []byte) bool {
 		return true
 	}
 	switch name {
+	case "browser":
+		return params.Action == "upload" || params.Action == "downloads_enable" || params.Action == "download" || params.Action == "resume"
 	case "mcp":
 		return params.Action != "list"
 	case "scan":

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -17,6 +18,7 @@ func BuildThreatModelTool(catalog *cyber.Catalog) *agentcore.Tool {
 			"Read, save, amend, or list the engagement's shared threat model.",
 			"The model defines attacker identity, trust boundaries, attack surface, and severity calibration for all subagents.",
 			"action is optional: model fields imply save, amendment implies amend, target implies get, and empty arguments imply list.",
+			"Saving requires target, overview, attacker, non-empty trust_boundaries and attack_surface, and severity_calibration. A validation_required result with saved=false lists missing_fields; fill them from observed context, never fabricate missing evidence or repeat unchanged arguments.",
 		}, "\n"),
 		Parameters: map[string]any{
 			"type": "object",
@@ -77,11 +79,22 @@ func BuildThreatModelTool(catalog *cyber.Catalog) *agentcore.Tool {
 				}
 				return model, nil
 			case "save":
-				return catalog.SaveThreatModel(cyber.ThreatModel{
+				model, err := catalog.SaveThreatModel(cyber.ThreatModel{
 					Target: params.Target, Overview: params.Overview, Attacker: params.Attacker,
 					TrustBoundaries: params.TrustBoundaries, AttackSurface: params.AttackSurface,
 					SeverityCalibration: params.SeverityCalibration,
 				})
+				var validation *cyber.ThreatModelValidationError
+				if errors.As(err, &validation) {
+					return map[string]any{
+						"status":         "validation_required",
+						"saved":          false,
+						"missing_fields": validation.MissingFields,
+						"error":          validation.Error(),
+						"next_action":    "Supply the listed non-empty fields using observed or explicitly unknown context, then explicitly retry save. Nothing was saved; do not invent attacker capabilities, trust boundaries, attack surfaces, or severity conclusions to satisfy validation.",
+					}, nil
+				}
+				return model, err
 			case "amend":
 				return catalog.AmendThreatModel(params.Target, params.Author, params.Amendment)
 			default:

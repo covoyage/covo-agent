@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/covoyage/covo-agent/internal/cli/commands/shared"
 	"github.com/covoyage/covo-agent/internal/i18n"
 	"github.com/covoyage/covo-agent/internal/safego"
+	"github.com/covoyage/covo-agent/internal/security"
 	"github.com/covoyage/covo-agent/internal/slashcmd"
 )
 
@@ -283,28 +285,41 @@ func (s *interactiveSession) steerCurrentRun(text string) bool {
 // Called from the spawn-completion goroutine — submitPrompt is already
 // invoked off the UI thread for queued prompts after each run, so this
 // follows existing practice.
-func (s *interactiveSession) onSubagentComplete(childID, task, output string, err error) {
-	if s.agentRuntime == nil {
-		return
-	}
+func subagentCompletionMessage(childID, task, output string, err error) (string, string) {
 	status := "completed"
 	body := output
 	if err != nil {
 		status = "failed"
-		body = err.Error()
+		body = security.ErrorSummary(err)
+	}
+	if errors.Is(err, context.Canceled) {
+		status = "interrupted"
 	}
 	text := fmt.Sprintf(
 		"[subagent %s %s] task: %s\nresult:\n%s\n\nIncorporate this result into your work before concluding. If the parent task still has unfinished work, continue it now instead of waiting for further input.",
-		childID, status, shared.Truncate(task, 200), shared.Truncate(body, 4000))
+		childID, status, shared.Truncate(security.RedactDiagnostic(task), 200), shared.Truncate(body, 4000))
+	notice := fmt.Sprintf("↩ subagent %s %s", shared.Truncate(childID, 12), status)
+	if err != nil {
+		notice += ": " + shared.Truncate(body, 240)
+		text += "\nThis child did not succeed. Do not report it as completed or bypass role, scope, or approval restrictions; use the error to decide the next permitted action."
+	}
+	return text, notice
+}
+
+func (s *interactiveSession) onSubagentComplete(childID, task, output string, err error) {
+	if s.agentRuntime == nil {
+		return
+	}
+	text, notice := subagentCompletionMessage(childID, task, output, err)
 
 	if s.busy.Load() {
 		if ag := s.agentRuntime.Core(); ag != nil {
 			ag.Steer(agentcore.Message{Role: agentcore.RoleUser, Content: text})
-			loadUIBus().PrintSystem(fmt.Sprintf("↩ subagent %s %s — steered into current run", shared.Truncate(childID, 12), status))
+			loadUIBus().PrintSystem(notice + " — steered into current run")
 		}
 		return
 	}
-	loadUIBus().PrintSystem(fmt.Sprintf("↩ subagent %s %s — waking session", shared.Truncate(childID, 12), status))
+	loadUIBus().PrintSystem(notice + " — waking session")
 	s.submitPrompt(context.Background(), text)
 }
 

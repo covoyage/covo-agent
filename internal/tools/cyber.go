@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/covoyage/covo-agent/internal/cyber"
@@ -249,6 +250,7 @@ func BuildScanToolWithTransport(workDir string, catalog *cyber.Catalog, sb inter
 			var stdout, stderr bytes.Buffer
 			var runErr error
 			ok := false
+			var binaryDiagnostic *cyber.BinaryDiagnostic
 			if sb != nil && sb.Type() != internalsandbox.TypeLocal {
 				result, err := sb.Run(ctx, shellCommand(plan.Command), timeout)
 				if err != nil {
@@ -269,6 +271,8 @@ func BuildScanToolWithTransport(workDir string, catalog *cyber.Catalog, sb inter
 					}
 					return nil, err
 				}
+				diagnostic := cyber.InspectBinary(bin)
+				binaryDiagnostic = &diagnostic
 				runCtx, cancel := context.WithTimeout(ctx, timeout)
 				defer cancel()
 				cmd := exec.CommandContext(runCtx, bin, plan.Command[1:]...)
@@ -306,11 +310,18 @@ func BuildScanToolWithTransport(workDir string, catalog *cyber.Catalog, sb inter
 				"stdout":  out,
 				"stderr":  errOut,
 			}
+			if binaryDiagnostic != nil {
+				result["binary_diagnostic"] = binaryDiagnostic
+			}
 			if exchangeID != "" {
 				result["exchange_id"] = exchangeID
 			}
 			if runErr != nil && !exitOK(runErr, plan.AllowedExit) {
 				result["error"] = redactScanSecrets(runErr.Error(), resultOptions, params.Extra...)
+				if errors.Is(runErr, syscall.ENOEXEC) || strings.Contains(strings.ToLower(runErr.Error()), "bad cpu type") {
+					result["error_kind"] = "binary_compatibility"
+					result["next_action"] = "Inspect binary_diagnostic and install a scanner build for the reported OS/architecture or explicitly configure a compatible runtime. Do not repeat the same incompatible binary or bypass scope/approval restrictions."
+				}
 			}
 			return result, nil
 		},

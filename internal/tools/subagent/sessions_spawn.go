@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/covoyage/covo-agent/internal/safego"
+	"github.com/covoyage/covo-agent/internal/security"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -364,17 +365,18 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 					// notification.
 					defer func() {
 						if r := recover(); r != nil {
-							registry.Complete(id, true)
+							panicErr := fmt.Errorf("subagent panicked: %v", r)
+							registry.CompleteWithError(id, panicErr)
 							if onComplete != nil {
-								onComplete(id, params.Task, "", fmt.Errorf("subagent panicked: %v", r))
+								onComplete(id, params.Task, "", panicErr)
 							}
 						}
 					}()
 					output, err := runner(runCtx, spawnTask, spawnToolsets, int(maxTurns))
-					registry.Complete(id, err != nil)
+					registry.CompleteWithError(id, err)
 					status, errText := "completed", ""
-					if err != nil {
-						status, errText = "failed", err.Error()
+					if run, ok := registry.Get(id); ok {
+						status, errText = run.Status, run.Error
 					}
 					observeAgent(AgentObservation{ID: id, Role: params.Role, Task: params.Task, Skills: RoleSkillNamesForTask(params.Role, params.Task), Status: status, Error: errText})
 					if onComplete != nil {
@@ -417,7 +419,7 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 				if err != nil {
 					return map[string]any{
 						"status":   "error",
-						"error":    err.Error(),
+						"error":    security.ErrorSummary(err),
 						"task":     params.Task,
 						"toolsets": childToolsets,
 						"role":     params.Role,
@@ -450,7 +452,7 @@ func BuildSessionsSpawnTool(runner SpawnRunner, subagentRunner *SubagentRunner, 
 			if err != nil {
 				return applyPersonaWarnings(map[string]any{
 					"status": "error",
-					"error":  err.Error(),
+					"error":  security.ErrorSummary(err),
 					"task":   params.Task,
 				}), nil
 			}

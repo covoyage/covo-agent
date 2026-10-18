@@ -374,6 +374,30 @@ func TestSubagentIsolationContext(t *testing.T) {
 	}
 }
 
+func TestSubagentRunner_PanicPersistsFailure(t *testing.T) {
+	store := newTestSubagentStore(t)
+	registry := NewSubagentRegistry()
+	registry.SetStore(store, func() string { return "parent" })
+	runner := NewSubagentRunner(SubagentRunnerConfig{})
+	runner.registry = registry
+	var events []SubagentProgressEvent
+	runner.cfg.ProgressCallback = func(event SubagentProgressEvent) { events = append(events, event) }
+	_, runErr := runner.Run(context.Background(), func(context.Context, string, []string, int) (string, error) {
+		panic("provider panic password=private-value")
+	}, "test", nil, SubagentRunOptions{})
+	if runErr == nil || !strings.Contains(runErr.Error(), "panicked") {
+		t.Fatalf("runner swallowed panic instead of returning an error: %v", runErr)
+	}
+	runs := registry.List(false)
+	records, err := store.ListByParent("parent")
+	if err != nil || len(runs) != 1 || len(records) != 1 || runs[0].Status != "failed" || !strings.Contains(runs[0].Error, "panicked") || strings.Contains(runs[0].Error, "private-value") || records[0].Error != runs[0].Error {
+		t.Fatalf("panic represented as success or leaked: %+v, %+v, %v", runs, records, err)
+	}
+	if len(events) == 0 || events[len(events)-1].Type != "error" || strings.Contains(events[len(events)-1].Error, "private-value") {
+		t.Fatalf("unsafe or missing panic progress: %+v", events)
+	}
+}
+
 func TestSubagentRunner_ErrorPath(t *testing.T) {
 	runner := NewSubagentRunner(SubagentRunnerConfig{})
 

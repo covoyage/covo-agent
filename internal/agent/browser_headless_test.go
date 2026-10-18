@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/covoyage/covo-agent/internal/cyber"
+	agenttools "github.com/covoyage/covo-agent/internal/tools"
 	"github.com/covoyage/covonaut/agentcore"
 	"github.com/covoyage/covonaut/tools"
 )
@@ -127,7 +128,7 @@ func TestCyberBrowserNetworkRealLedger(t *testing.T) {
 		callback(exchange)
 		saved <- struct{}{}
 	}
-	ext := tools.NewExtension(tools.ExtensionConfig{Browser: &tools.BrowserToolConfig{Headless: true, AllowPrivate: true, Engine: "chrome", NetworkObservation: config}})
+	ext := agenttools.NewBrowserToolsExtension(tools.ExtensionConfig{Browser: &tools.BrowserToolConfig{Headless: true, AllowPrivate: true, Engine: "chrome", NetworkObservation: config}}, nil)
 	core := agentcore.New(agentcore.Config{})
 	defer core.Close()
 	defer ext.Dispose()
@@ -136,13 +137,9 @@ func TestCyberBrowserNetworkRealLedger(t *testing.T) {
 	if err := ext.Init(ctx, core); err != nil {
 		t.Fatal(err)
 	}
-	for _, tool := range ext.Tools() {
-		if tool.Name == "browser" {
-			args, _ := json.Marshal(map[string]string{"action": "navigate", "url": server.URL + "/page"})
-			if _, err := tool.Func(ctx, args); err != nil {
-				t.Fatal(err)
-			}
-		}
+	args, _ := json.Marshal(map[string]string{"action": "navigate", "url": server.URL + "/page"})
+	if _, err := core.InvokeTool(ctx, "browser", args); err != nil {
+		t.Fatal(err)
 	}
 	for count := 0; count < 2; count++ {
 		select {

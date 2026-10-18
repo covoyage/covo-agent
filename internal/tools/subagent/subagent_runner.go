@@ -29,6 +29,7 @@ import (
 
 	"github.com/covoyage/covo-agent/internal/logutil"
 	"github.com/covoyage/covo-agent/internal/safego"
+	"github.com/covoyage/covo-agent/internal/security"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -574,14 +575,21 @@ func (sr *SubagentRunner) Run(ctx context.Context, spawn SpawnRunner, task strin
 		}
 	}
 	defer func() {
+		panicValue := recover()
+		if panicValue != nil {
+			err = fmt.Errorf("subagent panicked: %v", panicValue)
+		}
 		if sr.registry != nil && subID != "" {
-			sr.registry.Complete(subID, err != nil)
+			sr.registry.CompleteWithError(subID, err)
 			status, errText := "completed", ""
-			if err != nil {
-				status, errText = "failed", err.Error()
+			if run, ok := sr.registry.Get(subID); ok {
+				status, errText = run.Status, run.Error
 			}
 			role := SubagentRoleFromContext(ctx)
 			observeAgent(AgentObservation{ID: subID, Role: role, Task: opts.Goal, Skills: RoleSkillNamesForTask(role, opts.Goal), Status: status, Error: errText})
+		}
+		if panicValue != nil {
+			panic(panicValue)
 		}
 	}()
 
@@ -632,8 +640,13 @@ func (sr *SubagentRunner) Run(ctx context.Context, spawn SpawnRunner, task strin
 
 	emit("start", "", task, "")
 	defer func() {
+		if panicValue := recover(); panicValue != nil {
+			err = fmt.Errorf("subagent panicked: %v", panicValue)
+			emit("error", "", "", security.ErrorSummary(err))
+			panic(panicValue)
+		}
 		if err != nil {
-			emit("error", "", "", err.Error())
+			emit("error", "", "", security.ErrorSummary(err))
 		} else {
 			emit("complete", "", "", "")
 		}
@@ -665,6 +678,12 @@ func (sr *SubagentRunner) Run(ctx context.Context, spawn SpawnRunner, task strin
 	tp.SetPhase("running")
 	safego.SafeGo(func() {
 		defer close(done)
+		defer func() {
+			if panicValue := recover(); panicValue != nil {
+				runOutput = ""
+				runErr = fmt.Errorf("subagent panicked: %v", panicValue)
+			}
+		}()
 		runOutput, runErr = spawn(ctx, task, toolsets, opts.MaxTurns)
 	}, nil)
 

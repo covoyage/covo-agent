@@ -150,7 +150,7 @@ func BuildAdvancedWorkflowTool(runner SpawnRunner, registry *SubagentRegistry, h
 				output, err := runner(phaseCtx, prompt, toolsets, phase.MaxTurns)
 				if err != nil {
 					if registry != nil && subID != "" {
-						registry.Complete(subID, true)
+						registry.CompleteWithError(subID, err)
 					}
 					return nil, err
 				}

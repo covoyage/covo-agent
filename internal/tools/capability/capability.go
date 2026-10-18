@@ -116,7 +116,7 @@ func DeclareBuiltin(tool *agentcore.Tool) {
 		metadata = Metadata{Kind: Read, ReadParam: "file_path"}
 	case "bash", "process", "sandbox", "remote_exec", "external_agent", "execute_code", "skill_script", "preview", "computer_use", "deploy":
 		metadata = Metadata{Kind: Execute}
-	case "mcp", "scan", "cronjob", "scan_profile", "request_intake":
+	case "mcp", "scan", "cronjob", "scan_profile", "request_intake", "browser":
 		metadata = Metadata{Kind: Conditional}
 	default:
 		return

@@ -3,12 +3,14 @@ package subagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/covoyage/covo-agent/internal/security"
 	"github.com/covoyage/covonaut/agentcore"
 )
 
@@ -17,6 +19,7 @@ type SubagentRun struct {
 	ID            string      `json:"id"`
 	Task          string      `json:"task"`
 	Status        string      `json:"status"` // running, completed, failed
+	Error         string      `json:"error,omitempty"`
 	StartedAt     time.Time   `json:"started_at"`
 	EndedAt       *time.Time  `json:"ended_at,omitempty"`
 	Depth         int         `json:"depth"`
@@ -196,6 +199,14 @@ func (r *SubagentRegistry) UpdateHeartbeat(id string) {
 }
 
 func (r *SubagentRegistry) Complete(id string, failed bool) {
+	var err error
+	if failed {
+		err = errors.New("subagent failed without error details")
+	}
+	r.CompleteWithError(id, err)
+}
+
+func (r *SubagentRegistry) CompleteWithError(id string, runErr error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	run, ok := r.runs[id]
@@ -205,18 +216,27 @@ func (r *SubagentRegistry) Complete(id string, failed bool) {
 	now := time.Now()
 	run.EndedAt = &now
 	status := "completed"
-	if failed {
+	run.Error = ""
+	if runErr != nil {
 		status = "failed"
+		run.Error = security.RedactDiagnostic(runErr.Error())
+		if run.Error == "" {
+			run.Error = "subagent failed without error details"
+		}
+	}
+	if errors.Is(runErr, context.Canceled) {
+		status = "interrupted"
 	}
 	// An explicit interrupt already set a terminal state; do not downgrade
 	// it to completed/failed when the cancelled run reports back later.
 	if run.Status == "interrupted" {
 		status = "interrupted"
+		run.Error = "interrupted by parent"
 	}
 	run.Status = status
 	// Persist final state.
 	if r.store != nil {
-		_ = r.store.MarkCompleted(id, status, "")
+		_ = r.store.MarkCompleted(id, status, run.Error)
 	}
 }
 
@@ -275,6 +295,7 @@ func (r *SubagentRegistry) Interrupt(id string) bool {
 	now := time.Now()
 	run.EndedAt = &now
 	run.Status = "interrupted"
+	run.Error = "interrupted by parent"
 	// Persist interrupted state.
 	if r.store != nil {
 		_ = r.store.MarkCompleted(id, "interrupted", "interrupted by parent")
@@ -397,6 +418,9 @@ func BuildSubagentsTool(registry *SubagentRegistry) *agentcore.Tool {
 				}
 				if r.EndedAt != nil {
 					entry["ended_at"] = r.EndedAt.Format(time.RFC3339)
+				}
+				if r.Error != "" {
+					entry["error"] = r.Error
 				}
 				switch r.Status {
 				case "running":

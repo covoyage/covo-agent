@@ -2,6 +2,8 @@ package commands
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -52,5 +54,28 @@ func TestSideQuestionToolAllowed(t *testing.T) {
 		if sideQuestionToolAllowed(name) {
 			t.Fatalf("%s should be denied", name)
 		}
+	}
+}
+
+func TestSubagentCompletionMessageShowsSafeFailure(t *testing.T) {
+	err := fmt.Errorf("spawn: provider request failed: password=private-password https://user:private-userinfo@app.test/?token=private-token")
+	text, notice := subagentCompletionMessage("sub-1", "check token=private-task", "", err)
+	for _, message := range []string{text, notice} {
+		if !strings.Contains(message, "failed") || !strings.Contains(message, "provider request failed") {
+			t.Fatalf("missing failure reason: %s", message)
+		}
+		for _, secret := range []string{"private-password", "private-userinfo", "private-token", "private-task"} {
+			if strings.Contains(message, secret) {
+				t.Fatalf("diagnostic leaked %s", secret)
+			}
+		}
+	}
+	text, notice = subagentCompletionMessage("sub-2", "check", "", fmt.Errorf("spawn: %w", context.Canceled))
+	if !strings.Contains(notice, "interrupted") || !strings.Contains(text, "did not succeed") {
+		t.Fatalf("cancellation represented as success: %s / %s", text, notice)
+	}
+	text, notice = subagentCompletionMessage("sub-3", "check", "verified output", nil)
+	if !strings.Contains(text, "verified output") || !strings.Contains(notice, "completed") || strings.Contains(text, "did not succeed") {
+		t.Fatalf("successful completion changed: %s / %s", text, notice)
 	}
 }

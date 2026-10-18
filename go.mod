@@ -8,6 +8,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/gobwas/ws v1.4.0
 	github.com/google/uuid v1.6.0
+	github.com/kljensen/snowball v0.10.0
 	github.com/spf13/cobra v1.10.2
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.45.0

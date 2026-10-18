@@ -3,8 +3,10 @@ package subagent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/covoyage/covonaut/agentcore"
 )
@@ -388,6 +390,49 @@ func TestSessionsSpawn_DefaultContextMode_Isolated(t *testing.T) {
 	}
 	if msgs := ParentMessagesFromContext(capturedCtx); msgs != nil {
 		t.Errorf("expected no parent messages in default mode, got %v", msgs)
+	}
+}
+
+func TestSessionsSpawnBackgroundErrorPersists(t *testing.T) {
+	for _, kind := range []string{"failure", "panic", "canceled"} {
+		t.Run(kind, func(t *testing.T) {
+			store := newTestSubagentStore(t)
+			registry := NewSubagentRegistry()
+			registry.SetStore(store, func() string { return "parent" })
+			completed := make(chan error, 1)
+			runner := func(context.Context, string, []string, int) (string, error) {
+				if kind == "panic" {
+					panic("provider panic password=private-value")
+				}
+				if kind == "canceled" {
+					return "", fmt.Errorf("child: %w", context.Canceled)
+				}
+				return "", fmt.Errorf("provider failed password=private-value")
+			}
+			tool := BuildSessionsSpawnTool(runner, nil, nil, nil, registry, func(_, _, _ string, err error) { completed <- err })
+			result, err := tool.Func(context.Background(), json.RawMessage(`{"task":"test","background":true}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-completed:
+				if err == nil {
+					t.Fatal("failure was delivered as success")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("missing background completion")
+			}
+			id := result.(map[string]any)["id"].(string)
+			run, _ := registry.Get(id)
+			expected := "failed"
+			if kind == "canceled" {
+				expected = "interrupted"
+			}
+			records, err := store.ListByParent("parent")
+			if err != nil || len(records) != 1 || run.Status != expected || run.Error == "" || strings.Contains(run.Error, "private-value") || records[0].Error != run.Error {
+				t.Fatalf("background error lost or leaked: %+v, %+v, %v", run, records, err)
+			}
+		})
 	}
 }
 

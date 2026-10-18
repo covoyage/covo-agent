@@ -151,14 +151,58 @@ func containsAll(have []string, want ...string) bool {
 	return true
 }
 
+func TestToolsetFilterDiscoveryPreservesPolicyExceptLean(t *testing.T) {
+	type roleKey struct{}
+	names := []string{"read", "mcp", "computer_use", "bash", "scan", "web_fetch", "edit"}
+	platform := NewPlatformToolsets("cli")
+	platform.SetOverride("cli", []string{"read", "mcp", "computer_use", "bash", "scan", "web_fetch"})
+	availability := NewToolAvailability()
+	availability.RegisterCheck("computer_use", func() (string, bool) { return "not configured", false })
+	planMode := false
+	filter := NewToolsetFilter(ToolsetFilterConfig{
+		Platform: platform, Availability: availability, LeanMode: true, CyberMode: true,
+		ToolNames:  func() []string { return names },
+		NameFilter: func(name string) bool { return name != "bash" },
+		ContextFilter: func(ctx context.Context, name string) bool {
+			return name != "scan" || ctx.Value(roleKey{}) == "recon"
+		},
+		PlanModeChecker: func() bool { return planMode },
+		PlanModeAllowed: map[string]bool{"read": true},
+	})
+	ctx := context.WithValue(context.Background(), roleKey{}, "recon")
+	discovery := filter.DiscoveryPreview(ctx, names)
+	if len(discovery.Kept) != 4 || !containsAll(discovery.Kept, "read", "mcp", "scan", "web_fetch") {
+		t.Fatalf("unexpected discovery tools: %+v", discovery)
+	}
+	parent := filter.DiscoveryPreview(context.Background(), names)
+	if parent.Excluded["scan"] != "role policy" || parent.Excluded["bash"] != "name filter" || parent.Excluded["computer_use"] == "" || parent.Excluded["edit"] == "" {
+		t.Fatalf("discovery bypassed policy: %+v", parent)
+	}
+	request := &agentcore.ModelCallContext{Request: &agentcore.ProviderRequest{}}
+	for _, name := range names {
+		request.Request.Tools = append(request.Request.Tools, agentcore.ToolDefinition{Name: name})
+	}
+	if err := filter.BeforeModelCall(ctx, nil, request); err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Request.Tools) != 1 || request.Request.Tools[0].Name != "read" {
+		t.Fatalf("lean schemas were not hidden: %+v", request.Request.Tools)
+	}
+	planMode = true
+	discovery = filter.DiscoveryPreview(ctx, names)
+	if len(discovery.Kept) != 1 || discovery.Kept[0] != "read" || discovery.Excluded["mcp"] != "plan mode" {
+		t.Fatalf("discovery bypassed dynamic plan policy: %+v", discovery)
+	}
+}
+
 func TestToolsetFilter_LeanModeHidesLongTail(t *testing.T) {
 	platform := NewPlatformToolsets("cli")
-	platform.SetOverride("cli", []string{"read", "mcp", "tool_search", "computer_use"})
+	platform.SetOverride("cli", []string{"read", "mcp", "tool_search", "computer_use", "browser"})
 
 	tf := NewToolsetFilter(ToolsetFilterConfig{
 		Platform: platform,
 		ToolNames: func() []string {
-			return []string{"read", "mcp", "tool_search", "computer_use"}
+			return []string{"read", "mcp", "tool_search", "computer_use", "browser"}
 		},
 		PlatformName: func() string { return "cli" },
 		LeanMode:     true,
@@ -171,6 +215,7 @@ func TestToolsetFilter_LeanModeHidesLongTail(t *testing.T) {
 				{Name: "mcp"},
 				{Name: "tool_search"},
 				{Name: "computer_use"},
+				{Name: "browser"},
 			},
 		},
 	}
@@ -181,7 +226,7 @@ func TestToolsetFilter_LeanModeHidesLongTail(t *testing.T) {
 	for _, def := range mcc.Request.Tools {
 		kept[def.Name] = true
 	}
-	if !kept["read"] || !kept["tool_search"] {
+	if !kept["read"] || !kept["tool_search"] || !kept["browser"] {
 		t.Errorf("lean mode should keep core + discovery tools, kept=%v", kept)
 	}
 	if kept["mcp"] || kept["computer_use"] {
@@ -190,7 +235,7 @@ func TestToolsetFilter_LeanModeHidesLongTail(t *testing.T) {
 }
 
 func TestLeanDirectToolsKeepsCodingLoop(t *testing.T) {
-	for _, name := range []string{"read", "edit", "bash", "sessions_spawn", "sessions_wait", "tool_search", "tool_call"} {
+	for _, name := range []string{"read", "edit", "bash", "browser", "sessions_spawn", "sessions_wait", "tool_search", "tool_call"} {
 		if !LeanDirectTools[name] {
 			t.Errorf("expected %s in LeanDirectTools", name)
 		}
@@ -284,6 +329,55 @@ func TestLeanCyberToolsVisibleOnlyWhenEnabled(t *testing.T) {
 	if !tf.leanVisible("scan") || !tf.leanVisible("web_fetch") || !tf.leanVisible("open_url") || !tf.leanVisible("oast") {
 		t.Fatal("lean cyber should keep scan/web schemas")
 	}
+}
+
+func TestToolsetFilterMCPDiscoveryPolicy(t *testing.T) {
+	const remote = "mcp__inventory__lookup"
+	platform := NewPlatformToolsets("cli")
+	platform.SetOverride("cli", []string{"mcp", "discovery"})
+	availability := NewToolAvailability()
+	blockedName, blockedContext, plan := "", "", false
+	filter := NewToolsetFilter(ToolsetFilterConfig{
+		Platform: platform, Availability: availability, LeanMode: true,
+		NameFilter:      func(name string) bool { return name != blockedName },
+		ContextFilter:   func(_ context.Context, name string) bool { return name != blockedContext },
+		PlanModeChecker: func() bool { return plan },
+	})
+	names := []string{"mcp", remote, "tool_search", "tool_describe", "tool_call"}
+	check := func(want bool) {
+		t.Helper()
+		preview := filter.DiscoveryPreview(context.Background(), names)
+		found := false
+		for _, name := range preview.Kept {
+			found = found || name == remote
+		}
+		if found != want {
+			t.Fatalf("remote allowed=%v want=%v: %+v", found, want, preview)
+		}
+	}
+	check(true)
+	for _, name := range []string{"mcp", remote} {
+		blockedName = name
+		check(false)
+		blockedName = ""
+		blockedContext = name
+		check(false)
+		blockedContext = ""
+	}
+	plan = true
+	check(false)
+	plan = false
+	availability.RegisterCheck(remote, func() (string, bool) { return "not configured", false })
+	check(false)
+	availability.RegisterCheck(remote, func() (string, bool) { return "", true })
+	check(true)
+	availability.RegisterCheck("mcp", func() (string, bool) { return "disabled", false })
+	filter.InvalidateAvailability()
+	check(false)
+	availability.RegisterCheck("mcp", func() (string, bool) { return "", true })
+	platform.SetOverride("cli", []string{"discovery"})
+	filter.InvalidateTools()
+	check(false)
 }
 
 func TestToolsetFilter_NilNameFilterKeepsAll(t *testing.T) {

@@ -71,7 +71,7 @@ func BuildScriptWorkflowTool(runner SpawnRunner, registry *SubagentRegistry, hom
 					phaseCtx, prompt, toolsets := ApplySpawnRole(ctx, phase.Prompt, phase.Role, phase.Toolsets)
 					output, runErr := runner(phaseCtx, prompt, toolsets, phase.MaxTurns)
 					if registry != nil && subID != "" {
-						registry.Complete(subID, runErr != nil)
+						registry.CompleteWithError(subID, runErr)
 					}
 					if runErr != nil {
 						return nil, runErr

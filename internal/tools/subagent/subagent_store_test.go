@@ -1,8 +1,12 @@
 package subagent
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func newTestSubagentStore(t *testing.T) *SubagentStore {
@@ -412,5 +416,67 @@ func TestRegistryInterruptSurvivesComplete(t *testing.T) {
 	}
 	if run.Status != "interrupted" {
 		t.Fatalf("expected interrupted preserved, got %q", run.Status)
+	}
+}
+
+func TestRegistryCompletePersistsError(t *testing.T) {
+	store := newTestSubagentStore(t)
+	registry := NewSubagentRegistry()
+	registry.SetStore(store, func() string { return "parent" })
+	id := registry.Start("diagnostic", 1)
+	registry.CompleteWithError(id, fmt.Errorf("spawn: child run: %w", fmt.Errorf("provider request timed out")))
+	run, ok := registry.Get(id)
+	if !ok || run.Status != "failed" || run.Error != "spawn: child run: provider request timed out" || runSummary(run)["error"] != run.Error {
+		t.Fatalf("error missing from run summary: %+v", run)
+	}
+	records, err := store.ListByParent("parent")
+	if err != nil || len(records) != 1 || records[0].Error != run.Error {
+		t.Fatalf("error missing from persistence: %+v, %v", records, err)
+	}
+	interrupted := registry.Start("interrupt", 1)
+	registry.Interrupt(interrupted)
+	registry.CompleteWithError(interrupted, fmt.Errorf("spawn: %w", context.Canceled))
+	run, _ = registry.Get(interrupted)
+	if run.Status != "interrupted" || run.Error != "interrupted by parent" {
+		t.Fatalf("late completion overwrote interruption: %+v", run)
+	}
+}
+
+func TestRegistryErrorRedaction(t *testing.T) {
+	for _, test := range []struct {
+		text   string
+		secret string
+	}{
+		{"spawn: password=private-password request failed", "private-password"},
+		{`spawn: {"api_key":"private-api-key"}`, "private-api-key"},
+		{`spawn: {"authorization":"private-json-auth"}`, "private-json-auth"},
+		{`spawn: {"cookie":"session=private-json-cookie; other=value"}`, "private-json-cookie"},
+		{"spawn: cookie=private-cookie-assignment", "private-cookie-assignment"},
+		{"spawn: Authorization: Bearer private-authorization", "private-authorization"},
+		{"spawn: Cookie: session=private-cookie; other=value", "private-cookie"},
+		{"spawn: https://user:private-userinfo@app.test/api?token=private-query", "private-userinfo"},
+		{"spawn: https://app.test/api?token=private-query#private-fragment", "private-query"},
+		{"spawn: sk-abcdefghijklmnopqrstuv", "sk-abcdefghijklmnopqrstuv"},
+		{"spawn: -----BEGIN PRIVATE KEY-----private-key-----END PRIVATE KEY-----", "private-key"},
+	} {
+		t.Run(test.secret, func(t *testing.T) {
+			store := newTestSubagentStore(t)
+			registry := NewSubagentRegistry()
+			registry.SetStore(store, func() string { return "parent" })
+			id := registry.Start("redaction", 1)
+			registry.CompleteWithError(id, fmt.Errorf("%s", test.text))
+			run, _ := registry.Get(id)
+			records, err := store.ListByParent("parent")
+			if err != nil || len(records) != 1 || strings.Contains(run.Error, test.secret) || records[0].Error != run.Error || !strings.Contains(run.Error, "spawn:") {
+				t.Fatalf("unsafe or missing diagnostic: %+v, %+v, %v", run, records, err)
+			}
+		})
+	}
+	registry := NewSubagentRegistry()
+	id := registry.Start("bounded", 1)
+	registry.CompleteWithError(id, fmt.Errorf("\x1b\n%s", strings.Repeat("\u754c", 5000)))
+	run, _ := registry.Get(id)
+	if !utf8.ValidString(run.Error) || utf8.RuneCountInString(run.Error) > 4099 || strings.ContainsAny(run.Error, "\x1b\n") {
+		t.Fatalf("unbounded or unsafe diagnostic length: %d", len(run.Error))
 	}
 }
