@@ -4,10 +4,14 @@ package ossandbox
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -40,6 +44,30 @@ func TestTrustedLauncherResolvesSystemExecutable(t *testing.T) {
 	}
 	if err := probeLauncher(falsePath); err == nil {
 		t.Fatal("failed capability probe accepted")
+	}
+}
+
+func TestLauncherCapabilityProbeFailure(t *testing.T) {
+	const marker = "launcher-probe-denied"
+	const details = "namespace creation not permitted"
+	if os.Args[len(os.Args)-1] == marker {
+		fmt.Fprintln(os.Stderr, details)
+		os.Exit(1)
+	}
+	err := probeLauncher(os.Args[0], "-test.run=^TestLauncherCapabilityProbeFailure$", marker)
+	if !errors.Is(err, errLauncherCapabilityUnavailable) || !strings.Contains(err.Error(), details) {
+		t.Fatalf("missing capability classification or probe diagnostics: %v", err)
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("probe exit status was lost: %v", err)
+	}
+}
+
+func TestLauncherProbeStartFailureIsNotCapabilityUnavailable(t *testing.T) {
+	err := probeLauncher(filepath.Join(t.TempDir(), "missing-launcher"))
+	if err == nil || errors.Is(err, errLauncherCapabilityUnavailable) {
+		t.Fatalf("launcher start failure treated as missing capability: %v", err)
 	}
 }
 
@@ -86,7 +114,15 @@ func TestChildNetworkRestrictionIntegration(t *testing.T) {
 		globalState.mu.Unlock()
 	}()
 	cmd := makeCommand()
+	originalPath := cmd.Path
+	originalArgs := append([]string(nil), cmd.Args...)
 	if err := PrepareChildCommand(context.Background(), cmd); err != nil {
+		if cmd.Process != nil || cmd.Path != originalPath || !slices.Equal(cmd.Args, originalArgs) {
+			t.Fatalf("failed preparation started or modified the child command: %v", err)
+		}
+		if errors.Is(err, errLauncherCapabilityUnavailable) {
+			t.Skipf("child network isolation is unavailable on this host: %v", err)
+		}
 		t.Fatalf("network wrapper preparation failed: %v", err)
 	}
 	if output, err := cmd.CombinedOutput(); err == nil {

@@ -4,6 +4,7 @@ package ossandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,8 @@ import (
 	"syscall"
 	"time"
 )
+
+var errLauncherCapabilityUnavailable = errors.New("sandbox launcher capability unavailable")
 
 func trustedLauncher(name string) (string, error) {
 	path, err := exec.LookPath(name)
@@ -50,8 +53,16 @@ func probeLauncher(path string, args ...string) error {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Env = []string{"PATH=/usr/bin:/bin"}
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("sandbox launcher capability probe failed: %w", err)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		failure := fmt.Errorf("sandbox launcher capability probe failed: %w", err)
+		if details := strings.TrimSpace(string(output)); details != "" {
+			failure = fmt.Errorf("%w: %s", failure, details)
+		}
+		var exit *exec.ExitError
+		if ctx.Err() == nil && errors.As(err, &exit) && exit.ExitCode() > 0 {
+			return fmt.Errorf("%w: %w", errLauncherCapabilityUnavailable, failure)
+		}
+		return failure
 	}
 	return nil
 }
