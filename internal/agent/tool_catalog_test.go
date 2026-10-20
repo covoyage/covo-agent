@@ -440,6 +440,22 @@ func TestToolCatalogCoversRegistry(t *testing.T) {
 	}
 }
 
+func TestToolCatalogCoversConditionalTools(t *testing.T) {
+	data, err := os.ReadFile(catalogRelPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	documented := make(map[string]bool)
+	for _, match := range catalogNameRe.FindAllStringSubmatch(string(data), -1) {
+		documented[match[1]] = true
+	}
+	for _, name := range []string{"i2c", "spi", "tmux"} {
+		if !documented[name] {
+			t.Errorf("conditionally registered tool %q missing from catalog", name)
+		}
+	}
+}
+
 func writeToolCatalog(path string, rows []toolRow) error {
 	var b strings.Builder
 	b.WriteString("# Tool Catalog\n\n")

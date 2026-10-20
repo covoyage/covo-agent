@@ -208,6 +208,7 @@ The native `scan` recipe `ai-infra-guard` expects an independently installed Cob
 | `glob` | Find files matching a glob pattern. | safe |
 | `grep` | Search file contents for a pattern. | safe |
 | `human_handoff` | Pause and wait for the user to provide input or instructions. | undeclared |
+| `i2c` | Communicate with I2C devices on Linux. | undeclared |
 | `inbox_check` | Check and drain the current session's persistent inbox. | undeclared |
 | `inbox_send` | Send an asynchronous message to another session's persistent inbox. | undeclared |
 | `interrupt_agent` | Interrupt a running sub-agent by cancelling its context. | undeclared |
@@ -262,6 +263,7 @@ The native `scan` recipe `ai-infra-guard` expects an independently installed Cob
 | `skill_manage` | Create, update, and delete skills. | undeclared |
 | `skill_script` | Execute a script file from a skill's scripts/ directory, or list available scripts. | undeclared |
 | `skill_workshop` | Create and inspect Skill Workshop proposals. | undeclared |
+| `spi` | Communicate with SPI devices on Linux. | undeclared |
 | `spill` | Store a block of text to disk (in the spill store) and return its path. | undeclared |
 | `spill_list` | List text previously stored with the spill tool, newest first, for the current session. | undeclared |
 | `standing_orders` | Manage persistent behavioral instructions that are injected into every session. | undeclared |
@@ -276,6 +278,7 @@ The native `scan` recipe `ai-infra-guard` expects an independently installed Cob
 | `terminal_read` | Read new output from a persistent terminal session since the last read. | safe |
 | `terminal_send` | Write input to a persistent terminal session. | undeclared |
 | `terminal_signal` | Send a signal (SIGINT, SIGTERM, SIGHUP, SIGQUIT, SIGKILL) to a persistent terminal session's foreground process group. | undeclared |
+| `tmux` | Interact with tmux sessions when tmux is installed. | undeclared |
 | `todo` | Session-only task list (lost on restart). | undeclared |
 | `tool_call` | Invoke a tool discovered via 'tool_search' by its name with the given arguments. | undeclared |
 | `tool_describe` | Refresh the full JSON schema for a tool when its search result is missing or stale. | safe |
