@@ -170,7 +170,7 @@ func StylePasteChips(s string) string {
 func pasteChipStyle(pal *theme.Palette) theme.Style {
 	s := theme.NewStyle().Bold()
 	if pal == nil {
-		return s.Bg(theme.Yellow).Fg(theme.Black)
+		return s.Bg(theme.Yellow).WithFgParams(theme.FgParams("#000000", theme.DetectColorMode()))
 	}
 	bg := ""
 	if pal.Semantic != nil {
@@ -188,7 +188,9 @@ func pasteChipStyle(pal *theme.Palette) theme.Style {
 	if params := theme.FgParams(fg, pal.Mode); params != "" {
 		s = s.WithFgParams(params)
 	} else {
-		s = s.Fg(theme.Black)
+		// Fg(theme.Black) would emit a bare SGR 0, which resets every
+		// attribute — including the background set just above.
+		s = s.WithFgParams(theme.FgParams("#000000", pal.Mode))
 	}
 	return s
 }

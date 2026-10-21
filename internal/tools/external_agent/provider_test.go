@@ -11,6 +11,29 @@ import (
 	"time"
 )
 
+// turnStartedMarker returns the path a fake CLI touches once it has received
+// the task. Tests that cancel a run mid-flight wait for this marker instead
+// of racing a wall-clock deadline: process start-up latency under load is
+// unbounded, so a fixed timeout makes the test flaky.
+func turnStartedMarker(t *testing.T, dir string) string {
+	t.Helper()
+	return filepath.Join(dir, "turn-started")
+}
+
+// waitForFile blocks until path exists, failing the test if it does not
+// appear within timeout.
+func waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out after %s waiting for %s", timeout, path)
+}
+
 func writeFakeCLI(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -28,10 +51,59 @@ func writeFakeCLI(t *testing.T, dir, name, body string) string {
 	return path
 }
 
+// providerCLINames are the external agent CLIs whose presence on the host
+// PATH would make provider selection non-deterministic.
+var providerCLINames = []string{"claude", "codex", "opencode"}
+
+// withPath puts dir first on PATH so the fake CLI shadows any real one, and
+// strips the host directories that provide the other provider CLIs.
+//
+// The stripping matters: Registry.Default() walks the provider names in
+// alphabetical order and returns the first available one, so a developer
+// machine that has Claude Code (or Codex, or opencode) installed would make
+// Default() pick a different provider than the test expects. The remaining
+// PATH entries are preserved because the fake CLIs are POSIX shell scripts
+// that shell out to sed/printf.
 func withPath(t *testing.T, dir string) {
 	t.Helper()
 	sep := string(os.PathListSeparator)
-	t.Setenv("PATH", dir+sep+os.Getenv("PATH"))
+	t.Setenv("PATH", dir+sep+hostPathWithoutProviderCLIs(t, dir))
+}
+
+// hostPathWithoutProviderCLIs returns the host PATH with every entry that
+// provides one of the provider CLIs removed, except dir itself.
+func hostPathWithoutProviderCLIs(t *testing.T, dir string) string {
+	t.Helper()
+	sep := string(os.PathListSeparator)
+	fake, err := filepath.Abs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := make([]string, 0, 8)
+	for _, entry := range filepath.SplitList(os.Getenv("PATH")) {
+		if entry == "" {
+			continue
+		}
+		abs, err := filepath.Abs(entry)
+		if err != nil {
+			abs = entry
+		}
+		if abs == fake || providesProviderCLI(entry) {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return strings.Join(kept, sep)
+}
+
+// providesProviderCLI reports whether dir contains one of the provider CLIs.
+func providesProviderCLI(dir string) bool {
+	for _, name := range providerCLINames {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCLIProviderRun(t *testing.T) {

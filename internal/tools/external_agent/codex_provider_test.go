@@ -324,17 +324,39 @@ func TestCodexProviderUnknownRequest(t *testing.T) {
 
 func TestCodexProviderInterrupt(t *testing.T) {
 	dir := t.TempDir()
+	marker := turnStartedMarker(t, dir)
+	// The fake announces that the turn started, then blocks reading the next
+	// request — which is the turn/interrupt the provider sends once the
+	// context is cancelled.
 	writeCodexFake(t, dir, "0.147.0", `
-      sleep 3
+      touch "`+marker+`"
+      IFS= read -r line
+      case "$line" in
+        *turn/interrupt*) echo '{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"interrupted"}}}' ;;
+      esac
 `)
 
 	p := CodexProvider()
-	// 1.5s leaves headroom for the handshake under load while still firing
-	// before the fake app-server's 3s sleep finishes.
-	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	start := time.Now()
-	_, err := p.Run(ctx, "slow task", "")
+	done := make(chan struct{})
+	var err error
+	go func() {
+		defer close(done)
+		_, err = p.Run(ctx, "slow task", "")
+	}()
+
+	// Cancel only once the fake app-server has the task in hand, so the
+	// interrupt always lands on a running turn.
+	waitForFile(t, marker, 30*time.Second)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("Run did not return after the interrupt")
+	}
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected interrupt error")

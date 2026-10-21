@@ -4,7 +4,9 @@ go 1.25.0
 
 require (
 	github.com/alecthomas/chroma/v2 v2.27.0
-	github.com/covoyage/covonaut v1.1.6
+	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
+	github.com/chromedp/chromedp v0.14.2
+	github.com/covoyage/covonaut v1.1.7
 	github.com/creack/pty v1.1.24
 	github.com/gobwas/ws v1.4.0
 	github.com/google/uuid v1.6.0
@@ -29,8 +31,6 @@ require (
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327 // indirect
-	github.com/chromedp/chromedp v0.14.2 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect

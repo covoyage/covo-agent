@@ -65,11 +65,11 @@ go install github.com/covoyage/covo-agent/cmd/covo-agent@latest
 
 二进制会安装到 `GOBIN`；未设置 `GOBIN` 时，则安装到 `$(go env GOPATH)/bin`。请确保对应目录已加入 `PATH`。
 
-> 注意：`go.mod` 通过 `replace` 指令引用本地 `covoyage/covonaut` 模块，因此 `go install ...@latest` 与源码构建都要求本地存在该模块（见[从源码构建](#从源码构建)）。
+> 注意：`go install ...@latest` 与源码构建都会自动从模块代理解析全部依赖，无需任何本地模块配置。详见[从源码构建](#从源码构建)。
 
 ### 从源码构建
 
-源码构建使用 `go.mod` 中声明的依赖目录结构：需要在 `covo-agent` 旁边先克隆同级的 `covoyage/covonaut` 仓库（例如 `~/projects/go/covonaut`）。准备好其中引用的本地模块后，再克隆并构建项目：
+源码构建使用 `go.mod` 中声明的依赖目录结构；所有依赖都会自动从模块代理拉取：
 
 ```bash
 mkdir covoyage && cd covoyage
@@ -84,6 +84,15 @@ go build -o bin/covo-agent ./cmd/covo-agent
 ```bash
 install -m 0755 bin/covo-agent "$HOME/.local/bin/covo-agent"
 ```
+
+如需基于依赖的本地检出构建，请使用 Go workspace 而不是 `replace` 指令 —— 提交到仓库的 `replace` 会破坏 `go install ...@latest` 与发布构建，而 workspace 只在本地生效：
+
+```bash
+go work init .
+go work use ../covonaut   # 依赖的同级检出目录
+```
+
+`go.work` 已被 git 忽略。用 `GOWORK=off` 可强制使用已发布的模块版本构建。
 
 ## 快速开始
 

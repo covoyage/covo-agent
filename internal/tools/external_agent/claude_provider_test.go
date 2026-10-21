@@ -179,9 +179,13 @@ func TestClaudeProviderExitsWithoutResult(t *testing.T) {
 
 func TestClaudeProviderInterrupt(t *testing.T) {
 	dir := t.TempDir()
+	marker := turnStartedMarker(t, dir)
+	// The fake announces that the turn started, then blocks reading the next
+	// control request — which is the interrupt the provider sends once the
+	// context is cancelled.
 	writeClaudeFake(t, dir, "2.5.0", `
     *'"type":"user"'*)
-      sleep 3
+      touch "`+marker+`"
       IFS= read -r line2
       case "$line2" in
         *interrupt*) echo '{"type":"result","subtype":"success","result":"interrupted-gracefully","session_id":"s1"}' ;;
@@ -190,12 +194,27 @@ func TestClaudeProviderInterrupt(t *testing.T) {
 `)
 
 	p := ClaudeProvider()
-	// 1.5s leaves headroom for the handshake under load while still firing
-	// before the fake CLI's 3s sleep finishes.
-	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	start := time.Now()
-	out, err := p.Run(ctx, "slow task", "")
+	done := make(chan struct{})
+	var out string
+	var err error
+	go func() {
+		defer close(done)
+		out, err = p.Run(ctx, "slow task", "")
+	}()
+
+	// Cancel only once the fake CLI has the task in hand, so the interrupt
+	// always lands on a running turn.
+	waitForFile(t, marker, 30*time.Second)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("Run did not return after the interrupt")
+	}
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("Run failed: %v", err)

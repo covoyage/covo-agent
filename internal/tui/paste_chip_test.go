@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -114,6 +115,64 @@ func TestPasteChipStyleUsesThemeWarning(t *testing.T) {
 	if strings.Contains(got, "48;2;255;0;255") {
 		t.Fatalf("should not fall back to accent when warning is set, got %q", got)
 	}
+}
+
+func TestPasteChipStyleAlwaysCarriesForegroundAndBackground(t *testing.T) {
+	// A chip must stay legible: it needs a foreground AND a background,
+	// and it must never emit a bare SGR 0 (which resets every attribute,
+	// including the background).
+	theme.ForceColor(true)
+	prev := theme.CurrentPalette()
+	t.Cleanup(func() {
+		if prev != nil && prev.Semantic != nil {
+			theme.SyncPaletteGlobals(prev.Semantic, prev.Mode)
+		}
+	})
+	theme.SyncPaletteGlobals(&theme.SemanticTheme{
+		Warning: "#d4a843",
+		Accent:  "#d4a843",
+		Text:    "#e0e0e0",
+	}, theme.ColorModeTruecolor)
+
+	for _, pal := range []*theme.Palette{theme.CurrentPalette(), nil} {
+		got := pasteChipStyle(pal).Render("[Pasted ~2 lines]")
+		params := got[strings.Index(got, "\x1b[")+2 : strings.Index(got, "m")]
+
+		// A bare "0" parameter resets every attribute, including the
+		// background that was just set.
+		for _, p := range strings.Split(params, ";") {
+			if p == "0" {
+				t.Fatalf("chip emits a bare SGR reset: %q", got)
+			}
+		}
+		if !hasColorSpec(params, "38", 30, 37, 90, 97) {
+			t.Fatalf("chip has no foreground: %q", got)
+		}
+		if !hasColorSpec(params, "48", 40, 47, 100, 107) {
+			t.Fatalf("chip has no background: %q", got)
+		}
+	}
+}
+
+// hasColorSpec reports whether the SGR parameter list contains a colour
+// specification for the given extended prefix ("38"/"48") or one of the
+// given plain code ranges.
+func hasColorSpec(params, extPrefix string, ranges ...int) bool {
+	for _, p := range strings.Split(params, ";") {
+		if strings.HasPrefix(p, extPrefix+";") {
+			return true
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			continue
+		}
+		for _, r := range ranges {
+			if n >= r && n <= r+7 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestPasteStoreNil(t *testing.T) {

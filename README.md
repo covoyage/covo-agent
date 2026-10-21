@@ -65,11 +65,11 @@ go install github.com/covoyage/covo-agent/cmd/covo-agent@latest
 
 The binary is installed to `GOBIN`, or to `$(go env GOPATH)/bin` when `GOBIN` is not set. Make sure that directory is on your `PATH`.
 
-> Note: `go.mod` references the local `covoyage/covonaut` module via a `replace` directive, so `go install ...@latest` and source builds both require that module to exist locally (see [Build From Source](#build-from-source)).
+> Note: `go install ...@latest` and source builds resolve every dependency from the module proxy, so no local module setup is required. See [Build From Source](#build-from-source).
 
 ### Build From Source
 
-Source builds use the dependency layout declared in `go.mod`: the sibling `covoyage/covonaut` repository must be cloned next to `covo-agent` (e.g. `~/projects/go/covonaut`). Prepare the referenced local modules, then clone and build the project:
+Source builds use the dependency layout declared in `go.mod`; all dependencies are fetched from the module proxy automatically:
 
 ```bash
 mkdir covoyage && cd covoyage
@@ -84,6 +84,15 @@ Optionally install the binary on your `PATH`:
 ```bash
 install -m 0755 bin/covo-agent "$HOME/.local/bin/covo-agent"
 ```
+
+To build against a local checkout of a dependency, use a Go workspace rather than a `replace` directive — a committed `replace` would break `go install ...@latest` and release builds, while a workspace stays local:
+
+```bash
+go work init .
+go work use ../covonaut   # sibling checkout of a dependency
+```
+
+`go.work` is git-ignored. Use `GOWORK=off` to build against the published module versions.
 
 ## Quick Start
 
